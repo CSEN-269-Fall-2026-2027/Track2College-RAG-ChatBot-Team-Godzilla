@@ -33,8 +33,14 @@ def embed_new_chunks():
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModel.from_pretrained(model_id)
     
-    # Move model to GPU if available
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # Move model to GPU if available (CUDA, or Apple Silicon via MPS)
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+    print(f"[embed] Using device: {device}")
     model.to(device)
 
     print(f"[embed] Connecting to Qdrant at {QDRANT_URL or 'http://localhost:6333'}...")
@@ -62,6 +68,9 @@ def embed_new_chunks():
     total_upserted = 0
     collection_ready = False
     doc_id_index_ready = False
+    # doc_ids whose old points were already deleted this run. A doc's chunks can
+    # span several batches, so deleting again would wipe chunks just upserted.
+    cleaned_doc_ids = set()
 
     def _point_id(chunk_id: str) -> str:
         return str(uuid.uuid5(uuid.NAMESPACE_URL, chunk_id))
@@ -97,8 +106,10 @@ def embed_new_chunks():
 
         _ensure_doc_id_index()
 
-        # Delete existing chunks for these doc_ids to avoid duplicates/ghosts.
-        doc_ids_to_clean = set(c['doc_id'] for c in batch)
+        # Delete existing chunks for these doc_ids to avoid duplicates/ghosts
+        # (once per doc per run, so earlier batches of the same doc survive).
+        doc_ids_to_clean = set(c['doc_id'] for c in batch) - cleaned_doc_ids
+        cleaned_doc_ids.update(doc_ids_to_clean)
         for d_id in doc_ids_to_clean:
             try:
                 client.delete(
@@ -146,6 +157,8 @@ def embed_new_chunks():
         del input_mask_expanded, sum_embeddings, sum_mask, mean_embeddings
         if device == "cuda":
             torch.cuda.empty_cache()
+        elif device == "mps":
+            torch.mps.empty_cache()
 
         if not collection_ready:
             vector_size = len(batch_embeddings[0]) if batch_embeddings else 0

@@ -16,10 +16,15 @@ from source_filters import filter_sources_for_query, should_omit_sources_section
 # Environment / Config
 # ---------------------------------------------------------------------------
 load_dotenv()
+INFERENCE_PROVIDER  = os.environ.get("INFERENCE_PROVIDER", "runpod").strip().lower()
 RUNPOD_API_KEY      = os.environ.get("RunPod_API_Key", "") or os.environ.get("RUNPOD_API_KEY", "")
 RUNPOD_ENDPOINT_URL = os.environ.get("RUNPOD_ENDPOINT_URL", "")
 
-if not RUNPOD_API_KEY or not RUNPOD_ENDPOINT_URL:
+# Ollama (local inference) — used when INFERENCE_PROVIDER=ollama
+OLLAMA_URL   = os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:e4b")
+
+if INFERENCE_PROVIDER != "ollama" and (not RUNPOD_API_KEY or not RUNPOD_ENDPOINT_URL):
     print("[warning] Ensure RunPod_API_Key and RUNPOD_ENDPOINT_URL are set in .env")
 
 # RunPod expects /runsync for synchronous calls
@@ -334,6 +339,48 @@ def _call_runpod(prompt: str, max_tokens: int = 600) -> str:
         completion = full_text
 
     return completion.strip()
+
+
+def _call_ollama(system_prompt: str, user_message: str, max_tokens: int = 600) -> str:
+    """
+    Send the RAG prompt to a local Ollama server and return the answer body.
+
+    Uses /api/chat with separate system/user messages so Ollama applies the
+    model's own chat template (the Mistral [INST] prompt only suits Mistral).
+    Thinking is disabled so reasoning models answer directly.
+    The returned text has any leading "Answer:" header stripped, matching
+    _call_runpod (generate_answer() prepends it again).
+    """
+    payload = {
+        "model": OLLAMA_MODEL,
+        "stream": False,
+        "think": False,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ],
+        "options": {
+            "temperature": 0.1,
+            "top_p": 0.9,
+            "num_predict": max_tokens,
+            "num_ctx": 8192,
+        },
+    }
+
+    try:
+        resp = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=300)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        print(f"[Ollama] Request error ({OLLAMA_MODEL} at {OLLAMA_URL}): {exc}")
+        return ""
+
+    completion = (data.get("message") or {}).get("content", "").strip()
+    if not completion:
+        print(f"[Ollama] Empty response: {data}")
+        return ""
+
+    return re.sub(r"^\s*\**Answer:?\**\s*", "", completion, count=1).strip()
 
 
 def _extract_vllm_text(output) -> str:
@@ -688,16 +735,19 @@ Q3. What happens if my family's income changed since filing taxes?
     # We prime the response with "Answer:\n" so the model starts the answer body directly.
     full_prompt = f"<s>[INST] {system_prompt}\n\n{user_message} [/INST] Answer:\n"
 
-    # ── 4. Call RunPod vLLM ──────────────────────────────────────────────────
-    raw_completion = _call_runpod(full_prompt, max_tokens=1000)
+    # ── 4. Call the LLM (local Ollama or RunPod vLLM) ────────────────────────
+    if INFERENCE_PROVIDER == "ollama":
+        raw_completion = _call_ollama(system_prompt, user_message, max_tokens=1000)
+    else:
+        raw_completion = _call_runpod(full_prompt, max_tokens=1000)
 
     if not raw_completion:
-        print("[RunPod] Empty completion — returning fallback")
+        print(f"[{INFERENCE_PROVIDER}] Empty completion — returning fallback")
         if return_context:
             return OUT_OF_SCOPE_RESPONSE, sources, results["documents"][0]
         return OUT_OF_SCOPE_RESPONSE, sources
 
-    # _call_runpod strips the prompt echo; raw_completion is the answer body.
+    # _call_runpod / _call_ollama return only the answer body (no prompt echo).
     # Prepend the "Answer:" header so _parse_llm_output can locate sections.
     llm_output = "Answer:\n" + raw_completion
 
