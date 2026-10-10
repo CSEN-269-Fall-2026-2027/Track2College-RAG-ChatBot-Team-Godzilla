@@ -77,8 +77,8 @@ RUNPOD_URL = _resolve_runpod_url()
 if not API_KEY:
     raise RuntimeError("Missing API_KEY in .env")
 
-if INFERENCE_PROVIDER_ENV not in {"auto", "local", "runpod"}:
-    raise RuntimeError("INFERENCE_PROVIDER must be one of: auto, local, runpod")
+if INFERENCE_PROVIDER_ENV not in {"auto", "local", "runpod", "ollama"}:
+    raise RuntimeError("INFERENCE_PROVIDER must be one of: auto, local, runpod, ollama")
 
 if RUNPOD_PAYLOAD_MODE not in {"auto", "handler", "vllm"}:
     raise RuntimeError("RUNPOD_PAYLOAD_MODE must be one of: auto, handler, vllm")
@@ -119,7 +119,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5500",
         "http://127.0.0.1:5500",
-        # Replace this with vercel domain when deployed
+        # replace this with vercel domain when deployed
     ],
     allow_credentials=False,
     allow_methods=["*"],
