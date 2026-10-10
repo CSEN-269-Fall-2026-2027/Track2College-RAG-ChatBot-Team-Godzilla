@@ -156,6 +156,33 @@ Then open http://localhost:5500.
 
 3. Interactive API docs: http://localhost:8000/docs.
 
+## Stopping the backend
+
+Your data is safe either way: Qdrant keeps it in `~/qdrant/storage`, so the next start picks up where you left off.
+
+**Started in terminals** (as above): press **Ctrl+C** in each one — frontend, API, then Qdrant.
+
+**Started in the background, or the terminal is gone** (for example, launched by an editor or agent session that has since closed): stop whatever holds each port.
+
+```bash
+lsof -ti tcp:5500 | xargs kill   # frontend (Vite)
+lsof -ti tcp:8000 | xargs kill   # API (FastAPI)
+lsof -ti tcp:6333 | xargs kill   # Qdrant
+```
+
+**Ollama** usually needs nothing: it unloads the model after 5 minutes idle. To free the memory right away, or quit it entirely:
+
+```bash
+ollama stop gemma4:e4b                # unload the model now
+osascript -e 'quit app "Ollama"'      # quit the Ollama app (or menu bar icon → Quit)
+```
+
+Check that everything is off — this should print nothing:
+
+```bash
+lsof -nP -iTCP:5500,8000,6333 -sTCP:LISTEN
+```
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
