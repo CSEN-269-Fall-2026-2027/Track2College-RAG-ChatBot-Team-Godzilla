@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Track2College Chat</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --text: #1c2026;
+    --muted: #5f6b7a;
+    --border: #dfe3e8;
+    --accent: #8c1d2f;
+    --accent-text: #ffffff;
+    --accent-soft: #f6e9eb;
+    --user-bubble: #8c1d2f;
+    --user-text: #ffffff;
+    --ok: #1f8a4c;
+    --bad: #c0392b;
+    --warn: #b7791f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121417;
+      --surface: #1b1f24;
+      --text: #e6e9ed;
+      --muted: #9aa5b1;
+      --border: #2d333b;
+      --accent: #e0707f;
+      --accent-text: #121417;
+      --accent-soft: #2e1d21;
+      --user-bubble: #a3364a;
+      --user-text: #ffffff;
+      --ok: #4cc77f;
+      --bad: #f07167;
+      --warn: #e0b04c;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+  header .status { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); margin-left: auto; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--warn); }
+  .dot.ok { background: var(--ok); }
+  .dot.bad { background: var(--bad); }
+  button.ghost {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button.ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+  main { flex: 1; overflow-y: auto; }
+  .thread { max-width: 780px; margin: 0 auto; padding: 20px 16px 8px; display: flex; flex-direction: column; gap: 16px; }
+
+  .welcome { text-align: center; padding: 48px 8px 16px; }
+  .welcome h2 { margin: 0 0 6px; font-size: 22px; }
+  .welcome p { margin: 0 0 20px; color: var(--muted); }
+  .suggestions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+
+  .chip {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 7px 14px;
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .chip:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+  .chip:disabled { opacity: .5; cursor: default; }
+
+  .msg { display: flex; }
+  .msg.user { justify-content: flex-end; }
+  .bubble { max-width: 85%; border-radius: 14px; padding: 10px 14px; overflow-wrap: anywhere; }
+  .msg.user .bubble { background: var(--user-bubble); color: var(--user-text); border-bottom-right-radius: 4px; white-space: pre-wrap; }
+  .msg.bot .bubble { background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 4px; max-width: 100%; width: 100%; }
+  .msg.bot.error .bubble { border-color: var(--bad); }
+
+  .answer p { margin: 0 0 8px; }
+  .answer p:last-child { margin-bottom: 0; }
+  .answer ul, .answer ol { margin: 4px 0 8px; padding-left: 22px; }
+  .answer li { margin: 2px 0; }
+  .answer a, .sources a { color: var(--accent); }
+
+  .section-label { font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 6px; }
+  .sources { display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; }
+  .sources a { text-decoration: none; }
+  .sources a:hover { text-decoration: underline; }
+  .followups { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+  .meta { margin-top: 10px; font-size: 12px; color: var(--muted); }
+
+  .typing { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; }
+  .typing .dots span { display: inline-block; width: 6px; height: 6px; margin-right: 3px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite both; }
+  .typing .dots span:nth-child(2) { animation-delay: .2s; }
+  .typing .dots span:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+
+  footer { background: var(--bg); padding: 8px 16px 16px; }
+  form { max-width: 780px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+  textarea {
+    flex: 1;
+    resize: none;
+    min-height: 46px;
+    max-height: 160px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+  }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+  button.send {
+    height: 46px;
+    padding: 0 18px;
+    border: none;
+    border-radius: 12px;
+    background: var(--accent);
+    color: var(--accent-text);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.send:disabled { opacity: .5; cursor: default; }
+  .hint { max-width: 780px; margin: 6px auto 0; font-size: 12px; color: var(--muted); }
+  .hint code { font-size: 11.5px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Track2College</h1>
+  <button class="ghost" id="newChat" type="button">New chat</button>
+  <div class="status" title="Backend connection">
+    <span class="dot" id="statusDot"></span><span id="statusText">Connecting…</span>
+  </div>
+</header>
+
+<main id="scroller">
+  <div class="thread" id="thread">
+    <div class="welcome" id="welcome">
+      <h2>Ask about college planning</h2>
+      <p>Admissions, financial aid, scholarships, and more. Answers cite the pages they come from.</p>
+      <div class="suggestions">
+        <button class="chip" type="button">What are the admission requirements for Santa Clara University?</button>
+        <button class="chip" type="button">What do I need to fill out the FAFSA?</button>
+        <button class="chip" type="button">How do I find scholarships?</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <form id="form">
+    <textarea id="input" rows="1" placeholder="Ask a question…" autocomplete="off"></textarea>
+    <button class="send" id="send" type="submit">Send</button>
+  </form>
+  <div class="hint">Enter to send, Shift+Enter for a new line. Backend: <code id="apiLabel"></code></div>
+</footer>
+
+<script>
+  // Backend URL: defaults to the local FastAPI server; override with ?api=http://host:port
+  const API_BASE = (new URLSearchParams(location.search).get("api") || "http://localhost:8000").replace(/\/$/, "");
+
+  const thread = document.getElementById("thread");
+  const scroller = document.getElementById("scroller");
+  const form = document.getElementById("form");
+  const input = document.getElementById("input");
+  const sendBtn = document.getElementById("send");
+  const statusDot = document.getElementById("statusDot");
+  const statusText = document.getElementById("statusText");
+  document.getElementById("apiLabel").textContent = API_BASE;
+
+  let sessionId = null;
+  let busy = false;
+
+  // ---------- backend status ----------
+  async function checkHealth() {
+    try {
+      const res = await fetch(`${API_BASE}/health`);
+      if (!res.ok) throw new Error(res.status);
+      const data = await res.json();
+      statusDot.className = "dot ok";
+      statusText.textContent = `Connected · ${data.inference_provider}`;
+    } catch {
+      statusDot.className = "dot bad";
+      statusText.textContent = "Backend offline";
+    }
+  }
+  checkHealth();
+  setInterval(checkHealth, 15000);
+
+  // ---------- rendering helpers ----------
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  function inline(s) {
+    let html = escapeHtml(s);
+    html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    html = html.replace(/(https?:\/\/[^\s<)]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+    return html;
+  }
+
+  // Turn the answer body (paragraphs, •/-/* bullets, numbered steps) into HTML.
+  function renderAnswer(text) {
+    const lines = text.split("\n");
+    let html = "", list = null, para = [];
+    const flushPara = () => { if (para.length) { html += `<p>${para.map(inline).join("<br>")}</p>`; para = []; } };
+    const closeList = () => { if (list) { html += `</${list}>`; list = null; } };
+    for (const raw of lines) {
+      const line = raw.trim();
+      const bullet = line.match(/^(?:[•\-*]|•)\s+(.*)$/);
+      const numbered = line.match(/^\d+[.)]\s+(.*)$/);
+      if (bullet || numbered) {
+        flushPara();
+        const tag = bullet ? "ul" : "ol";
+        if (list !== tag) { closeList(); html += `<${tag}>`; list = tag; }
+        html += `<li>${inline((bullet || numbered)[1])}</li>`;
+      } else if (!line) {
+        flushPara(); closeList();
+      } else {
+        closeList(); para.push(line);
+      }
+    }
+    flushPara(); closeList();
+    return html;
+  }
+
+  // Split the backend's "Answer: / Sources: / Follow-up Questions" text into parts.
+  function parseResponse(raw) {
+    const fupRe = /\n?\s*Follow-up Questions you might have:\s*\n?/i;
+    const srcRe = /\n?\s*Sources:\s*\n?/i;
+    let body = raw, followups = [], sources = [];
+    const fupSplit = body.split(fupRe);
+    if (fupSplit.length > 1) {
+      body = fupSplit[0];
+      followups = fupSplit[1].split("\n")
+        .map(l => l.trim().replace(/^Q\d+[.)]\s*/i, "").replace(/^[-•*]\s*/, ""))
+        .filter(Boolean);
+    }
+    const srcSplit = body.split(srcRe);
+    if (srcSplit.length > 1) {
+      body = srcSplit[0];
+      sources = srcSplit[1].split("\n")
+        .map(l => l.trim().replace(/^[-•*]\s*/, ""))
+        .filter(l => /^https?:\/\//i.test(l));
+    }
+    body = body.replace(/^\s*Answer:\s*/i, "").trim();
+    return { body, sources, followups };
+  }
+
+  function scrollToBottom() {
+    scroller.scrollTop = scroller.scrollHeight;
+  }
+
+  function addUserMessage(text) {
+    document.getElementById("welcome")?.remove();
+    const el = document.createElement("div");
+    el.className = "msg user";
+    el.innerHTML = `<div class="bubble"></div>`;
+    el.querySelector(".bubble").textContent = text;
+    thread.appendChild(el);
+    scrollToBottom();
+  }
+
+  function addTyping() {
+    const el = document.createElement("div");
+    el.className = "msg bot";
+    el.innerHTML = `<div class="bubble"><div class="typing"><span class="dots"><span></span><span></span><span></span></span><span class="elapsed">Thinking… 0s</span></div></div>`;
+    thread.appendChild(el);
+    scrollToBottom();
+    const started = Date.now();
+    const label = el.querySelector(".elapsed");
+    const timer = setInterval(() => {
+      const s = Math.round((Date.now() - started) / 1000);
+      label.textContent = s > 20 ? `Thinking… ${s}s (the local model can take a minute)` : `Thinking… ${s}s`;
+    }, 1000);
+    return { el, stop: () => clearInterval(timer) };
+  }
+
+  function renderBotMessage(el, data) {
+    const { body, sources: parsedSources, followups } = parseResponse(data.answer || "");
+    const sources = [...new Set([...(parsedSources.length ? parsedSources : (data.sources || []))])]
+      .filter(s => /^https?:\/\//i.test(s));
+
+    let html = `<div class="answer">${renderAnswer(body)}</div>`;
+    if (sources.length) {
+      html += `<div class="section-label">Sources</div><div class="sources">` +
+        sources.map(u => `<a href="${escapeHtml(u)}" target="_blank" rel="noopener">${escapeHtml(u)}</a>`).join("") +
+        `</div>`;
+    }
+    if (followups.length) {
+      html += `<div class="section-label">Follow-up questions</div><div class="followups">` +
+        followups.map(q => `<button class="chip followup" type="button">${escapeHtml(q)}</button>`).join("") +
+        `</div>`;
+    }
+    if (data.response_time_ms != null) {
+      html += `<div class="meta">${(data.response_time_ms / 1000).toFixed(1)}s</div>`;
+    }
+    el.querySelector(".bubble").innerHTML = html;
+    el.querySelectorAll(".followup").forEach(btn => btn.addEventListener("click", () => send(btn.textContent)));
+  }
+
+  function renderError(el, message) {
+    el.classList.add("error");
+    el.querySelector(".bubble").innerHTML = `<div class="answer"><p></p></div>`;
+    el.querySelector("p").textContent = message;
+  }
+
+  // ---------- sending ----------
+  function setBusy(value) {
+    busy = value;
+    sendBtn.disabled = value;
+    document.querySelectorAll(".chip").forEach(c => c.disabled = value);
+  }
+
+  async function send(text) {
+    text = text.trim();
+    if (!text || busy) return;
+    addUserMessage(text);
+    input.value = "";
+    autosize();
+    setBusy(true);
+    const typing = addTyping();
+    try {
+      const res = await fetch(`${API_BASE}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: text, session_id: sessionId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+      sessionId = data.session_id;
+      typing.stop();
+      renderBotMessage(typing.el, data);
+    } catch (err) {
+      typing.stop();
+      const offline = err instanceof TypeError;
+      renderError(typing.el, offline
+        ? `Couldn't reach the backend at ${API_BASE}. Is "python api.py" running?`
+        : `Something went wrong: ${err.message}`);
+    } finally {
+      setBusy(false);
+      scrollToBottom();
+      input.focus();
+    }
+  }
+
+  form.addEventListener("submit", e => { e.preventDefault(); send(input.value); });
+  input.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(input.value); }
+  });
+
+  function autosize() {
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 160) + "px";
+  }
+  input.addEventListener("input", autosize);
+
+  document.querySelectorAll(".suggestions .chip").forEach(btn => btn.addEventListener("click", () => send(btn.textContent)));
+
+  document.getElementById("newChat").addEventListener("click", async () => {
+    if (busy) return;
+    if (sessionId) {
+      fetch(`${API_BASE}/chat/${encodeURIComponent(sessionId)}`, { method: "DELETE" }).catch(() => {});
+    }
+    sessionId = null;
+    location.reload();
+  });
+
+  input.focus();
+</script>
+</body>
+</html>
