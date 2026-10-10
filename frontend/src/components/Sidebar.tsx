@@ -1,6 +1,6 @@
 import { memo, useMemo } from "react";
 import type { Conversation } from "../types";
-import { ChatIcon, Logo, PlusIcon, SidebarIcon, TrashIcon } from "./icons";
+import { ChatIcon, PlusIcon, SidebarIcon, TrashIcon } from "./icons";
 
 interface SidebarProps {
   conversations: Conversation[];
@@ -48,11 +48,8 @@ export const Sidebar = memo(function Sidebar({
       <div className={`scrim ${open ? "visible" : ""}`} onClick={onClose} aria-hidden="true" />
       <aside className={`sidebar ${open ? "open" : ""}`} aria-label="Chat history">
         <div className="sidebar-top">
-          <div className="brand">
-            <Logo size={26} />
-            <span>Track2College</span>
-          </div>
-          <button className="icon-btn" onClick={onClose} aria-label="Close sidebar" title="Close sidebar">
+          <span className="sidebar-title">Conversations</span>
+          <button className="icon-btn" onClick={onClose} aria-label="Hide conversations" title="Hide conversations">
             <SidebarIcon />
           </button>
         </div>
