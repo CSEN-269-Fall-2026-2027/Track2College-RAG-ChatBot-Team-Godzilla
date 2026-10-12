@@ -383,6 +383,41 @@ def _call_ollama(system_prompt: str, user_message: str, max_tokens: int = 600) -
     return re.sub(r"^\s*\**Answer:?\**\s*", "", completion, count=1).strip()
 
 
+def complete(system_prompt: str, user_message: str, max_tokens: int = 1000) -> str:
+    """
+    Single-turn completion for features that need a JSON object back
+    (transcript reading, course plans, profile analysis). Uses the same
+    INFERENCE_PROVIDER as chat. Returns "" on failure.
+    """
+    if INFERENCE_PROVIDER != "ollama":
+        return _call_runpod(f"<s>[INST] {system_prompt}\n\n{user_message} [/INST]", max_tokens=max_tokens)
+
+    payload = {
+        "model": OLLAMA_MODEL,
+        "stream": False,
+        "think": False,
+        # Constrains decoding to valid JSON, which small local models need.
+        "format": "json",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ],
+        "options": {
+            "temperature": 0.1,
+            "num_predict": max_tokens,
+            # Transcripts and multi-college context run longer than chat prompts.
+            "num_ctx": 16384,
+        },
+    }
+    try:
+        resp = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=600)
+        resp.raise_for_status()
+        return ((resp.json().get("message") or {}).get("content") or "").strip()
+    except Exception as exc:
+        print(f"[Ollama] Request error ({OLLAMA_MODEL} at {OLLAMA_URL}): {exc}")
+        return ""
+
+
 def _extract_vllm_text(output) -> str:
     """
     Extract the raw generated text from any known RunPod vLLM output shape.
@@ -628,6 +663,7 @@ def generate_answer(
     query: str,
     return_context: bool = False,
     conversation_history: list | None = None,
+    profile_context: str | None = None,
 ) -> tuple:
     """
     Full RAG pipeline:
@@ -725,7 +761,18 @@ Q3. What happens if my family's income changed since filing taxes?
     else:
         history_section = ""
 
+    if profile_context and profile_context.strip():
+        profile_section = (
+            "=== Student Profile ===\n"
+            "Use this ONLY to personalize the answer (address the student by first name, focus on what "
+            "matters for their grade, schools, and majors). It is NOT a source of facts about colleges.\n"
+            f"{profile_context.strip()}\n\n"
+        )
+    else:
+        profile_section = ""
+
     user_message = (
+        f"{profile_section}"
         f"{history_section}"
         f"=== Context Passages ===\n{context_str}\n"
         f"=== Current Question ===\n{query}"
