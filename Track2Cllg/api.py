@@ -104,6 +104,9 @@ try:
         _extract_followup_questions,
         _resolve_followup_query,
     )
+    from profile_analysis import analyze_profile
+    from transcript import TranscriptError, analyze_transcript
+    from course_plan import build_course_plan
 except ImportError as error:
     print(f"Error importing query module: {error}")
     sys.exit(1)
@@ -136,7 +139,113 @@ class ChatRequest(BaseModel):
         None,
         description="Optional chat session id. Create one if omitted.",
     )
- 
+    profile_context: Optional[str] = Field(
+        None,
+        max_length=6000,
+        description="Optional plain-text student profile used to personalize answers.",
+    )
+
+
+class ProfileAnalysisRequest(BaseModel):
+    profile_summary: str = Field("", max_length=8000)
+    colleges: List[str] = Field(default_factory=list, max_length=20)
+    majors: List[str] = Field(default_factory=list, max_length=10)
+
+
+class CollegeFit(BaseModel):
+    name: str
+    fit: str
+    reasoning: str
+    sources: List[str]
+
+
+class ActionItem(BaseModel):
+    title: str
+    detail: str
+    timeframe: str
+
+
+class ProfileAnalysisResponse(BaseModel):
+    summary: str
+    strengths: List[str]
+    gaps: List[str]
+    colleges: List[CollegeFit]
+    actions: List[ActionItem]
+
+
+class TranscriptRequest(BaseModel):
+    file_name: str = Field(..., min_length=1, max_length=255)
+    mime_type: str = Field("", max_length=100)
+    # 5 MB file ≈ 6.7 MB base64
+    content_base64: str = Field(..., min_length=1, max_length=7_200_000)
+
+
+class TranscriptCourse(BaseModel):
+    name: str
+    grade_level: str
+    term: str
+    grade: str
+    level: str
+    area: str
+    semesters: int
+
+
+class ReportedGpa(BaseModel):
+    unweighted: str
+    weighted: str
+
+
+class TranscriptResponse(BaseModel):
+    student_name: str
+    school: str
+    reported_gpa: ReportedGpa
+    courses: List[TranscriptCourse]
+    summary: str
+    strengths: List[str]
+    concerns: List[str]
+
+
+class CompletedCourse(BaseModel):
+    name: str = Field(..., max_length=200)
+    grade_level: str = Field("", max_length=10)
+    level: str = Field("regular", max_length=30)
+    area: str = Field("none", max_length=10)
+    grade: str = Field("", max_length=10)
+
+
+class CoursePlanRequest(BaseModel):
+    college: str = Field(..., min_length=1, max_length=200)
+    major: str = Field("", max_length=200)
+    grade_level: str = Field("", max_length=20)
+    completed_courses: List[CompletedCourse] = Field(default_factory=list, max_length=120)
+    profile_summary: str = Field("", max_length=8000)
+
+
+class PlannedCourse(BaseModel):
+    name: str
+    area: str
+    level: str
+    status: str
+    note: str
+
+
+class PlanYear(BaseModel):
+    grade: str
+    courses: List[PlannedCourse]
+
+
+class PlanRequirement(BaseModel):
+    area: str
+    detail: str
+
+
+class CoursePlanResponse(BaseModel):
+    summary: str
+    requirements: List[PlanRequirement]
+    years: List[PlanYear]
+    tips: List[str]
+    sources: List[str]
+
 
 class ChatResponse(BaseModel):
     session_id: str
@@ -370,8 +479,12 @@ def _extract_runpod_answer(body: Dict):
     return "", [], f"RunPod returned an empty answer payload: {body}"
 
 
-def _generate_answer_backend(query_text: str, conversation_history: Optional[List[Dict[str, str]]] = None):
-    return generate_answer(query_text, conversation_history=conversation_history)
+def _generate_answer_backend(
+    query_text: str,
+    conversation_history: Optional[List[Dict[str, str]]] = None,
+    profile_context: Optional[str] = None,
+):
+    return generate_answer(query_text, conversation_history=conversation_history, profile_context=profile_context)
 
 
 def _get_answer_backend(question: str) -> str:
@@ -433,6 +546,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         raw_response, sources = _generate_answer_backend(
             resolved_query,
             conversation_history=memory_snapshot,
+            profile_context=request.profile_context,
         )
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Chat generation failed: {error}")
@@ -468,6 +582,49 @@ async def clear_session(session_id: str):
         "session_id": session_id,
         "cleared": existed,
     }
+
+
+@app.post("/profile/analysis", response_model=ProfileAnalysisResponse)
+def profile_analysis(request: ProfileAnalysisRequest) -> ProfileAnalysisResponse:
+    if not request.profile_summary.strip() and not request.colleges:
+        raise HTTPException(status_code=400, detail="Add some profile details or colleges before running an analysis.")
+    try:
+        result = analyze_profile(request.profile_summary, request.colleges, request.majors)
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error))
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Profile analysis failed: {error}")
+    return ProfileAnalysisResponse(**result)
+
+
+@app.post("/transcript/analyze", response_model=TranscriptResponse)
+def transcript_analyze(request: TranscriptRequest) -> TranscriptResponse:
+    try:
+        result = analyze_transcript(request.file_name, request.mime_type, request.content_base64)
+    except TranscriptError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error))
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Transcript analysis failed: {error}")
+    return TranscriptResponse(**result)
+
+
+@app.post("/plan/courses", response_model=CoursePlanResponse)
+def plan_courses(request: CoursePlanRequest) -> CoursePlanResponse:
+    try:
+        result = build_course_plan(
+            request.college.strip(),
+            request.major.strip(),
+            request.grade_level.strip(),
+            [course.model_dump() for course in request.completed_courses],
+            request.profile_summary,
+        )
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error))
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Course planning failed: {error}")
+    return CoursePlanResponse(**result)
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)

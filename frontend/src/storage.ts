@@ -1,37 +1,21 @@
-import type { Conversation } from "./types";
-
-const STORAGE_KEY = "t2c.conversations.v1";
-const ACTIVE_KEY = "t2c.active.v1";
-const MAX_STORED = 50;
-
-export interface StoredState {
-  conversations: Conversation[];
-  activeId: string | null;
-}
-
-export function loadState(): StoredState {
+export function readJSON<T>(key: string, fallback: T): T {
   try {
-    const conversations = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]") as Conversation[];
-    const activeId = localStorage.getItem(ACTIVE_KEY);
-    return {
-      conversations: Array.isArray(conversations) ? conversations : [],
-      activeId: conversations.some((c) => c.id === activeId) ? activeId : null,
-    };
+    const raw = localStorage.getItem(key);
+    return raw === null ? fallback : (JSON.parse(raw) as T);
   } catch {
-    return { conversations: [], activeId: null };
+    return fallback;
   }
 }
 
-export function saveState({ conversations, activeId }: StoredState): void {
+export function writeJSON(key: string, value: unknown): void {
   try {
-    const kept = [...conversations].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_STORED);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(kept));
-    if (activeId) localStorage.setItem(ACTIVE_KEY, activeId);
-    else localStorage.removeItem(ACTIVE_KEY);
+    localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    // Storage full or disabled (e.g. private mode); history just won't persist.
+    // Storage full or disabled (e.g. private mode); data just won't persist.
   }
 }
+
+export const userKey = (userId: string, name: string) => `t2c.u.${userId}.${name}`;
 
 export function newId(): string {
   return crypto.randomUUID();
