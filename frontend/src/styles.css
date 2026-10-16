@@ -3655,3 +3655,410 @@ a.stat:hover {
     height: 24px;
   }
 }
+
+/* ---------- Readiness checklist & essay coach ---------- */
+
+.readiness-top {
+  align-items: stretch;
+  grid-template-columns: minmax(240px, 1.35fr) minmax(0, 1fr);
+}
+
+.readiness-status {
+  display: flex;
+  flex-direction: column;
+  min-height: 280px;
+}
+
+.readiness-status .status-stack {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  justify-content: space-evenly;
+  gap: 0;
+}
+
+.readiness-status .status-stack li {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 18px 4px;
+  border-top: 1px solid var(--border);
+}
+
+.readiness-status .status-stack li:first-child {
+  border-top: none;
+  padding-top: 4px;
+}
+
+.readiness-status .status-stack strong {
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1;
+  min-width: 1.5ch;
+}
+
+.readiness-status .status-stack span {
+  font-size: 15px;
+  color: var(--text-muted);
+}
+
+.readiness-colleges {
+  display: flex;
+  flex-direction: column;
+  min-height: 280px;
+  max-height: 280px;
+}
+
+.readiness-colleges-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  overscroll-behavior: contain;
+}
+
+.checklist-page {
+  margin-top: 0;
+}
+
+.insight-college-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.insight-college-list li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.insight-college-list li:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.insight-college-list strong {
+  display: block;
+  font-size: 14px;
+}
+
+.insight-college-list .muted {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.status-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.status-pill.s-applying,
+.status-pill.s-researching {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.status-pill.s-submitted {
+  background: color-mix(in srgb, #2563eb 14%, transparent);
+  color: #2563eb;
+}
+
+.status-pill.s-accepted {
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--success);
+}
+
+.status-pill.s-waitlisted,
+.status-pill.s-denied {
+  background: color-mix(in srgb, var(--danger, #b42318) 12%, transparent);
+  color: var(--danger, #b42318);
+}
+
+.checklist-grades {
+  margin-bottom: 18px;
+}
+
+.checklist-phase + .checklist-phase {
+  margin-top: 22px;
+}
+
+.checklist-phase-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.readiness-checklist > li {
+  border-top: 1px solid var(--border);
+}
+
+.readiness-checklist > li:first-child {
+  border-top: none;
+}
+
+.checklist-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.check-btn {
+  display: grid;
+  place-items: center;
+  padding: 10px 6px 10px 2px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+}
+
+.checklist-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 4px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.checklist-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  font-size: 14px;
+}
+
+.readiness-checklist .done .checklist-label {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+.readiness-checklist .done .check {
+  border-color: var(--success);
+  background: var(--success);
+  color: #fff;
+}
+
+.checklist-chevron {
+  color: var(--text-faint);
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+}
+
+.checklist-chevron.up {
+  transform: rotate(-90deg);
+}
+
+.tag.soft {
+  font-size: 10px;
+  font-weight: 650;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.checklist-detail {
+  margin: 0 0 12px 34px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--bg-hover);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.checklist-detail h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.checklist-detail p {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+}
+
+.checklist-detail .card-link {
+  display: inline-flex;
+  margin-top: 6px;
+}
+
+.detail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.detail-list li {
+  padding: 3px 0;
+  color: var(--text-muted);
+}
+
+.detail-list .detail-heading {
+  margin-top: 8px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.detail-list .detail-gap {
+  height: 6px;
+  padding: 0;
+}
+
+.video-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.video-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.video-list a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.video-list a:hover {
+  color: var(--accent);
+}
+
+.essay-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.essay-form textarea {
+  width: 100%;
+  min-height: 110px;
+  resize: vertical;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.45;
+}
+
+.essay-prompt-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.essay-mode {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  width: fit-content;
+}
+
+.essay-mode button {
+  border: none;
+  background: transparent;
+  padding: 7px 14px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.essay-mode button.on {
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.essay-draft {
+  margin: 8px 0 16px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.essay-ideas ul {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+}
+
+.essay-ideas li {
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.essay-ideas li:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.essay-ideas p {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.essay-ideas .muted {
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+.profile-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.profile-transcript .form-foot {
+  padding: 14px 18px;
+}
+
+@media (max-width: 860px) {
+  .insight-college-list li {
+    grid-template-columns: 1fr auto;
+  }
+
+  .insight-college-list .link-btn {
+    grid-column: 1 / -1;
+  }
+}

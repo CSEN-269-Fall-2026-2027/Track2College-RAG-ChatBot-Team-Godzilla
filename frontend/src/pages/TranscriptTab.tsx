@@ -286,6 +286,9 @@ function TranscriptView({ transcript, transcripts, onSelect, onChange, onRemove,
           <a className="card-link plan-link" href={href("insights", "plan")}>
             <BookIcon width={14} height={14} /> Build a course plan from this transcript
           </a>
+          <a className="card-link plan-link" href={href("profile", "academics")}>
+            <CheckIcon width={14} height={14} /> Back to academics
+          </a>
         </section>
       </div>
 

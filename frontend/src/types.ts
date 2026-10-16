@@ -96,6 +96,8 @@ export interface Profile {
     essays: ProgressStatus;
     recommendations: ProgressStatus;
   };
+  /** Manual checklist ticks on Insights → Readiness (item id → done). */
+  checklistDone: Record<string, boolean>;
   updatedAt: number;
 }
 

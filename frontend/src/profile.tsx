@@ -30,6 +30,7 @@ export function emptyProfile(firstName = "", lastName = ""): Profile {
       essays: "",
       recommendations: "",
     },
+    checklistDone: {},
     updatedAt: 0,
   };
 }
@@ -44,6 +45,7 @@ function hydrate(stored: Partial<Profile> | null, fallback: Profile): Profile {
     academics: { ...fallback.academics, ...stored.academics },
     goals: { ...fallback.goals, ...stored.goals },
     preferences: { ...fallback.preferences, ...stored.preferences },
+    checklistDone: { ...fallback.checklistDone, ...stored.checklistDone },
   };
 }
 
@@ -54,6 +56,7 @@ function hydrate(stored: Partial<Profile> | null, fallback: Profile): Profile {
 export const PROFILE_SECTIONS = [
   { id: "basics", title: "About you", blurb: "Grade, school, and location" },
   { id: "academics", title: "Academics", blurb: "GPA, coursework, and testing" },
+  { id: "transcript", title: "Transcript", blurb: "Upload and review your courses" },
   { id: "goals", title: "Interests & goals", blurb: "Majors and what you want from college" },
   { id: "activities", title: "Activities & awards", blurb: "What you do outside class" },
   { id: "colleges", title: "College list", blurb: "Schools, plans, and deadlines" },
@@ -64,7 +67,7 @@ export type SectionId = (typeof PROFILE_SECTIONS)[number]["id"];
 
 const filled = (value: string) => value.trim().length > 0;
 
-export function sectionChecks(p: Profile): Record<SectionId, boolean[]> {
+export function sectionChecks(p: Profile): Partial<Record<SectionId, boolean[]>> {
   const { basics: b, academics: a, goals: g, preferences: f } = p;
   return {
     basics: [filled(b.firstName), b.gradeLevel !== "", filled(b.graduationYear), filled(b.highSchool), filled(b.state)],
@@ -88,10 +91,13 @@ export function sectionChecks(p: Profile): Record<SectionId, boolean[]> {
 export function completeness(p: Profile) {
   const checks = sectionChecks(p);
   const sections = Object.fromEntries(
-    Object.entries(checks).map(([id, list]) => [id, list.filter(Boolean).length / list.length]),
+    PROFILE_SECTIONS.map(({ id }) => {
+      const list = checks[id];
+      return [id, list && list.length ? list.filter(Boolean).length / list.length : 0];
+    }),
   ) as Record<SectionId, number>;
   const all = Object.values(checks).flat();
-  return { overall: all.filter(Boolean).length / all.length, sections };
+  return { overall: all.length ? all.filter(Boolean).length / all.length : 0, sections };
 }
 
 // ---------------------------------------------------------------------------

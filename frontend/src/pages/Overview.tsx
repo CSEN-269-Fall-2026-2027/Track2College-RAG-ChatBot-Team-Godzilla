@@ -1,11 +1,10 @@
 import { useState, type FormEvent } from "react";
-import { useAnalysis } from "../analysis";
 import { useAuth } from "../auth";
-import { planningChecklist } from "../checklist";
+import { nextSteps } from "../checklist";
 import { PROFILE_SECTIONS, completeness, displayName, upcomingDeadlines, useProfile } from "../profile";
 import { href } from "../router";
 import { ProgressRing } from "../components/Form";
-import { ArrowRightIcon, ArrowUpIcon, CalendarIcon, CheckIcon, SparkIcon } from "../components/icons";
+import { ArrowRightIcon, ArrowUpIcon, CalendarIcon, SparkIcon } from "../components/icons";
 import { daysLabel, formatDeadline } from "../format";
 
 function greeting() {
@@ -18,12 +17,11 @@ const QUICK_PROMPTS = ["How do I apply for Cal Grant?", "What GPA do I need for 
 export function Overview({ onAsk }: { onAsk: (text: string) => void }) {
   const { account } = useAuth();
   const { profile } = useProfile();
-  const { analysis, stale } = useAnalysis();
   const [question, setQuestion] = useState("");
 
   const { overall, sections } = completeness(profile);
-  const nextSection = PROFILE_SECTIONS.find((s) => sections[s.id] < 1);
-  const todo = planningChecklist(profile).filter((i) => !i.done).slice(0, 4);
+  const nextSection = PROFILE_SECTIONS.filter((s) => s.id !== "transcript").find((s) => sections[s.id] < 1);
+  const todo = nextSteps(profile, 4);
   const deadlines = upcomingDeadlines(profile).filter((d) => d.days >= 0).slice(0, 3);
   const name = displayName(profile, account?.name ?? "");
   const { gradeLevel, graduationYear, highSchool } = profile.basics;
@@ -72,7 +70,7 @@ export function Overview({ onAsk }: { onAsk: (text: string) => void }) {
               </div>
             </div>
             <ul className="mini-sections">
-              {PROFILE_SECTIONS.map((s) => (
+              {PROFILE_SECTIONS.filter((s) => s.id !== "transcript").map((s) => (
                 <li key={s.id}>
                   <a href={href("profile", s.id)}>
                     <span className="mini-bar">
@@ -103,7 +101,7 @@ export function Overview({ onAsk }: { onAsk: (text: string) => void }) {
               <ul className="checklist">
                 {todo.map((item) => (
                   <li key={item.id}>
-                    <a href={href("profile", item.section)}>
+                    <a href={item.section ? href("profile", item.section) : href("insights")}>
                       <span className="check" />
                       <span>{item.label}</span>
                       <ArrowRightIcon width={14} height={14} className="check-go" />
@@ -147,42 +145,25 @@ export function Overview({ onAsk }: { onAsk: (text: string) => void }) {
           <section className="card insight-teaser">
             <header className="card-head row-head">
               <h2>
-                <SparkIcon width={17} height={17} /> AI insights
+                <SparkIcon width={17} height={17} /> Readiness
               </h2>
-              {analysis && stale && <span className="tag">Outdated</span>}
             </header>
-            {analysis ? (
+            {profile.colleges.length > 0 ? (
               <>
-                <p className="teaser-summary">{analysis.summary}</p>
-                <div className="fit-summary">
-                  {(["reach", "target", "likely"] as const).map((fit) => {
-                    const count = analysis.colleges.filter((c) => c.fit === fit).length;
-                    return count ? (
-                      <span key={fit} className={`fit fit-${fit}`}>
-                        {count} {fit}
-                      </span>
-                    ) : null;
-                  })}
-                </div>
+                <p className="teaser-summary">
+                  {profile.colleges.length} college{profile.colleges.length === 1 ? "" : "s"} on your list · {todo.length ? `${todo.length} open next steps` : "checklist looking good"}
+                </p>
                 <a className="card-link" href={href("insights")}>
-                  See full analysis <ArrowRightIcon width={14} height={14} />
+                  Open readiness checklist <ArrowRightIcon width={14} height={14} />
                 </a>
               </>
             ) : (
               <>
-                <p className="list-empty">Get an AI review of your strengths, gaps, and how each college on your list fits.</p>
-                <a className="btn-ghost" href={href("insights")}>
-                  <SparkIcon width={15} height={15} /> Go to insights
+                <p className="list-empty">Add colleges and work through the planning checklist for your grade.</p>
+                <a className="btn-ghost" href={href("explore")}>
+                  <SparkIcon width={15} height={15} /> Explore colleges
                 </a>
               </>
-            )}
-            {analysis && analysis.actions[0] && (
-              <div className="teaser-action">
-                <CheckIcon width={14} height={14} />
-                <span>
-                  <strong>Top priority:</strong> {analysis.actions[0].title}
-                </span>
-              </div>
             )}
           </section>
         </div>
