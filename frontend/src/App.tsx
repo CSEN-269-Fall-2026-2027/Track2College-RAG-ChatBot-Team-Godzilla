@@ -96,7 +96,7 @@ function Shell() {
             <NavRail route={route} health={health} theme={theme} onToggleTheme={toggleTheme} />
             <main className="page">
               {route === "overview" && <Overview onAsk={askAdvisor} />}
-              {route === "profile" && <ProfilePage section={param} />}
+              {route === "profile" && <ProfilePage section={param} onAsk={askAdvisor} />}
               {route === "explore" && <Explore onAsk={askAdvisor} />}
               {route === "insights" && <Insights tab={param} onAsk={askAdvisor} />}
               <Advisor userId={account.id} visible={route === "advisor"} health={health} onHealth={setHealth} handoff={handoff} />

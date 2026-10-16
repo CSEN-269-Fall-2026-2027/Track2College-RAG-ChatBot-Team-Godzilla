@@ -392,12 +392,12 @@ def complete(system_prompt: str, user_message: str, max_tokens: int = 1000) -> s
     if INFERENCE_PROVIDER != "ollama":
         return _call_runpod(f"<s>[INST] {system_prompt}\n\n{user_message} [/INST]", max_tokens=max_tokens)
 
+    # Note: do not send format=json — Gemma4/MLX on Homebrew Ollama returns 501
+    # ("Structured output is unavailable" / missing xgrammar). We parse JSON ourselves.
     payload = {
         "model": OLLAMA_MODEL,
         "stream": False,
         "think": False,
-        # Constrains decoding to valid JSON, which small local models need.
-        "format": "json",
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},

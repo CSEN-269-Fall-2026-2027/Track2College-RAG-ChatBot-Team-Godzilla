@@ -65,7 +65,7 @@ export function CoursePlanTab({ onAsk }: { onAsk: (text: string) => void }) {
             </>
           ) : (
             <>
-              No transcript yet. <a href={href("insights", "transcript")}>Upload one</a> so the plan accounts for what you've completed.
+              No transcript yet. <a href={href("profile", "transcript")}>Upload one</a> so the plan accounts for what you've completed.
             </>
           )}
           {!profile.basics.gradeLevel && (

@@ -1,34 +1,354 @@
-import { completeness, type SectionId } from "./profile";
-import type { Profile } from "./types";
+import type { SectionId } from "./profile";
+import type { GradeLevel, Profile } from "./types";
 
-export interface ChecklistItem {
-  id: string;
-  label: string;
-  done: boolean;
-  section: SectionId;
+export type ChecklistGrade = "9" | "10" | "11" | "12" | "gap" | "transfer";
+export type ChecklistPhase = "building" | "applying" | "submitted" | "decisions";
+
+export interface ChecklistVideo {
+  title: string;
+  url: string;
+  channel: string;
 }
 
-export function planningChecklist(p: Profile): ChecklistItem[] {
-  const { sections } = completeness(p);
-  const { preferences: f, academics: a } = p;
-  const items: ChecklistItem[] = [
-    { id: "basics", label: "Fill in your basic info", done: sections.basics === 1, section: "basics" },
-    { id: "grades", label: "Add your GPA and coursework", done: sections.academics >= 0.75, section: "academics" },
-    { id: "testing", label: "Decide on a testing plan", done: a.testPlan !== "" && a.testPlan !== "undecided", section: "academics" },
-    { id: "majors", label: "Explore and list possible majors", done: p.goals.majors.length > 0, section: "goals" },
-    { id: "activities", label: "Record at least 3 activities", done: p.activities.length >= 3, section: "activities" },
-    { id: "list", label: "Build a list of 4+ colleges", done: p.colleges.length >= 4, section: "colleges" },
-    {
-      id: "plans",
-      label: "Set an application type and deadline for each college",
-      done: p.colleges.length > 0 && p.colleges.every((c) => c.plan && c.deadline),
-      section: "colleges",
+export interface ChecklistDetail {
+  kind: "counselor" | "videos" | "tips";
+  title: string;
+  body?: string[];
+  videos?: ChecklistVideo[];
+}
+
+export interface ChecklistDef {
+  id: string;
+  label: string;
+  grades: ChecklistGrade[];
+  phase: ChecklistPhase;
+  section?: SectionId;
+  /** Auto-complete from profile when possible; manual toggle still wins if set. */
+  autoDone?: (p: Profile) => boolean;
+  detail?: ChecklistDetail;
+}
+
+const COMMON_APP_VIDEOS: ChecklistVideo[] = [
+  {
+    title: "How to Write a Personal Statement",
+    url: "https://www.youtube.com/watch?v=KkRFXQ6Nq0s",
+    channel: "College Essay Guy",
+  },
+  {
+    title: "Brainstorming Your College Essay",
+    url: "https://www.youtube.com/watch?v=HhCZEX3v5jE",
+    channel: "College Essay Guy",
+  },
+  {
+    title: "UC Personal Insight Questions Explained",
+    url: "https://www.youtube.com/watch?v=8Q8qK2nG8nA",
+    channel: "UC Admissions",
+  },
+];
+
+const COUNSELOR_BRING = [
+  "Unofficial transcript or list of courses you've taken and plan to take",
+  "Current GPA (weighted and unweighted) and test scores if you have them",
+  "A draft college list (reach / target / likely) — even if it's rough",
+  "Questions about A–G, dual enrollment, or summer programs",
+  "Any scholarship or first-gen program deadlines you've seen",
+  "Notes on intended majors and what you want from a campus",
+];
+
+const COUNSELOR_NOTES = [
+  "Ask which courses your school offers that strengthen your target colleges",
+  "Confirm recommendation letter process and deadlines at your school",
+  "Ask how to request fee waivers for applications and SAT/ACT if needed",
+  "Share family college history (first-gen) so they can point you to support",
+  "Ask about Naviance / Scoir / school-specific application tools",
+];
+
+/** Full college-planning checklist. Same plan for everyone; grade filter highlights what's timely. */
+export const CHECKLIST_DEFS: ChecklistDef[] = [
+  {
+    id: "meet-counselor",
+    label: "Meet with your high school counselor",
+    grades: ["9", "10", "11", "12", "gap", "transfer"],
+    phase: "building",
+    detail: {
+      kind: "counselor",
+      title: "Counselor meeting prep",
+      body: [
+        "What to bring:",
+        ...COUNSELOR_BRING.map((s) => `• ${s}`),
+        "",
+        "Notes / questions for your counselor:",
+        ...COUNSELOR_NOTES.map((s) => `• ${s}`),
+      ],
     },
-    { id: "essays", label: "Finish your personal essays", done: f.essays === "done", section: "finances" },
-    { id: "recs", label: "Line up recommendation letters", done: f.recommendations === "done", section: "finances" },
-  ];
-  if (f.needsAid !== "no") {
-    items.push({ id: "fafsa", label: "Submit the FAFSA or CADAA", done: f.fafsa === "done", section: "finances" });
+  },
+  {
+    id: "basics",
+    label: "Fill in your basic profile info",
+    grades: ["9", "10", "11", "12", "gap", "transfer"],
+    phase: "building",
+    section: "basics",
+    autoDone: (p) => !!(p.basics.firstName && p.basics.gradeLevel && p.basics.highSchool),
+  },
+  {
+    id: "ag-plan",
+    label: "Map A–G / graduation requirements with your counselor",
+    grades: ["9", "10"],
+    phase: "building",
+    section: "academics",
+    detail: {
+      kind: "tips",
+      title: "Why this matters",
+      body: [
+        "UC and CSU campuses require A–G coursework. Get on track early so you don't scramble junior year.",
+        "Ask which classes count for each letter and whether summer or dual enrollment can fill gaps.",
+      ],
+    },
+  },
+  {
+    id: "rigor",
+    label: "Plan honors / AP / IB / dual enrollment for next year",
+    grades: ["9", "10", "11"],
+    phase: "building",
+    section: "academics",
+    autoDone: (p) => p.academics.apIbCourses.trim().length > 0 || p.academics.coursework.trim().length > 40,
+  },
+  {
+    id: "activities-start",
+    label: "Join 1–2 activities you can stick with",
+    grades: ["9", "10"],
+    phase: "building",
+    section: "activities",
+    autoDone: (p) => p.activities.length >= 1,
+  },
+  {
+    id: "psat",
+    label: "Take the PSAT / practice SAT or ACT (optional)",
+    grades: ["10", "11"],
+    phase: "building",
+    section: "academics",
+    detail: {
+      kind: "tips",
+      title: "Testing note",
+      body: [
+        "UCs and CSUs are test-blind. Many private colleges are test-optional.",
+        "A practice test still helps if you're applying anywhere that considers scores.",
+      ],
+    },
+  },
+  {
+    id: "majors",
+    label: "Explore possible majors and careers",
+    grades: ["9", "10", "11", "12", "gap", "transfer"],
+    phase: "building",
+    section: "goals",
+    autoDone: (p) => p.goals.majors.length > 0,
+  },
+  {
+    id: "summer",
+    label: "Plan a meaningful summer (job, program, project, or research)",
+    grades: ["10", "11"],
+    phase: "building",
+    detail: {
+      kind: "tips",
+      title: "Summer ideas",
+      body: [
+        "Paid work, family responsibilities, self-directed projects, and community college classes all count.",
+        "Depth over prestige — colleges care that you grew, not that you bought a fancy program.",
+      ],
+    },
+  },
+  {
+    id: "list-build",
+    label: "Build a balanced college list (reach / target / likely)",
+    grades: ["10", "11", "12", "gap", "transfer"],
+    phase: "building",
+    section: "colleges",
+    autoDone: (p) => p.colleges.length >= 4,
+  },
+  {
+    id: "campus-research",
+    label: "Research campuses (virtual tour, visit, or info session)",
+    grades: ["10", "11", "12", "gap", "transfer"],
+    phase: "building",
+    section: "colleges",
+    autoDone: (p) => p.colleges.some((c) => c.status !== "researching" || c.notes.trim().length > 0),
+  },
+  {
+    id: "testing-plan",
+    label: "Decide your testing plan",
+    grades: ["11", "12", "gap"],
+    phase: "applying",
+    section: "academics",
+    autoDone: (p) => p.academics.testPlan !== "" && p.academics.testPlan !== "undecided",
+  },
+  {
+    id: "activities-depth",
+    label: "Record activities with roles, hours, and impact",
+    grades: ["11", "12", "gap", "transfer"],
+    phase: "applying",
+    section: "activities",
+    autoDone: (p) => p.activities.length >= 3,
+  },
+  {
+    id: "essays",
+    label: "Write personal essays / UC PIQs",
+    grades: ["11", "12", "gap", "transfer"],
+    phase: "applying",
+    section: "finances",
+    autoDone: (p) => p.preferences.essays === "done",
+    detail: {
+      kind: "videos",
+      title: "Videos on writing essays",
+      videos: COMMON_APP_VIDEOS,
+      body: [
+        "Start with stories only you can tell. Specific beats impressive.",
+        "Use Insights → Essays to draft from a prompt using your profile.",
+      ],
+    },
+  },
+  {
+    id: "recs",
+    label: "Ask for recommendation letters (if your colleges need them)",
+    grades: ["11", "12", "gap", "transfer"],
+    phase: "applying",
+    section: "finances",
+    autoDone: (p) => p.preferences.recommendations === "done",
+    detail: {
+      kind: "tips",
+      title: "Recommendation tips",
+      body: [
+        "Ask teachers who know you well — usually junior-year core teachers.",
+        "Give 3–4 weeks notice, a brag sheet, and the exact deadline.",
+        "UCs and CSUs do not use teacher letters for freshman admission.",
+      ],
+    },
+  },
+  {
+    id: "apps-open",
+    label: "Start UC, CSU, Common App, or Coalition applications",
+    grades: ["12", "gap", "transfer"],
+    phase: "applying",
+    section: "colleges",
+    autoDone: (p) => p.colleges.some((c) => c.status === "applying" || c.status === "submitted" || ["accepted", "waitlisted", "denied"].includes(c.status)),
+  },
+  {
+    id: "deadlines",
+    label: "Set an application type and deadline for each college",
+    grades: ["11", "12", "gap", "transfer"],
+    phase: "applying",
+    section: "colleges",
+    autoDone: (p) => p.colleges.length > 0 && p.colleges.every((c) => c.plan && c.deadline),
+  },
+  {
+    id: "fafsa",
+    label: "Submit the FAFSA or CADAA",
+    grades: ["12", "gap", "transfer"],
+    phase: "applying",
+    section: "finances",
+    autoDone: (p) => p.preferences.fafsa === "done" || p.preferences.needsAid === "no",
+    detail: {
+      kind: "tips",
+      title: "Financial aid",
+      body: [
+        "FAFSA opens in the fall of senior year (dates shift — confirm the current cycle).",
+        "California Dream Act (CADAA) is for undocumented students who meet AB 540 criteria.",
+        "Also check CSS Profile if any private colleges on your list require it.",
+      ],
+    },
+  },
+  {
+    id: "scholarships",
+    label: "Apply to scholarships (school, local, and national)",
+    grades: ["11", "12", "gap", "transfer"],
+    phase: "applying",
+    detail: {
+      kind: "tips",
+      title: "Where to look",
+      body: [
+        "Start with your high school counseling office and local community foundations.",
+        "Many deadlines fall between December and March — put them on a calendar.",
+      ],
+    },
+  },
+  {
+    id: "submit-apps",
+    label: "Submit applications and pay fees (or use fee waivers)",
+    grades: ["12", "gap", "transfer"],
+    phase: "submitted",
+    section: "colleges",
+    autoDone: (p) => p.colleges.length > 0 && p.colleges.every((c) => c.status === "submitted" || ["accepted", "waitlisted", "denied"].includes(c.status)),
+  },
+  {
+    id: "transcripts-send",
+    label: "Send official transcripts / self-report grades as required",
+    grades: ["12", "gap", "transfer"],
+    phase: "submitted",
+    section: "transcript",
+    detail: {
+      kind: "tips",
+      title: "Transcripts",
+      body: [
+        "UC uses self-reported coursework; official transcripts come after admission.",
+        "Many Common App schools want mid-year reports — ask your counselor early.",
+      ],
+    },
+  },
+  {
+    id: "decisions",
+    label: "Track decisions and update your college list statuses",
+    grades: ["12", "gap", "transfer"],
+    phase: "decisions",
+    section: "colleges",
+    autoDone: (p) => p.colleges.some((c) => ["accepted", "waitlisted", "denied"].includes(c.status)),
+  },
+  {
+    id: "commit",
+    label: "Compare aid offers and commit by May 1 (or your school's date)",
+    grades: ["12", "gap", "transfer"],
+    phase: "decisions",
+    detail: {
+      kind: "tips",
+      title: "Choosing where to go",
+      body: [
+        "Compare net price, not sticker price. Ask each school about appeals if needed.",
+        "Housing deposits and orientation deadlines often follow right after commitment.",
+      ],
+    },
+  },
+];
+
+export interface ChecklistItem extends ChecklistDef {
+  done: boolean;
+  relevant: boolean;
+}
+
+export function normalizeGrade(grade: GradeLevel): ChecklistGrade | "" {
+  if (grade === "9" || grade === "10" || grade === "11" || grade === "12" || grade === "gap" || grade === "transfer") {
+    return grade;
   }
-  return items;
+  return "";
+}
+
+export function isItemDone(def: ChecklistDef, p: Profile): boolean {
+  if (p.checklistDone[def.id] === true) return true;
+  if (p.checklistDone[def.id] === false) return false;
+  return def.autoDone?.(p) ?? false;
+}
+
+export function planningChecklist(p: Profile, gradeFilter: ChecklistGrade | "all" = "all"): ChecklistItem[] {
+  const grade = normalizeGrade(p.basics.gradeLevel);
+  return CHECKLIST_DEFS.filter((def) => gradeFilter === "all" || def.grades.includes(gradeFilter)).map((def) => ({
+    ...def,
+    done: isItemDone(def, p),
+    relevant: !grade || def.grades.includes(grade),
+  }));
+}
+
+/** Short “next steps” list for Overview — incomplete items for the student's grade (or all if unknown). */
+export function nextSteps(p: Profile, limit = 4): ChecklistItem[] {
+  const grade = normalizeGrade(p.basics.gradeLevel);
+  const items = planningChecklist(p, grade || "all").filter((i) => !i.done);
+  const prioritized = grade ? items.filter((i) => i.relevant) : items;
+  return (prioritized.length ? prioritized : items).slice(0, limit);
 }

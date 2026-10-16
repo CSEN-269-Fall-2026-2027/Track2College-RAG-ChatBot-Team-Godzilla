@@ -107,6 +107,7 @@ try:
     from profile_analysis import analyze_profile
     from transcript import TranscriptError, analyze_transcript
     from course_plan import build_course_plan
+    from essay import generate_essay
 except ImportError as error:
     print(f"Error importing query module: {error}")
     sys.exit(1)
@@ -245,6 +246,25 @@ class CoursePlanResponse(BaseModel):
     years: List[PlanYear]
     tips: List[str]
     sources: List[str]
+
+
+class EssayRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=4000)
+    profile_summary: str = Field("", max_length=8000)
+    mode: str = Field("draft", max_length=20)
+
+
+class EssayIdea(BaseModel):
+    title: str
+    angle: str
+    why_it_fits: str
+
+
+class EssayResponse(BaseModel):
+    title: str
+    essay: str
+    ideas: List[EssayIdea]
+    tips: List[str]
 
 
 class ChatResponse(BaseModel):
@@ -625,6 +645,20 @@ def plan_courses(request: CoursePlanRequest) -> CoursePlanResponse:
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Course planning failed: {error}")
     return CoursePlanResponse(**result)
+
+
+@app.post("/essay/generate", response_model=EssayResponse)
+def essay_generate(request: EssayRequest) -> EssayResponse:
+    if not request.prompt.strip():
+        raise HTTPException(status_code=400, detail="Paste an essay prompt first.")
+    mode = "ideas" if request.mode.strip().lower() == "ideas" else "draft"
+    try:
+        result = generate_essay(request.prompt, request.profile_summary, mode)
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error))
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Essay generation failed: {error}")
+    return EssayResponse(**result)
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)
