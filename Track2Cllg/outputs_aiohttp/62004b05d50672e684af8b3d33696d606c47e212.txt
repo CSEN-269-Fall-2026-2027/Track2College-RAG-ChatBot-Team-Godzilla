@@ -1,0 +1,10 @@
+Multiple Choices
+
+The document name you requested (
+/admission/undergraduate/contact.html
+) could not be found on this server.
+However, we found documents with names similar to the one you requested.
+Available documents:
+
+/admission/undergraduate/contact
+ (common basename)

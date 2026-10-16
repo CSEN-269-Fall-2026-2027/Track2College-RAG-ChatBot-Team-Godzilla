@@ -22,15 +22,12 @@ data/cleaned/
 # Generated data files (rebuilt by ingestion pipeline)
 chunk_metadata.json
 cleaned_metadata.json
-scraped_metadata.json
-cleaned_metadata.json
 rag_evaluation_results.csv
 clgUrls.txt
 urls.txt
 
 # Logs and outputs
 logs/
-outputs_aiohttp/
 
 # Temp folders
 tmp*/
