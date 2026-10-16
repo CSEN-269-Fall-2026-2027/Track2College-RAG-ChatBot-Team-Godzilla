@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { KNOWN_COLLEGES, MAJOR_SUGGESTIONS } from "../constants";
+import { usePlanning } from "../planning";
 import { PROFILE_SECTIONS, completeness, useProfile, type SaveState, type SectionId } from "../profile";
 import { href, navigate } from "../router";
 import { newId } from "../storage";
 import type { Activity, Award, Profile, TargetCollege } from "../types";
 import { ChipsInput, ProgressRing, Segmented, SelectField, TextArea, TextField, type Option } from "../components/Form";
 import { ArrowRightIcon, CheckIcon, PlusIcon, TrashIcon } from "../components/icons";
+import { TranscriptTab } from "./TranscriptTab";
 
 type Group = "basics" | "academics" | "goals" | "preferences";
 type Setter = <G extends Group, K extends keyof Profile[G]>(group: G, key: K) => (value: Profile[G][K]) => void;
@@ -74,8 +76,9 @@ function SavedIndicator({ state }: { state: SaveState }) {
   );
 }
 
-export function ProfilePage({ section: param }: { section: string | null }) {
+export function ProfilePage({ section: param, onAsk }: { section: string | null; onAsk: (text: string) => void }) {
   const { profile, update, saveState } = useProfile();
+  const { transcripts } = usePlanning();
   const section: SectionId = isSection(param) ? param : "basics";
   const { overall, sections } = completeness(profile);
   const index = PROFILE_SECTIONS.findIndex((s) => s.id === section);
@@ -107,11 +110,12 @@ export function ProfilePage({ section: param }: { section: string | null }) {
         <div className="profile-layout">
           <nav className="section-nav" aria-label="Profile sections">
             {PROFILE_SECTIONS.map((s) => {
-              const done = sections[s.id] === 1;
+              const done = s.id === "transcript" ? transcripts.length > 0 : sections[s.id] === 1;
+              const value = s.id === "transcript" ? (transcripts.length > 0 ? 1 : 0) : sections[s.id];
               return (
                 <a key={s.id} href={href("profile", s.id)} className={`section-link ${s.id === section ? "active" : ""}`}>
                   <span className={`section-dot ${done ? "done" : ""}`}>
-                    {done ? <CheckIcon width={12} height={12} /> : <ProgressRing value={sections[s.id]} size={18} stroke={2.5} />}
+                    {done ? <CheckIcon width={12} height={12} /> : <ProgressRing value={value} size={18} stroke={2.5} />}
                   </span>
                   <span className="section-text">
                     <span>{s.title}</span>
@@ -122,31 +126,48 @@ export function ProfilePage({ section: param }: { section: string | null }) {
             })}
           </nav>
 
-          <section className="card form-card" key={section}>
-            <header className="card-head">
-              <h2>{current.title}</h2>
-              <p>{current.blurb}</p>
-            </header>
+          {section === "transcript" ? (
+            <div className="profile-transcript" key={section}>
+              <TranscriptTab onAsk={onAsk} />
+              <footer className="form-foot card">
+                {next ? (
+                  <button className="btn-primary" onClick={() => navigate("profile", next.id)}>
+                    Next: {next.title} <ArrowRightIcon width={16} height={16} />
+                  </button>
+                ) : (
+                  <button className="btn-primary" onClick={() => navigate("insights")}>
+                    See my insights <ArrowRightIcon width={16} height={16} />
+                  </button>
+                )}
+              </footer>
+            </div>
+          ) : (
+            <section className="card form-card" key={section}>
+              <header className="card-head">
+                <h2>{current.title}</h2>
+                <p>{current.blurb}</p>
+              </header>
 
-            {section === "basics" && <BasicsForm profile={profile} set={set} />}
-            {section === "academics" && <AcademicsForm profile={profile} set={set} />}
-            {section === "goals" && <GoalsForm profile={profile} set={set} />}
-            {section === "activities" && <ActivitiesForm profile={profile} update={update} />}
-            {section === "colleges" && <CollegesForm profile={profile} update={update} />}
-            {section === "finances" && <FinancesForm profile={profile} set={set} />}
+              {section === "basics" && <BasicsForm profile={profile} set={set} />}
+              {section === "academics" && <AcademicsForm profile={profile} set={set} />}
+              {section === "goals" && <GoalsForm profile={profile} set={set} />}
+              {section === "activities" && <ActivitiesForm profile={profile} update={update} />}
+              {section === "colleges" && <CollegesForm profile={profile} update={update} />}
+              {section === "finances" && <FinancesForm profile={profile} set={set} />}
 
-            <footer className="form-foot">
-              {next ? (
-                <button className="btn-primary" onClick={() => navigate("profile", next.id)}>
-                  Next: {next.title} <ArrowRightIcon width={16} height={16} />
-                </button>
-              ) : (
-                <button className="btn-primary" onClick={() => navigate("insights")}>
-                  See my insights <ArrowRightIcon width={16} height={16} />
-                </button>
-              )}
-            </footer>
-          </section>
+              <footer className="form-foot">
+                {next ? (
+                  <button className="btn-primary" onClick={() => navigate("profile", next.id)}>
+                    Next: {next.title} <ArrowRightIcon width={16} height={16} />
+                  </button>
+                ) : (
+                  <button className="btn-primary" onClick={() => navigate("insights")}>
+                    See my insights <ArrowRightIcon width={16} height={16} />
+                  </button>
+                )}
+              </footer>
+            </section>
+          )}
         </div>
       </div>
     </div>
@@ -189,7 +210,7 @@ function BasicsForm({ profile: { basics: b }, set }: FormProps) {
 function AcademicsForm({ profile: { academics: a }, set }: FormProps) {
   return (
     <div className="form-grid">
-      <a className="apply-bar field-wide transcript-shortcut" href={href("insights", "transcript")}>
+      <a className="apply-bar field-wide transcript-shortcut" href={href("profile", "transcript")}>
         <span>
           <strong>Have your transcript?</strong> Upload it to calculate your GPA and fill this in automatically.
         </span>

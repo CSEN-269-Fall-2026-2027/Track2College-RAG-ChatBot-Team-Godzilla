@@ -7,7 +7,7 @@ import { ChatIcon, Logo, MoonIcon, SparkIcon, SunIcon, UserIcon } from "../compo
 const FEATURES = [
   { Icon: UserIcon, title: "One profile, everything in one place", text: "Grades, tests, activities, and your college list." },
   { Icon: ChatIcon, title: "An advisor that knows you", text: "Ask anything; answers are tailored to your profile and cite official sources." },
-  { Icon: SparkIcon, title: "AI insights on your list", text: "See reach, target, and likely schools plus a prioritized action plan." },
+  { Icon: SparkIcon, title: "A clear readiness plan", text: "Grade-aware checklist, essay coach, and course planning in one place." },
 ];
 
 export function AuthPage({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => void }) {

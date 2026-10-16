@@ -1,22 +1,43 @@
-import { useAnalysis } from "../analysis";
-import { planningChecklist } from "../checklist";
-import { completeness, profileSummary, upcomingDeadlines, useProfile } from "../profile";
+import { useMemo, useState } from "react";
+import { normalizeGrade, planningChecklist, type ChecklistGrade, type ChecklistItem, type ChecklistPhase } from "../checklist";
+import { useProfile } from "../profile";
 import { href } from "../router";
-import { daysLabel, formatDeadline, hostOf } from "../format";
-import type { Fit, ProfileAnalysis } from "../types";
-import { ProgressRing } from "../components/Form";
-import { AlertIcon, ArrowRightIcon, BookIcon, CalendarIcon, ChatIcon, CheckIcon, ExternalIcon, FileIcon, RetryIcon, SparkIcon } from "../components/icons";
-import { TranscriptTab } from "./TranscriptTab";
+import type { TargetCollege } from "../types";
+import { ArrowRightIcon, BookIcon, ChatIcon, CheckIcon, ChevronIcon, ExternalIcon, FileIcon } from "../components/icons";
 import { CoursePlanTab } from "./CoursePlanTab";
-
-const FIT_LABEL: Record<Fit, string> = { reach: "Reach", target: "Target", likely: "Likely", unknown: "Not enough info" };
-const FIT_ORDER: Fit[] = ["reach", "target", "likely", "unknown"];
+import { EssayTab } from "./EssayTab";
 
 const TABS = [
-  { id: "readiness", label: "Readiness", Icon: SparkIcon, blurb: "Where you stand, what's coming up, and an AI review of your college list." },
-  { id: "transcript", label: "Transcript", Icon: FileIcon, blurb: "Upload your transcript to see your GPA, A–G progress, and AI feedback." },
+  { id: "readiness", label: "Checklist", Icon: CheckIcon, blurb: "Work through your college plan by grade, and keep your list next to it." },
+  { id: "essays", label: "Essays", Icon: FileIcon, blurb: "Brainstorm topics or draft essays from a prompt using your profile." },
   { id: "plan", label: "Course plan", Icon: BookIcon, blurb: "A year-by-year high school course plan for the college you're aiming for." },
 ] as const;
+
+const GRADE_FILTERS: { id: ChecklistGrade | "all"; label: string }[] = [
+  { id: "all", label: "All grades" },
+  { id: "9", label: "9th" },
+  { id: "10", label: "10th" },
+  { id: "11", label: "11th" },
+  { id: "12", label: "12th" },
+  { id: "gap", label: "Gap year" },
+  { id: "transfer", label: "Transfer" },
+];
+
+const PHASE_LABEL: Record<ChecklistPhase, string> = {
+  building: "Building your plan",
+  applying: "Applying",
+  submitted: "Submitted",
+  decisions: "Decisions",
+};
+
+const STATUS_LABEL: Record<TargetCollege["status"], string> = {
+  researching: "Researching",
+  applying: "Applying",
+  submitted: "Submitted",
+  accepted: "Accepted",
+  waitlisted: "Waitlisted",
+  denied: "Denied",
+};
 
 export function Insights({ tab: param, onAsk }: { tab: string | null; onAsk: (text: string) => void }) {
   const tab = TABS.find((t) => t.id === param) ?? TABS[0];
@@ -38,7 +59,7 @@ export function Insights({ tab: param, onAsk }: { tab: string | null; onAsk: (te
         </nav>
         <div key={tab.id} className="tab-panel">
           {tab.id === "readiness" && <ReadinessTab onAsk={onAsk} />}
-          {tab.id === "transcript" && <TranscriptTab onAsk={onAsk} />}
+          {tab.id === "essays" && <EssayTab onAsk={onAsk} />}
           {tab.id === "plan" && <CoursePlanTab onAsk={onAsk} />}
         </div>
       </div>
@@ -47,296 +68,196 @@ export function Insights({ tab: param, onAsk }: { tab: string | null; onAsk: (te
 }
 
 function ReadinessTab({ onAsk }: { onAsk: (text: string) => void }) {
-  const { profile } = useProfile();
-  const { analysis, running, error, stale, run, cancel } = useAnalysis();
-  const { overall } = completeness(profile);
-  const checklist = planningChecklist(profile);
-  const doneCount = checklist.filter((i) => i.done).length;
-  const deadlines = upcomingDeadlines(profile);
-  const nextDeadline = deadlines.find((d) => d.days >= 0);
-  const hasProfile = profileSummary(profile).length > 0;
+  const { profile, update } = useProfile();
+  const userGrade = normalizeGrade(profile.basics.gradeLevel);
+  const [gradeFilter, setGradeFilter] = useState<ChecklistGrade | "all">(userGrade || "all");
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  const checklist = useMemo(() => planningChecklist(profile, gradeFilter), [profile, gradeFilter]);
+  const byPhase = (Object.keys(PHASE_LABEL) as ChecklistPhase[])
+    .map((phase) => ({ phase, items: checklist.filter((i) => i.phase === phase) }))
+    .filter((g) => g.items.length > 0);
+
   const statusCounts = {
     building: profile.colleges.filter((c) => c.status === "researching" || c.status === "applying").length,
     submitted: profile.colleges.filter((c) => c.status === "submitted").length,
     decisions: profile.colleges.filter((c) => ["accepted", "waitlisted", "denied"].includes(c.status)).length,
   };
 
+  const toggleDone = (item: ChecklistItem) =>
+    update((p) => ({
+      ...p,
+      checklistDone: { ...p.checklistDone, [item.id]: !item.done },
+    }));
+
   return (
     <>
-        <div className="stat-grid">
-          <a className="card stat" href={href("profile")}>
-            <ProgressRing value={overall} size={48} stroke={5} />
-            <span>
-              <strong>{Math.round(overall * 100)}%</strong>
-              <span className="stat-label">Profile complete</span>
-            </span>
-          </a>
-          <div className="card stat">
-            <span className="stat-icon">
-              <CheckIcon />
-            </span>
-            <span>
-              <strong>
-                {doneCount}/{checklist.length}
-              </strong>
-              <span className="stat-label">Checklist done</span>
-            </span>
-          </div>
-          <div className="card stat">
-            <span className="stat-icon">
-              <CalendarIcon />
-            </span>
-            <span>
-              <strong>{nextDeadline ? daysLabel(nextDeadline.days) : "—"}</strong>
-              <span className="stat-label">Next deadline</span>
-            </span>
-          </div>
-          <div className="card stat">
-            <span className="stat-split">
-              <span>
-                <strong>{statusCounts.building}</strong>
-                <span className="stat-label">In progress</span>
-              </span>
-              <span>
-                <strong>{statusCounts.submitted}</strong>
-                <span className="stat-label">Submitted</span>
-              </span>
-              <span>
-                <strong>{statusCounts.decisions}</strong>
-                <span className="stat-label">Decisions</span>
-              </span>
-            </span>
-          </div>
-        </div>
-
-        <section className="card ai-card">
-          <header className="ai-head">
-            <div className="ai-title">
-              <span className="ai-badge">
-                <SparkIcon width={18} height={18} />
-              </span>
-              <div>
-                <h2>AI college list analysis</h2>
-                <p>
-                  {analysis
-                    ? `Generated ${new Date(analysis.generatedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`
-                    : "Reviews your profile against admission info from each school's official pages."}
-                </p>
-              </div>
-            </div>
-            {running ? (
-              <button className="btn-ghost" onClick={cancel}>
-                Cancel
-              </button>
-            ) : (
-              <button className={analysis && !stale ? "btn-ghost" : "btn-primary"} onClick={run} disabled={!hasProfile}>
-                {analysis ? <RetryIcon width={15} height={15} /> : <SparkIcon width={15} height={15} />}
-                {analysis ? "Regenerate" : "Generate analysis"}
-              </button>
-            )}
+      <div className="two-col readiness-top">
+        <section className="card readiness-status">
+          <header className="card-head">
+            <h2>List status</h2>
+            <p>How your applications are moving</p>
           </header>
-
-          {stale && !running && (
-            <div className="notice">
-              <AlertIcon width={16} height={16} />
-              Your profile changed since this analysis was generated. Regenerate to include the latest details.
-            </div>
-          )}
-          {error && !running && (
-            <div className="error-card">
-              <p>{error}</p>
-              <button className="btn-ghost" onClick={run}>
-                <RetryIcon width={14} height={14} /> Try again
-              </button>
-            </div>
-          )}
-
-          {running ? (
-            <AnalysisSkeleton colleges={profile.colleges.length} />
-          ) : analysis ? (
-            <AnalysisResult analysis={analysis} onAsk={onAsk} />
-          ) : (
-            <div className="ai-empty">
-              {hasProfile ? (
-                <p>
-                  {profile.colleges.length === 0 ? (
-                    <>
-                      Tip: <a href={href("profile", "colleges")}>add a few colleges</a> first to get a reach / target / likely breakdown.
-                    </>
-                  ) : (
-                    <>Ready to analyze {profile.colleges.length} college{profile.colleges.length === 1 ? "" : "s"} on your list.</>
-                  )}
-                </p>
-              ) : (
-                <p>
-                  <a href={href("profile")}>Start your profile</a> to unlock an AI analysis of your strengths, gaps, and college fit.
-                </p>
-              )}
-            </div>
-          )}
+          <ul className="status-stack">
+            <li>
+              <strong>{statusCounts.building}</strong>
+              <span>In progress</span>
+            </li>
+            <li>
+              <strong>{statusCounts.submitted}</strong>
+              <span>Submitted</span>
+            </li>
+            <li>
+              <strong>{statusCounts.decisions}</strong>
+              <span>Decisions</span>
+            </li>
+          </ul>
         </section>
 
-        <div className="two-col">
-          <section className="card">
-            <header className="card-head">
-              <h2>Deadlines</h2>
-              <p>Upcoming dates for colleges you're still applying to</p>
-            </header>
-            {deadlines.length === 0 ? (
+        <section className="card readiness-colleges">
+          <header className="card-head row-head">
+            <div>
+              <h2>My college list</h2>
+              <p>Schools from Explore or Profile</p>
+            </div>
+            <a className="card-link" href={href("explore")}>
+              Explore <ArrowRightIcon width={14} height={14} />
+            </a>
+          </header>
+          <div className="readiness-colleges-scroll">
+            {profile.colleges.length === 0 ? (
               <p className="list-empty">
-                No deadlines yet. <a href={href("profile", "colleges")}>Add deadlines to your college list</a>.
+                Nothing here yet. <a href={href("explore")}>Add colleges from Explore</a> or{" "}
+                <a href={href("profile", "colleges")}>edit your list in Profile</a>.
               </p>
             ) : (
-              <ol className="timeline">
-                {deadlines.map(({ college, date, days }) => (
-                  <li key={college.id} className={days < 0 ? "past" : days <= 14 ? "soon" : ""}>
-                    <span className="timeline-dot" />
-                    <span className="timeline-body">
+              <ul className="insight-college-list">
+                {profile.colleges.map((college) => (
+                  <li key={college.id}>
+                    <div>
                       <strong>{college.name}</strong>
-                      <span>
-                        {college.plan || "Application"} · {formatDeadline(date)}
-                      </span>
-                    </span>
-                    <span className="timeline-days">{daysLabel(days)}</span>
+                      <span className="muted">{[college.plan, college.deadline].filter(Boolean).join(" · ") || "No deadline set"}</span>
+                    </div>
+                    <span className={`status-pill s-${college.status}`}>{STATUS_LABEL[college.status]}</span>
+                    <button className="link-btn" onClick={() => onAsk(`What should I know about applying to ${college.name}?`)}>
+                      <ChatIcon width={13} height={13} /> Ask
+                    </button>
                   </li>
                 ))}
-              </ol>
+              </ul>
             )}
-          </section>
+          </div>
+        </section>
+      </div>
 
-          <section className="card">
-            <header className="card-head">
-              <h2>Checklist</h2>
-              <p>
-                {doneCount} of {checklist.length} complete
-              </p>
-            </header>
-            <ul className="checklist">
-              {checklist.map((item) => (
-                <li key={item.id} className={item.done ? "done" : ""}>
-                  <a href={href("profile", item.section)}>
-                    <span className="check">{item.done && <CheckIcon width={13} height={13} />}</span>
-                    <span>{item.label}</span>
-                    {!item.done && <ArrowRightIcon width={14} height={14} className="check-go" />}
-                  </a>
-                </li>
-              ))}
+      <section className="card checklist-page">
+        <header className="card-head">
+          <h2>Checklist</h2>
+          <p>
+            Same plan for everyone — filter by grade to see what's most timely.
+            {userGrade
+              ? ` You're marked as ${GRADE_FILTERS.find((g) => g.id === userGrade)?.label ?? userGrade}.`
+              : " Add your grade in Profile to highlight your year."}
+          </p>
+        </header>
+
+        <div className="region-chips checklist-grades" role="tablist" aria-label="Grade filter">
+          {GRADE_FILTERS.map((g) => (
+            <button key={g.id} role="tab" aria-selected={gradeFilter === g.id} className={gradeFilter === g.id ? "on" : ""} onClick={() => setGradeFilter(g.id)}>
+              {g.label}
+            </button>
+          ))}
+        </div>
+
+        {byPhase.map(({ phase, items }) => (
+          <div key={phase} className="checklist-phase">
+            <h3 className="checklist-phase-title">{PHASE_LABEL[phase]}</h3>
+            <ul className="checklist readiness-checklist">
+              {items.map((item) => {
+                const open = openId === item.id;
+                return (
+                  <li key={item.id} className={`${item.done ? "done" : ""} ${open ? "open" : ""}`}>
+                    <div className="checklist-row">
+                      <button
+                        type="button"
+                        className="check-btn"
+                        onClick={() => toggleDone(item)}
+                        aria-pressed={item.done}
+                        aria-label={item.done ? `Mark incomplete: ${item.label}` : `Mark done: ${item.label}`}
+                      >
+                        <span className="check">{item.done && <CheckIcon width={13} height={13} />}</span>
+                      </button>
+                      <button type="button" className="checklist-main" onClick={() => setOpenId(open ? null : item.id)} aria-expanded={open}>
+                        <span className="checklist-label">
+                          {item.label}
+                          {item.relevant && gradeFilter === "all" && userGrade && <span className="tag soft">For your grade</span>}
+                        </span>
+                        {(item.detail || item.section) && <ChevronIcon width={16} height={16} className={`checklist-chevron ${open ? "up" : ""}`} />}
+                      </button>
+                    </div>
+                    {open && (
+                      <div className="checklist-detail">
+                        {item.detail?.kind === "counselor" && (
+                          <>
+                            <h4>{item.detail.title}</h4>
+                            <ul className="detail-list">
+                              {item.detail.body?.map((line) =>
+                                line === "" ? (
+                                  <li key="gap" className="detail-gap" />
+                                ) : line.endsWith(":") ? (
+                                  <li key={line} className="detail-heading">
+                                    {line}
+                                  </li>
+                                ) : (
+                                  <li key={line}>{line.replace(/^•\s*/, "")}</li>
+                                ),
+                              )}
+                            </ul>
+                          </>
+                        )}
+                        {item.detail?.kind === "videos" && (
+                          <>
+                            <h4>{item.detail.title}</h4>
+                            {item.detail.body?.map((line) => (
+                              <p key={line}>{line}</p>
+                            ))}
+                            <ul className="video-list">
+                              {item.detail.videos?.map((video) => (
+                                <li key={video.url}>
+                                  <a href={video.url} target="_blank" rel="noreferrer">
+                                    {video.title} <ExternalIcon width={12} height={12} />
+                                  </a>
+                                  <span className="muted">{video.channel}</span>
+                                </li>
+                              ))}
+                            </ul>
+                            <a className="card-link" href={href("insights", "essays")}>
+                              Open essay coach
+                            </a>
+                          </>
+                        )}
+                        {item.detail?.kind === "tips" && (
+                          <>
+                            <h4>{item.detail.title}</h4>
+                            {item.detail.body?.map((line) => (
+                              <p key={line}>{line}</p>
+                            ))}
+                          </>
+                        )}
+                        {item.section && (
+                          <a className="card-link" href={href("profile", item.section)}>
+                            Open in profile
+                          </a>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
-          </section>
-        </div>
+          </div>
+        ))}
+      </section>
     </>
-  );
-}
-
-function AnalysisSkeleton({ colleges }: { colleges: number }) {
-  return (
-    <div className="ai-loading" aria-live="polite">
-      <p className="shimmer">
-        {colleges > 0 ? `Reading admission pages for ${colleges} college${colleges === 1 ? "" : "s"}…` : "Reviewing your profile…"}
-      </p>
-      <div className="skeleton-lines">
-        <span style={{ width: "92%" }} />
-        <span style={{ width: "78%" }} />
-        <span style={{ width: "64%" }} />
-      </div>
-    </div>
-  );
-}
-
-function AnalysisResult({ analysis, onAsk }: { analysis: ProfileAnalysis; onAsk: (text: string) => void }) {
-  const byFit = FIT_ORDER.map((fit) => ({ fit, count: analysis.colleges.filter((c) => c.fit === fit).length })).filter(
-    (x) => x.count > 0,
-  );
-  const sorted = [...analysis.colleges].sort((a, b) => FIT_ORDER.indexOf(a.fit) - FIT_ORDER.indexOf(b.fit));
-  const missingLikely = analysis.colleges.length >= 3 && !analysis.colleges.some((c) => c.fit === "likely");
-
-  return (
-    <div className="ai-result">
-      {analysis.summary && <p className="ai-summary">{analysis.summary}</p>}
-
-      <div className="two-col tight">
-        <div className="pill-list strengths">
-          <h3>Strengths</h3>
-          <ul>
-            {analysis.strengths.map((s) => (
-              <li key={s}>{s}</li>
-            ))}
-          </ul>
-        </div>
-        <div className="pill-list gaps">
-          <h3>Areas to strengthen</h3>
-          <ul>
-            {analysis.gaps.map((s) => (
-              <li key={s}>{s}</li>
-            ))}
-          </ul>
-        </div>
-      </div>
-
-      {analysis.colleges.length > 0 && (
-        <>
-          <div className="fit-head">
-            <h3>College fit</h3>
-            <div className="fit-summary">
-              {byFit.map(({ fit, count }) => (
-                <span key={fit} className={`fit fit-${fit}`}>
-                  {count} {FIT_LABEL[fit].toLowerCase()}
-                </span>
-              ))}
-            </div>
-          </div>
-          {missingLikely && (
-            <div className="notice">
-              <AlertIcon width={16} height={16} />
-              Your list has no likely schools. Consider adding one or two where your profile is well above the typical admit.
-            </div>
-          )}
-          <div className="fit-grid">
-            {sorted.map((c) => (
-              <article key={c.name} className="fit-card">
-                <header>
-                  <strong>{c.name}</strong>
-                  <span className={`fit fit-${c.fit}`}>{FIT_LABEL[c.fit]}</span>
-                </header>
-                <p>{c.reasoning}</p>
-                <footer>
-                  {c.sources.map((url) => (
-                    <a key={url} href={url} target="_blank" rel="noreferrer" className="source-link">
-                      {hostOf(url)} <ExternalIcon width={12} height={12} />
-                    </a>
-                  ))}
-                  <button className="link-btn" onClick={() => onAsk(`What should I know about applying to ${c.name}?`)}>
-                    <ChatIcon width={13} height={13} /> Ask advisor
-                  </button>
-                </footer>
-              </article>
-            ))}
-          </div>
-        </>
-      )}
-
-      {analysis.actions.length > 0 && (
-        <>
-          <h3 className="actions-head">Your action plan</h3>
-          <ol className="action-list">
-            {analysis.actions.map((a, i) => (
-              <li key={`${a.title}-${i}`}>
-                <span className="action-num">{i + 1}</span>
-                <div className="action-body">
-                  <div className="action-top">
-                    <strong>{a.title}</strong>
-                    {a.timeframe && <span className="timeframe">{a.timeframe}</span>}
-                  </div>
-                  {a.detail && <p>{a.detail}</p>}
-                </div>
-                <button className="icon-btn" onClick={() => onAsk(`Help me with this step: ${a.title}. ${a.detail}`)} title="Ask the advisor about this" aria-label={`Ask the advisor about ${a.title}`}>
-                  <ChatIcon width={16} height={16} />
-                </button>
-              </li>
-            ))}
-          </ol>
-        </>
-      )}
-    </div>
   );
 }

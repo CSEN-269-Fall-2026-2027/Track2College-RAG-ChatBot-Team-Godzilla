@@ -156,6 +156,22 @@ export function buildCoursePlan(
   );
 }
 
+export interface EssayResult {
+  title: string;
+  essay: string;
+  ideas: { title: string; angle: string; why_it_fits: string }[];
+  tips: string[];
+}
+
+export function generateEssay(
+  prompt: string,
+  profileSummary: string,
+  mode: "draft" | "ideas",
+  signal?: AbortSignal,
+): Promise<EssayResult> {
+  return post("/essay/generate", { prompt, profile_summary: profileSummary, mode }, signal);
+}
+
 export async function clearSession(sessionId: string): Promise<void> {
   try {
     await fetch(`${API_BASE}/chat/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
