@@ -4,6 +4,7 @@ import sys
 import torch
 import requests
 import os
+import threading
 from collections import deque
 from transformers import AutoTokenizer, AutoModel
 import torch.nn.functional as F
@@ -24,7 +25,17 @@ RUNPOD_ENDPOINT_URL = os.environ.get("RUNPOD_ENDPOINT_URL", "")
 OLLAMA_URL   = os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:e4b")
 
-if INFERENCE_PROVIDER != "ollama" and (not RUNPOD_API_KEY or not RUNPOD_ENDPOINT_URL):
+# Gemini API — used when INFERENCE_PROVIDER=gemini
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
+# Free tier allows 15 requests per minute; stay under it client-side.
+GEMINI_RPM     = int(os.environ.get("GEMINI_RPM", "15"))
+_GEMINI_URL    = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+
+if INFERENCE_PROVIDER == "gemini":
+    if not GEMINI_API_KEY:
+        print("[warning] Ensure GEMINI_API_KEY is set in .env")
+elif INFERENCE_PROVIDER != "ollama" and (not RUNPOD_API_KEY or not RUNPOD_ENDPOINT_URL):
     print("[warning] Ensure RunPod_API_Key and RUNPOD_ENDPOINT_URL are set in .env")
 
 # RunPod expects /runsync for synchronous calls
@@ -383,12 +394,95 @@ def _call_ollama(system_prompt: str, user_message: str, max_tokens: int = 600) -
     return re.sub(r"^\s*\**Answer:?\**\s*", "", completion, count=1).strip()
 
 
+# Timestamps of Gemini requests sent in the last 60s, shared by all threads.
+_gemini_request_times: deque = deque()
+_gemini_rate_lock = threading.Lock()
+
+
+def _wait_for_gemini_slot() -> None:
+    """Block until sending one more request keeps us within GEMINI_RPM."""
+    while True:
+        with _gemini_rate_lock:
+            now = time.monotonic()
+            while _gemini_request_times and now - _gemini_request_times[0] >= 60:
+                _gemini_request_times.popleft()
+            if len(_gemini_request_times) < GEMINI_RPM:
+                _gemini_request_times.append(now)
+                return
+            wait = 60 - (now - _gemini_request_times[0])
+        print(f"[Gemini] {GEMINI_RPM} requests/min limit reached — waiting {wait:.1f}s")
+        time.sleep(wait)
+
+
+def _call_gemini(system_prompt: str, user_message: str, max_tokens: int = 600, json_mode: bool = False) -> str:
+    """
+    Send the RAG prompt to the Gemini API and return the answer body.
+
+    Requests are throttled to GEMINI_RPM per minute (free tier: 15). If Google
+    still answers 429, we wait out the window once and retry.
+    The returned text has any leading "Answer:" header stripped, matching
+    _call_ollama (generate_answer() prepends it again).
+    """
+    generation_config = {
+        "temperature": 0.1,
+        "topP": 0.9,
+        "maxOutputTokens": max_tokens,
+    }
+    if json_mode:
+        generation_config["responseMimeType"] = "application/json"
+    payload = {
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "contents": [{"role": "user", "parts": [{"text": user_message}]}],
+        "generationConfig": generation_config,
+    }
+    headers = {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
+
+    data = None
+    for attempt in range(2):
+        _wait_for_gemini_slot()
+        try:
+            resp = requests.post(_GEMINI_URL, json=payload, headers=headers, timeout=120)
+        except Exception as exc:
+            print(f"[Gemini] Request error ({GEMINI_MODEL}): {exc}")
+            return ""
+        if resp.status_code == 429 and attempt == 0:
+            print("[Gemini] Rate limited (429) — retrying in 60s")
+            time.sleep(60)
+            continue
+        try:
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:
+            print(f"[Gemini] Request error ({GEMINI_MODEL}): {exc} {resp.text[:500]}")
+            return ""
+        break
+    if data is None:
+        return ""
+
+    candidates = data.get("candidates") or []
+    if not candidates:
+        print(f"[Gemini] No candidates returned: {data.get('promptFeedback') or data}")
+        return ""
+    parts = (candidates[0].get("content") or {}).get("parts") or []
+    # Skip thought-summary parts; only the visible answer is wanted.
+    completion = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
+    if not completion:
+        print(f"[Gemini] Empty response (finishReason={candidates[0].get('finishReason')})")
+        return ""
+
+    if json_mode:
+        return completion
+    return re.sub(r"^\s*\**Answer:?\**\s*", "", completion, count=1).strip()
+
+
 def complete(system_prompt: str, user_message: str, max_tokens: int = 1000) -> str:
     """
     Single-turn completion for features that need a JSON object back
     (transcript reading, course plans, profile analysis). Uses the same
     INFERENCE_PROVIDER as chat. Returns "" on failure.
     """
+    if INFERENCE_PROVIDER == "gemini":
+        return _call_gemini(system_prompt, user_message, max_tokens=max_tokens, json_mode=True)
     if INFERENCE_PROVIDER != "ollama":
         return _call_runpod(f"<s>[INST] {system_prompt}\n\n{user_message} [/INST]", max_tokens=max_tokens)
 
@@ -782,9 +876,11 @@ Q3. What happens if my family's income changed since filing taxes?
     # We prime the response with "Answer:\n" so the model starts the answer body directly.
     full_prompt = f"<s>[INST] {system_prompt}\n\n{user_message} [/INST] Answer:\n"
 
-    # ── 4. Call the LLM (local Ollama or RunPod vLLM) ────────────────────────
+    # ── 4. Call the LLM (local Ollama, Gemini API, or RunPod vLLM) ───────────
     if INFERENCE_PROVIDER == "ollama":
         raw_completion = _call_ollama(system_prompt, user_message, max_tokens=1000)
+    elif INFERENCE_PROVIDER == "gemini":
+        raw_completion = _call_gemini(system_prompt, user_message, max_tokens=1000)
     else:
         raw_completion = _call_runpod(full_prompt, max_tokens=1000)
 
@@ -794,7 +890,7 @@ Q3. What happens if my family's income changed since filing taxes?
             return OUT_OF_SCOPE_RESPONSE, sources, results["documents"][0]
         return OUT_OF_SCOPE_RESPONSE, sources
 
-    # _call_runpod / _call_ollama return only the answer body (no prompt echo).
+    # _call_runpod / _call_ollama / _call_gemini return only the answer body (no prompt echo).
     # Prepend the "Answer:" header so _parse_llm_output can locate sections.
     llm_output = "Answer:\n" + raw_completion
 
