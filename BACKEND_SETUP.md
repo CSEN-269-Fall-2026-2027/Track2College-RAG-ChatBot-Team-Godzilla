@@ -51,6 +51,21 @@ grep -v pysqlite3 requirements.txt > /tmp/req-mac.txt
 pip install -r /tmp/req-mac.txt        # Linux: pip install -r requirements.txt
 ```
 
+On Apple Silicon, make sure this is a native ARM64 Python environment. Check the active interpreter with:
+
+```bash
+python -c 'import platform, sys; print(platform.machine(), sys.executable)'
+```
+
+It should report `arm64`. If it reports `x86_64`, install/use an Apple Silicon Python and recreate `.venv`; a virtual environment keeps the architecture of the Python that created it. Python on Apple Silicon can run as `arm64` or `x86_64`, and only a native setup can use PyTorch's MPS backend. [PyTorch MPS documentation](https://docs.pytorch.org/docs/stable/notes/mps.html)
+
+Transformers also requires PyTorch 2.6 or newer. If the active environment has an older version, update it explicitly before ingestion:
+
+```bash
+python -m pip install --upgrade 'torch>=2.6.0'
+python -c 'import torch; print(torch.__version__)'
+```
+
 Copy `.env.example` to `.env` and fill it in. `.env` is gitignored; never commit it.
 
 ```bash
@@ -188,6 +203,8 @@ lsof -nP -iTCP:5500,8000,6333 -sTCP:LISTEN
 | Symptom | Cause | Fix |
 | ------- | ----- | --- |
 | `pip` fails on `pysqlite3-binary` | Linux-only package | Install with it filtered out (One-time setup) |
+| `PyTorch >= 2.6 is required` or Transformers says PyTorch is disabled | Installed torch is older than 2.6 | Run `python -m pip install --upgrade 'torch>=2.6.0'` in the same virtual environment used for `run_ingestion.py` |
+| MPS is unavailable on an Apple Silicon Mac | Python or PyTorch is running as x86_64 | Check `platform.machine()`; recreate `.venv` with native ARM64 Python, then reinstall requirements |
 | `RuntimeError: Missing API_KEY in .env` | `.env` missing or empty `API_KEY` | Set `API_KEY` in `Track2Cllg/.env` |
 | Frontend says the server is unreachable | API not running, or page not on port 5500 | Start `python api.py`; the API only accepts browser requests from `localhost:5500` / `127.0.0.1:5500` |
 | `npm run dev` fails: port 5500 in use | Another server on 5500 | Stop it; Vite is locked to 5500 to match the API's CORS list |
