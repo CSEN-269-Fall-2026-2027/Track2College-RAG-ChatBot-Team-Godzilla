@@ -2,6 +2,8 @@ import { createClient, type Session as SupabaseSession } from "@supabase/supabas
 import type { Conversation, CoursePlan, Profile, ProfileAnalysis, Transcript } from "../types";
 import { AuthError, type DataStore, type Session } from "./store";
 
+/** Generated schema types live in `./database.types` for reference / future typed queries. */
+
 /** Table and bucket names must match supabase/schema.sql. */
 const TABLES = {
   profiles: "profiles",
@@ -88,6 +90,12 @@ export function createSupabaseStore(url: string, anonKey: string): DataStore {
       async signOut() {
         await client.auth.signOut();
       },
+      async resetPassword(email) {
+        const { error } = await client.auth.resetPasswordForEmail(email.trim(), {
+          redirectTo: `${window.location.origin}${window.location.pathname}`,
+        });
+        if (error) throw new AuthError(error.message);
+      },
       onChange(listener) {
         const { data } = client.auth.onAuthStateChange((_event, session) => listener(session ? toSession(session) : null));
         return () => data.subscription.unsubscribe();
@@ -102,15 +110,24 @@ export function createSupabaseStore(url: string, anonKey: string): DataStore {
         let record = transcript;
         if (file) {
           const path = `${userId}/${transcript.id}/${file.name}`;
-          check(await client.storage.from(TRANSCRIPT_BUCKET).upload(path, file, { upsert: true, contentType: file.type }));
-          record = { ...transcript, storagePath: path };
+          try {
+            check(await client.storage.from(TRANSCRIPT_BUCKET).upload(path, file, { upsert: true, contentType: file.type }));
+            record = { ...transcript, storagePath: path };
+          } catch (error) {
+            // Storage may be unavailable while a project finishes restoring; still keep the parsed record.
+            console.warn("[supabase] transcript file upload skipped:", error);
+          }
         }
         await transcripts.save(userId, record);
         return record;
       },
       async remove(userId, transcript) {
         if (transcript.storagePath) {
-          check(await client.storage.from(TRANSCRIPT_BUCKET).remove([transcript.storagePath]));
+          try {
+            check(await client.storage.from(TRANSCRIPT_BUCKET).remove([transcript.storagePath]));
+          } catch (error) {
+            console.warn("[supabase] transcript file delete skipped:", error);
+          }
         }
         await transcripts.remove(userId, transcript.id);
       },
