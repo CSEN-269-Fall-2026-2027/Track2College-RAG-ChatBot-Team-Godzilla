@@ -91,7 +91,7 @@ def build_course_plan(college: str, major: str, grade_level: str, completed: lis
 
     raw = complete(SYSTEM_PROMPT, user_message, max_tokens=4000)
     if not raw:
-        raise RuntimeError("The language model didn't respond. Make sure Ollama (or your RunPod endpoint) is running.")
+        raise RuntimeError("The language model didn't respond. Check INFERENCE_PROVIDER in .env (Ollama running, RunPod endpoint up, or GEMINI_API_KEY set).")
     try:
         data = parse_json(raw)
     except (ValueError, json.JSONDecodeError) as exc:

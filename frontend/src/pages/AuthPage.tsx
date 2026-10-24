@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from "react";
 import { AuthError, useAuth } from "../auth";
-import { STORE_KIND } from "../data";
 import type { Theme } from "../App";
 import { ChatIcon, Logo, MoonIcon, SparkIcon, SunIcon, UserIcon } from "../components/icons";
 
@@ -11,8 +10,8 @@ const FEATURES = [
 ];
 
 export function AuthPage({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => void }) {
-  const { signIn, signUp } = useAuth();
-  const [mode, setMode] = useState<"signup" | "signin">("signup");
+  const { signIn, signUp, resetPassword } = useAuth();
+  const [mode, setMode] = useState<"signup" | "signin" | "reset">("signup");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -23,13 +22,20 @@ export function AuthPage({ theme, onToggleTheme }: { theme: Theme; onToggleTheme
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError(null);
+    setNotice(null);
     if (mode === "signup" && password.length < 8) {
       setError("Use at least 8 characters for your password.");
       return;
     }
     setSubmitting(true);
-    setNotice(null);
     try {
+      if (mode === "reset") {
+        await resetPassword(email);
+        setNotice("If an account exists for that email, a reset link is on the way.");
+        setMode("signin");
+        setSubmitting(false);
+        return;
+      }
       if (mode === "signup") {
         const result = await signUp(name, email, password);
         if ("confirmEmail" in result) {
@@ -51,6 +57,7 @@ export function AuthPage({ theme, onToggleTheme }: { theme: Theme; onToggleTheme
   const switchMode = () => {
     setMode((m) => (m === "signup" ? "signin" : "signup"));
     setError(null);
+    setNotice(null);
   };
 
   return (
@@ -89,9 +96,13 @@ export function AuthPage({ theme, onToggleTheme }: { theme: Theme; onToggleTheme
           <div className="auth-mobile-brand">
             <Logo size={40} />
           </div>
-          <h2>{mode === "signup" ? "Create your account" : "Welcome back"}</h2>
+          <h2>{mode === "signup" ? "Create your account" : mode === "reset" ? "Reset password" : "Welcome back"}</h2>
           <p className="auth-sub">
-            {mode === "signup" ? "It takes a minute, and you can fill in your profile at your own pace." : "Sign in to pick up where you left off."}
+            {mode === "signup"
+              ? "It takes a minute, and you can fill in your profile at your own pace."
+              : mode === "reset"
+                ? "We'll email you a link to choose a new password."
+                : "Sign in to pick up where you left off."}
           </p>
 
           {mode === "signup" && (
@@ -104,18 +115,20 @@ export function AuthPage({ theme, onToggleTheme }: { theme: Theme; onToggleTheme
             <span className="field-label">Email</span>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required placeholder="you@example.com" />
           </label>
-          <label className="field">
-            <span className="field-label">Password</span>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete={mode === "signup" ? "new-password" : "current-password"}
-              minLength={mode === "signup" ? 8 : undefined}
-              required
-              placeholder={mode === "signup" ? "At least 8 characters" : ""}
-            />
-          </label>
+          {mode !== "reset" && (
+            <label className="field">
+              <span className="field-label">Password</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                minLength={mode === "signup" ? 8 : undefined}
+                required
+                placeholder={mode === "signup" ? "At least 8 characters" : ""}
+              />
+            </label>
+          )}
 
           {error && (
             <p className="form-error" role="alert">
@@ -129,16 +142,35 @@ export function AuthPage({ theme, onToggleTheme }: { theme: Theme; onToggleTheme
           )}
 
           <button className="btn-primary btn-block" disabled={submitting}>
-            {submitting ? "One moment…" : mode === "signup" ? "Create account" : "Sign in"}
+            {submitting ? "One moment…" : mode === "signup" ? "Create account" : mode === "reset" ? "Send reset link" : "Sign in"}
           </button>
 
+          {mode === "signin" && (
+            <p className="auth-switch">
+              <button type="button" onClick={() => { setMode("reset"); setError(null); setNotice(null); }}>
+                Forgot password?
+              </button>
+            </p>
+          )}
+
           <p className="auth-switch">
-            {mode === "signup" ? "Already have an account?" : "New to Track2College?"}{" "}
-            <button type="button" onClick={switchMode}>
-              {mode === "signup" ? "Sign in" : "Create one"}
-            </button>
+            {mode === "reset" ? (
+              <>
+                Remembered it?{" "}
+                <button type="button" onClick={() => { setMode("signin"); setError(null); setNotice(null); }}>
+                  Sign in
+                </button>
+              </>
+            ) : (
+              <>
+                {mode === "signup" ? "Already have an account?" : "New to Track2College?"}{" "}
+                <button type="button" onClick={switchMode}>
+                  {mode === "signup" ? "Sign in" : "Create one"}
+                </button>
+              </>
+            )}
           </p>
-          {STORE_KIND === "local" && <p className="auth-note">Accounts are currently stored privately on this device only.</p>}
+          <p className="auth-note">Your account syncs across devices with Supabase.</p>
         </form>
       </section>
     </div>

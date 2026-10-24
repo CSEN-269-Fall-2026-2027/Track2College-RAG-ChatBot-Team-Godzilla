@@ -75,7 +75,13 @@ export function PlanningProvider({ userId, children }: { userId: string; childre
       try {
         const extracted = await analyzeTranscript(file);
         const draft: Transcript = { ...extracted, id: newId(), fileName: file.name, uploadedAt: Date.now(), storagePath: null };
-        const saved = await (await getStore()).transcripts.save(userId, draft, file).catch(() => draft);
+        let saved: Transcript;
+        try {
+          saved = await (await getStore()).transcripts.save(userId, draft, file);
+        } catch (error) {
+          setUploadError(errorMessage(error, "Transcript was read, but saving to your account failed. Please try again."));
+          return null;
+        }
         setTranscripts((current) => [saved, ...current]);
         return saved;
       } catch (error) {

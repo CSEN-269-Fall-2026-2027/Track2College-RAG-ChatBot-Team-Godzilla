@@ -227,12 +227,28 @@ export function ProfileProvider({ userId, name, fallback, children }: ProviderPr
     let cancelled = false;
     const [first = "", ...rest] = name.trim().split(/\s+/);
     const defaults = emptyProfile(first, rest.join(" "));
-    getStore()
-      .then((store) => store.profiles.get(userId))
-      .catch(() => null)
-      .then((stored) => {
-        if (!cancelled) setInitial(hydrate(stored, defaults));
-      });
+    (async () => {
+      const store = await getStore();
+      let stored: Profile | null = null;
+      try {
+        stored = await store.profiles.get(userId);
+      } catch {
+        stored = null;
+      }
+      const profile = hydrate(stored, defaults);
+      // First sign-in: create the row in Supabase so profile data is cloud-backed immediately.
+      if (!stored) {
+        const seeded = { ...profile, updatedAt: Date.now() };
+        try {
+          await store.profiles.save(userId, seeded);
+          if (!cancelled) setInitial(seeded);
+          return;
+        } catch {
+          // Still render locally; auto-save will retry on the next edit.
+        }
+      }
+      if (!cancelled) setInitial(profile);
+    })();
     return () => {
       cancelled = true;
     };

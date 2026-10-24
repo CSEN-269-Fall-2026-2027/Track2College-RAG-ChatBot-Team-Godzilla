@@ -2,7 +2,7 @@ import type { Account, Conversation, CoursePlan, Profile, ProfileAnalysis, Trans
 
 export interface Session {
   account: Account;
-  /** Bearer token for the Track2College API; null for device-local accounts. */
+  /** Supabase JWT used as Bearer token for the Track2College API when present. */
   accessToken: string | null;
 }
 
@@ -11,17 +11,16 @@ export type SignUpResult = { session: Session } | { confirmEmail: true };
 export class AuthError extends Error {}
 
 /**
- * Everything the app persists goes through this interface, so the storage
- * backend (browser localStorage today, Supabase later) can be swapped without
- * touching pages or providers.
+ * Everything the app persists goes through this interface (Supabase Auth + tables).
  */
 export interface DataStore {
-  kind: "local" | "supabase";
+  kind: "supabase";
   auth: {
     getSession(): Promise<Session | null>;
     signUp(name: string, email: string, password: string): Promise<SignUpResult>;
     signIn(email: string, password: string): Promise<Session>;
     signOut(): Promise<void>;
+    resetPassword(email: string): Promise<void>;
     onChange(listener: (session: Session | null) => void): () => void;
   };
   profiles: {

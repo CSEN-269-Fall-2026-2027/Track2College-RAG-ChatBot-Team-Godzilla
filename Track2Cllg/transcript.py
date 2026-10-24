@@ -114,7 +114,7 @@ def analyze_transcript(file_name: str, mime_type: str, content_base64: str) -> d
     transcript_text = extract_text(file_name, mime_type, content_base64)
     raw = complete(SYSTEM_PROMPT, f"=== Transcript ===\n{transcript_text}", max_tokens=6000)
     if not raw:
-        raise RuntimeError("The language model didn't respond. Make sure Ollama (or your RunPod endpoint) is running.")
+        raise RuntimeError("The language model didn't respond. Check INFERENCE_PROVIDER in .env (Ollama running, RunPod endpoint up, or GEMINI_API_KEY set).")
     try:
         data = parse_json(raw)
     except (ValueError, json.JSONDecodeError) as exc:

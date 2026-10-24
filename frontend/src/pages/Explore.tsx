@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { toggleCollegeOnProfile } from "../collegeList";
 import { COLLEGES, REGIONS, regionFromText, type College, type CollegeType, type RegionId } from "../colleges";
 import { useProfile } from "../profile";
 import { href } from "../router";
@@ -68,12 +69,7 @@ export function Explore({ onAsk }: { onAsk: (text: string) => void }) {
     return result;
   }, []);
 
-  const toggle = (college: College) =>
-    update((p) =>
-      onList.has(college.name.toLowerCase())
-        ? { ...p, colleges: p.colleges.filter((c) => c.name.toLowerCase() !== college.name.toLowerCase()) }
-        : { ...p, colleges: [...p.colleges, { id: newId(), name: college.name, status: "researching", plan: "", deadline: "", notes: "" }] },
-    );
+  const toggle = (college: College) => update((p) => toggleCollegeOnProfile(p, college.name, newId));
 
   const regionLabel = REGIONS.find((r) => r.id === region)?.label;
 

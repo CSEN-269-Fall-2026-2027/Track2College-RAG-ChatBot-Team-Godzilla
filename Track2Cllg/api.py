@@ -77,8 +77,8 @@ RUNPOD_URL = _resolve_runpod_url()
 if not API_KEY:
     raise RuntimeError("Missing API_KEY in .env")
 
-if INFERENCE_PROVIDER_ENV not in {"auto", "local", "runpod", "ollama"}:
-    raise RuntimeError("INFERENCE_PROVIDER must be one of: auto, local, runpod, ollama")
+if INFERENCE_PROVIDER_ENV not in {"auto", "local", "runpod", "ollama", "gemini"}:
+    raise RuntimeError("INFERENCE_PROVIDER must be one of: auto, local, runpod, ollama, gemini")
 
 if RUNPOD_PAYLOAD_MODE not in {"auto", "handler", "vllm"}:
     raise RuntimeError("RUNPOD_PAYLOAD_MODE must be one of: auto, handler, vllm")
@@ -92,6 +92,9 @@ if INFERENCE_PROVIDER == "runpod" and (not RUNPOD_API_KEY or not RUNPOD_URL):
     raise RuntimeError(
         "RunPod mode requires RUNPOD_API_KEY (or RunPod_API_Key) and RUNPOD_ENDPOINT_ID or RUNPOD_ENDPOINT_URL"
     )
+
+if INFERENCE_PROVIDER == "gemini" and not os.getenv("GEMINI_API_KEY", "").strip():
+    raise RuntimeError("Gemini mode requires GEMINI_API_KEY in .env")
 
 generate_answer = None
 get_answer = None
