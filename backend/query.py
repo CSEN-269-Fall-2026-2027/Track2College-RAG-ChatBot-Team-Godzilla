@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from qdrant_client import QdrantClient
 from followup_refs import resolve_followup_query as _resolve_followup_query
 from source_filters import filter_sources_for_query, should_omit_sources_section
+from persona import extract_mood, normalize_persona, persona_prompt
 
 # ---------------------------------------------------------------------------
 # Environment / Config
@@ -24,7 +25,18 @@ RUNPOD_ENDPOINT_URL = os.environ.get("RUNPOD_ENDPOINT_URL", "")
 OLLAMA_URL   = os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:e4b")
 
-if INFERENCE_PROVIDER != "ollama" and (not RUNPOD_API_KEY or not RUNPOD_ENDPOINT_URL):
+# Groq (OpenAI-compatible chat) — used when INFERENCE_PROVIDER=groq
+GROQ_API_KEY = (os.environ.get("GROQ_API_KEY", "") or os.environ.get("GROQ_KEY", "")).strip()
+GROQ_MODEL = (
+    os.environ.get("GROQ_MODEL", "").strip()
+    or os.environ.get("LLM_MODEL", "").strip()
+    or "openai/gpt-oss-120b"
+)
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+if INFERENCE_PROVIDER == "groq" and not GROQ_API_KEY:
+    print("[warning] INFERENCE_PROVIDER=groq but GROQ_API_KEY is missing in .env")
+elif INFERENCE_PROVIDER not in {"ollama", "groq"} and (not RUNPOD_API_KEY or not RUNPOD_ENDPOINT_URL):
     print("[warning] Ensure RunPod_API_Key and RUNPOD_ENDPOINT_URL are set in .env")
 
 # RunPod expects /runsync for synchronous calls
@@ -341,6 +353,89 @@ def _call_runpod(prompt: str, max_tokens: int = 600) -> str:
     return completion.strip()
 
 
+def _call_groq(messages: list[dict], max_tokens: int = 1000) -> str:
+    """OpenAI-compatible Groq chat completions. Returns assistant text or ""."""
+    if not GROQ_API_KEY:
+        print("[Groq] Missing GROQ_API_KEY")
+        return ""
+    payload = {
+        "model": GROQ_MODEL,
+        "messages": messages,
+        "temperature": 0.4,
+        "max_tokens": max_tokens,
+    }
+    try:
+        resp = requests.post(
+            GROQ_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=90,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        print(f"[Groq] Request error ({GROQ_MODEL}): {exc}")
+        return ""
+
+    try:
+        return (data["choices"][0]["message"]["content"] or "").strip()
+    except Exception:
+        print(f"[Groq] Unexpected response: {data}")
+        return ""
+
+
+def _generate_groq_chat(
+    query: str,
+    conversation_history: list | None = None,
+    profile_context: str | None = None,
+    persona: str | None = None,
+) -> tuple[str, list[str]]:
+    """Direct conversational answers via Groq — no RAG retrieval for now."""
+    persona = normalize_persona(persona) or "sage"
+    system = (
+        "You are Sage, a friendly college-planning advisor for Track2College. "
+        "Help high school students with UC applications, A–G requirements, majors, "
+        "deadlines, and general admissions advice. Be clear, warm, and practical. "
+        "Use short paragraphs or bullets when listing steps. "
+        "If you are unsure, say so and suggest talking to a school counselor. "
+        "Do not invent official deadlines or URLs — if you mention a site, prefer well-known "
+        "ones like universityofcalifornia.edu or studentaid.gov."
+    )
+    if profile_context and profile_context.strip():
+        system += (
+            "\n\nStudent profile (personalize with this; it is not a source of college facts):\n"
+            + profile_context.strip()
+        )
+    system += persona_prompt(persona)
+
+    messages: list[dict] = [{"role": "system", "content": system}]
+    for turn in conversation_history or []:
+        user = (turn.get("user") or "").strip()
+        bot = (turn.get("bot") or "").strip()
+        if user:
+            messages.append({"role": "user", "content": user})
+        if bot:
+            messages.append({"role": "assistant", "content": bot})
+    messages.append({"role": "user", "content": query})
+
+    completion = _call_groq(messages, max_tokens=1200)
+    if not completion:
+        return (
+            "Answer:\nI'm having trouble reaching the advisor right now. Please try again in a moment.",
+            [],
+        )
+
+    mood, body = extract_mood(completion)
+    # Keep frontend parsers happy with the structured Answer section.
+    response = f"Answer:\n{body.strip()}"
+    if mood:
+        response = f"Mood: {mood}\n{response}"
+    return response, []
+
+
 def _call_ollama(system_prompt: str, user_message: str, max_tokens: int = 600) -> str:
     """
     Send the RAG prompt to a local Ollama server and return the answer body.
@@ -389,6 +484,14 @@ def complete(system_prompt: str, user_message: str, max_tokens: int = 1000) -> s
     (transcript reading, course plans, profile analysis). Uses the same
     INFERENCE_PROVIDER as chat. Returns "" on failure.
     """
+    if INFERENCE_PROVIDER == "groq":
+        return _call_groq(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            max_tokens=max_tokens,
+        )
     if INFERENCE_PROVIDER != "ollama":
         return _call_runpod(f"<s>[INST] {system_prompt}\n\n{user_message} [/INST]", max_tokens=max_tokens)
 
@@ -664,16 +767,23 @@ def generate_answer(
     return_context: bool = False,
     conversation_history: list | None = None,
     profile_context: str | None = None,
+    persona: str | None = None,
 ) -> tuple:
     """
-    Full RAG pipeline:
-      1. Embed query locally
-    2. Retrieve top-K passages from Qdrant
-      3. Check relevance threshold → return out-of-scope if needed
-      4. Assemble strict prompt
-      5. Call RunPod vLLM for completion
-      6. Parse & format 3-section response
+    Full RAG pipeline (RunPod/Ollama), or direct Groq chat when
+    INFERENCE_PROVIDER=groq.
     """
+
+    if INFERENCE_PROVIDER == "groq":
+        response, sources = _generate_groq_chat(
+            query,
+            conversation_history=conversation_history,
+            profile_context=profile_context,
+            persona=persona,
+        )
+        if return_context:
+            return response, sources, []
+        return response, sources
 
     # ── 1. Embed & Retrieve ──────────────────────────────────────────────────
     query_emb = get_query_embedding(query)
@@ -753,6 +863,9 @@ Q1. What is the FAFSA deadline for my state?
 Q2. Do I need to reapply for financial aid every year?
 Q3. What happens if my family's income changed since filing taxes?
 """
+    # Story-mode persona: tone + a one-word mood line; grounding rules above still apply.
+    persona = normalize_persona(persona)
+    system_prompt += persona_prompt(persona)
 
     # Only include the history block when there are prior turns — omitting it
     # when empty avoids wasting tokens on a "None" placeholder.
@@ -794,6 +907,10 @@ Q3. What happens if my family's income changed since filing taxes?
             return OUT_OF_SCOPE_RESPONSE, sources, results["documents"][0]
         return OUT_OF_SCOPE_RESPONSE, sources
 
+    # Strip the persona's "Mood:" line before section parsing so it can't leak
+    # into the follow-up questions.
+    mood, raw_completion = extract_mood(raw_completion)
+
     # _call_runpod / _call_ollama return only the answer body (no prompt echo).
     # Prepend the "Answer:" header so _parse_llm_output can locate sections.
     llm_output = "Answer:\n" + raw_completion
@@ -834,6 +951,9 @@ Q3. What happens if my family's income changed since filing taxes?
 
     # ── 7. Assemble final structured response ────────────────────────────────
     response      = _build_response(answer_text, final_sources, followups, include_sources=include_sources)
+    if persona and mood and response != OUT_OF_SCOPE_RESPONSE:
+        # Leading line keeps the Answer/Sources/Follow-up parsers unaffected.
+        response = f"Mood: {mood}\n{response}"
 
     if return_context:
         return response, final_sources, results["documents"][0]

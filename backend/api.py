@@ -77,8 +77,8 @@ RUNPOD_URL = _resolve_runpod_url()
 if not API_KEY:
     raise RuntimeError("Missing API_KEY in .env")
 
-if INFERENCE_PROVIDER_ENV not in {"auto", "local", "runpod", "ollama"}:
-    raise RuntimeError("INFERENCE_PROVIDER must be one of: auto, local, runpod, ollama")
+if INFERENCE_PROVIDER_ENV not in {"auto", "local", "runpod", "ollama", "groq"}:
+    raise RuntimeError("INFERENCE_PROVIDER must be one of: auto, local, runpod, ollama, groq")
 
 if RUNPOD_PAYLOAD_MODE not in {"auto", "handler", "vllm"}:
     raise RuntimeError("RUNPOD_PAYLOAD_MODE must be one of: auto, handler, vllm")
@@ -108,6 +108,7 @@ try:
     from transcript import TranscriptError, analyze_transcript
     from course_plan import build_course_plan
     from essay import generate_essay
+    from piq import generate_piqs
 except ImportError as error:
     print(f"Error importing query module: {error}")
     sys.exit(1)
@@ -144,6 +145,11 @@ class ChatRequest(BaseModel):
         None,
         max_length=6000,
         description="Optional plain-text student profile used to personalize answers.",
+    )
+    persona: Optional[str] = Field(
+        None,
+        max_length=32,
+        description="Optional Story-mode mentor id (sage, penny, quill, milo) that sets the answer's voice.",
     )
 
 
@@ -265,6 +271,33 @@ class EssayResponse(BaseModel):
     essay: str
     ideas: List[EssayIdea]
     tips: List[str]
+
+
+class PiqAnswer(BaseModel):
+    question: str = Field("", max_length=500)
+    answer: str = Field("", max_length=3000)
+
+
+class PiqItem(BaseModel):
+    id: str = Field(..., max_length=40)
+    answers: List[PiqAnswer] = Field(default_factory=list, max_length=8)
+
+
+class PiqRequest(BaseModel):
+    piqs: List[PiqItem] = Field(..., min_length=1, max_length=4)
+    profile_summary: str = Field("", max_length=8000)
+    regenerate: bool = False
+
+
+class PiqDraft(BaseModel):
+    id: str
+    question: str
+    essay: str
+    word_count: int
+
+
+class PiqResponse(BaseModel):
+    essays: List[PiqDraft]
 
 
 class ChatResponse(BaseModel):
@@ -503,8 +536,14 @@ def _generate_answer_backend(
     query_text: str,
     conversation_history: Optional[List[Dict[str, str]]] = None,
     profile_context: Optional[str] = None,
+    persona: Optional[str] = None,
 ):
-    return generate_answer(query_text, conversation_history=conversation_history, profile_context=profile_context)
+    return generate_answer(
+        query_text,
+        conversation_history=conversation_history,
+        profile_context=profile_context,
+        persona=persona,
+    )
 
 
 def _get_answer_backend(question: str) -> str:
@@ -567,6 +606,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
             resolved_query,
             conversation_history=memory_snapshot,
             profile_context=request.profile_context,
+            persona=request.persona,
         )
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Chat generation failed: {error}")
@@ -659,6 +699,24 @@ def essay_generate(request: EssayRequest) -> EssayResponse:
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Essay generation failed: {error}")
     return EssayResponse(**result)
+
+
+@app.post("/essay/piqs", response_model=PiqResponse)
+def essay_piqs(request: PiqRequest) -> PiqResponse:
+    """Drafts the student's chosen UC Personal Insight Questions (max 350 words each) with Groq."""
+    try:
+        essays = generate_piqs(
+            [item.model_dump() for item in request.piqs],
+            request.profile_summary,
+            regenerate=request.regenerate,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error))
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"PIQ generation failed: {error}")
+    return PiqResponse(essays=essays)
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)

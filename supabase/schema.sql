@@ -19,6 +19,13 @@ create table if not exists public.profile_analyses (
   updated_at timestamptz not null default now()
 );
 
+-- Story-mode progress: XP, achievements, mentor affinity and settings (frontend/src/game/progress.ts).
+create table if not exists public.game_progress (
+  user_id    uuid primary key references auth.users (id) on delete cascade,
+  data       jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
 -- ---------------------------------------------------------------------------
 -- Per-user collections
 -- ---------------------------------------------------------------------------
@@ -56,7 +63,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['profiles', 'profile_analyses', 'conversations', 'transcripts', 'course_plans'] loop
+  foreach t in array array['profiles', 'profile_analyses', 'game_progress', 'conversations', 'transcripts', 'course_plans'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('drop policy if exists "Users manage own rows" on public.%I', t);
     execute format(

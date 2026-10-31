@@ -18,7 +18,7 @@
 mkdir -p logs
 
 # move to project directory
-cd /WAVE/projects2/track2college/Track2Cllg
+cd /WAVE/projects2/track2college/backend
 
 # activate virtual environment
 source /WAVE/projects2/track2college/keyavenv/bin/activate

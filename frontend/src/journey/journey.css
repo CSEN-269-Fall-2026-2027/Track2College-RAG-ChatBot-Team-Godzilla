@@ -1,0 +1,312 @@
+/* UC Journey Map — pixel-art route with five checkpoints. */
+
+.map-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: 0 2px 0 var(--border-strong);
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+
+.map-btn:hover { transform: translateY(-1px); box-shadow: 0 3px 0 var(--border-strong); }
+.map-btn:active { transform: translateY(1px); box-shadow: 0 1px 0 var(--border-strong); }
+.map-btn.on { border-color: #c9a23f; box-shadow: 0 2px 0 #c9a23f; }
+.map-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pixel-map-icon { image-rendering: pixelated; }
+
+.jm {
+  --jm-cream: #f6efdd;
+  --jm-ink: #2f3a33;
+  --jm-green: #6f8f5a;
+  --jm-slate: #4f6280;
+  --jm-gold: #c9a23f;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  position: relative;
+}
+
+/* Story-mode side panel: same map board, fills the rail. */
+.jm-embedded {
+  background: transparent;
+  min-height: 0;
+  height: 100%;
+}
+
+.jm-embedded .jm-scroll {
+  padding: 72px 0 0;
+  place-items: stretch;
+  align-content: start;
+  gap: 10px;
+  height: 100%;
+}
+
+.jm-embedded .jm-embedded-head {
+  flex: none;
+}
+
+.jm-embedded .jm-overall {
+  min-width: 0;
+  width: 100%;
+}
+
+.jm-embedded .jm-overall strong {
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.jm-embedded .jm-bar {
+  display: none;
+}
+
+.jm-embedded .jm-map {
+  width: 100%;
+  max-width: none;
+}
+
+.jm-top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.jm-back { display: inline-flex; align-items: center; gap: 6px; }
+.jm-title { flex: 1; min-width: 0; }
+.jm-title h1 { margin: 0; font-size: 18px; }
+.jm-title p { margin: 0; font-size: 13px; color: var(--text-muted); }
+
+.jm-overall { display: grid; gap: 5px; min-width: 190px; font-size: 13px; }
+.jm-bar { display: block; height: 8px; background: var(--bg-hover); border: 1px solid var(--border); }
+.jm-bar span { display: block; height: 100%; background: var(--jm-gold); transition: width 0.5s; }
+
+.jm-scroll { flex: 1; min-height: 0; overflow: auto; padding: 20px; display: grid; place-items: center; align-content: start; gap: 12px; }
+
+.jm-map {
+  position: relative;
+  width: min(100%, calc((100dvh - 180px) * 200 / 112));
+  border: 4px solid var(--jm-ink);
+  box-shadow: 6px 6px 0 rgba(47, 58, 51, 0.18);
+  background: #aabf8f;
+}
+
+.jm-map-tall { width: min(100%, 440px); }
+
+.jm-scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+
+.jm-pixel-text {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 2.6px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+.jm-nodes { list-style: none; margin: 0; padding: 0; }
+
+.jm-node { position: absolute; transform: translate(-50%, -50%); z-index: 2; }
+
+.jm-node button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--jm-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.jm-label-below button { flex-direction: column; text-align: center; }
+.jm-label-left button { flex-direction: row-reverse; text-align: right; }
+
+.jm-node-dot {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--jm-ink);
+  background: var(--jm-cream);
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: 3px 3px 0 rgba(47, 58, 51, 0.3);
+}
+
+.jm-node-complete .jm-node-dot { background: var(--jm-green); color: #fff; }
+.jm-node-current .jm-node-dot { background: var(--jm-gold); color: var(--jm-ink); animation: jm-pulse 1.6s steps(2) infinite; }
+.jm-node-upcoming .jm-node-dot { color: var(--jm-slate); }
+
+.jm-node-text {
+  display: grid;
+  gap: 2px;
+  padding: 5px 9px;
+  border: 2px solid var(--jm-ink);
+  background: var(--jm-cream);
+  box-shadow: 3px 3px 0 rgba(47, 58, 51, 0.25);
+  white-space: nowrap;
+}
+
+.jm-label-below .jm-node-text { margin-top: 2px; }
+.jm-node-title { font-size: 13px; font-weight: 700; }
+.jm-node-meta { display: flex; gap: 6px; align-items: center; font-size: 11.5px; color: #55605a; }
+.jm-label-below .jm-node-meta { justify-content: center; }
+
+.jm-state { padding: 0 5px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; border: 1px solid currentColor; }
+.jm-state-complete { color: #4c6b3e; }
+.jm-state-current { color: #8a6a17; background: rgba(201, 162, 63, 0.18); }
+.jm-state-upcoming { color: var(--jm-slate); }
+
+.jm-node button:hover .jm-node-text,
+.jm-node button:focus-visible .jm-node-text { background: #fffaf0; transform: translate(-1px, -1px); box-shadow: 4px 4px 0 rgba(47, 58, 51, 0.3); }
+.jm-node button:focus-visible { outline: 3px solid var(--jm-slate); outline-offset: 3px; }
+
+.jm-player {
+  position: absolute;
+  /* Below the checkpoint labels so it never hides their text. */
+  z-index: 1;
+  transform: translate(-50%, -100%);
+  transition: left 0.9s linear, top 0.9s linear;
+  pointer-events: none;
+}
+
+.jm-player img {
+  display: block;
+  /* Whole-number multiples of the 28×44 sprite keep its pixels square. */
+  width: 56px;
+  height: 88px;
+  image-rendering: pixelated;
+  filter: drop-shadow(2px 2px 0 rgba(47, 58, 51, 0.25));
+}
+@media (max-width: 720px) { .jm-player img { width: 28px; height: 44px; } }
+/* Single-frame sprite: a stepped waddle stands in for a walk cycle. */
+.jm-pose-run-a img { transform: translateY(-2px) rotate(-4deg); }
+.jm-pose-run-b img { transform: translateY(-2px) rotate(4deg); }
+.jm-pose-jump { animation: jm-hop 0.26s steps(3); }
+
+.jm-finished { max-width: 640px; text-align: center; color: var(--text-muted); font-size: 14px; }
+
+/* ------------------------------------------------------------ Panel */
+
+/* Sit below the shared app topbar (56px) so the drawer doesn't cover nav. */
+.jm-panel-wrap {
+  position: fixed;
+  top: 56px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: flex-end;
+}
+.jm-scrim { position: absolute; inset: 0; border: 0; background: rgba(20, 24, 22, 0.35); cursor: default; }
+
+.jm-panel {
+  position: relative;
+  width: min(460px, 100%);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border-left: 4px solid var(--jm-ink, #2f3a33);
+  animation: jm-slide 0.22s ease-out;
+}
+
+.jm-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+.jm-panel-kicker { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+.jm-panel-head h2 { margin: 2px 0 0; font-size: 19px; }
+.jm-panel-head h2:focus { outline: none; }
+.jm-panel-body { flex: 1; overflow: auto; padding: 16px 18px 28px; display: grid; gap: 14px; align-content: start; }
+
+.jm-progress { display: grid; gap: 6px; font-size: 13px; font-weight: 600; }
+
+.jm-tasks, .jm-manual, .jm-mini-list, .jm-campuses ul, .jm-piqs ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.jm-tasks li { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; }
+.jm-check { flex: none; display: grid; place-items: center; width: 18px; height: 18px; margin-top: 2px; border: 2px solid var(--border-strong); }
+.jm-tasks li.done .jm-check { background: #6f8f5a; border-color: #6f8f5a; color: #fff; }
+.jm-task-label { display: block; font-weight: 600; }
+.jm-task-label em { font-weight: 400; color: var(--text-muted); }
+.jm-task-detail { display: block; font-size: 12.5px; color: var(--text-muted); }
+.jm-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+.jm-note { margin: 0; font-size: 13px; color: var(--text-muted); }
+.jm-tip { display: grid; gap: 3px; padding: 10px 12px; border-left: 4px solid #c9a23f; background: var(--bg-subtle); font-size: 13px; }
+.jm-h3 { margin: 6px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+.jm-cta { display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; justify-self: start; }
+
+.jm-mini-list li { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 6px 10px; border: 1px solid var(--border); }
+.jm-warn { color: var(--warning); font-weight: 600; }
+.jm-ok { color: var(--text-muted); }
+
+.jm-campuses li, .jm-piqs li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+}
+
+.jm-campuses li.on, .jm-piqs li.on { border-color: #6f8f5a; background: var(--bg-subtle); }
+.jm-campus-toggle, .jm-piq-toggle, .jm-manual label { display: flex; gap: 9px; align-items: flex-start; font-size: 14px; cursor: pointer; }
+.jm-campus-toggle small { color: var(--text-muted); margin-left: 4px; }
+.jm-piq-toggle span, .jm-manual label span { display: grid; gap: 2px; }
+.jm-piq-toggle small, .jm-manual small { color: var(--text-muted); font-size: 12.5px; }
+.jm-piqs li { grid-template-columns: 1fr; }
+.jm-ext { color: var(--text-muted); }
+.jm-input { grid-column: 1 / -1; height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 13.5px; }
+
+.jm-seg { display: inline-flex; border: 2px solid var(--jm-ink, #2f3a33); justify-self: start; }
+.jm-seg button { padding: 4px 10px; border: 0; background: var(--bg-elevated); color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; }
+.jm-seg button + button { border-left: 2px solid var(--jm-ink, #2f3a33); }
+.jm-seg button.on { background: #c9a23f; color: #2f3a33; font-weight: 700; }
+
+.jm-submitted { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0; color: #4c6b3e; font-weight: 600; font-size: 14px; }
+.jm-link { border: 0; background: none; color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit; }
+.jm-confirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px; border: 2px dashed var(--border-strong); }
+.jm-confirm p { flex-basis: 100%; margin: 0; font-size: 13px; }
+
+:root[data-theme="dark"] .jm-map { border-color: #11161a; }
+
+@keyframes jm-pulse { 50% { transform: translateY(-2px); } }
+@keyframes jm-hop { 50% { transform: translate(-50%, calc(-100% - 6px)); } }
+@keyframes jm-slide { from { transform: translateX(40px); opacity: 0; } }
+
+@media (max-width: 720px) {
+  .jm-top { flex-wrap: wrap; padding: 10px 16px; gap: 8px 12px; }
+  .jm-overall { flex-basis: 100%; }
+  .jm-scroll { padding: 12px 16px 24px; }
+  .jm-node-text { white-space: normal; width: 128px; }
+  .jm-node-title { font-size: 12.5px; }
+  .jm-node-meta { flex-wrap: wrap; }
+  .jm-label-right { transform: translate(-14px, -50%); }
+  .jm-label-left { transform: translate(calc(-100% + 14px), -50%); }
+  .jm-panel-wrap { align-items: flex-end; }
+  .jm-panel { height: 88%; border-left: 0; border-top: 4px solid #2f3a33; animation-name: jm-sheet; }
+}
+
+@keyframes jm-sheet { from { transform: translateY(40px); opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .jm-player { transition: none; }
+  .jm-node-current .jm-node-dot, .jm-pose-jump, .jm-panel { animation: none; }
+  .map-btn, .jm-bar span { transition: none; }
+}
+
+/* Global form styles stretch inputs; keep panel checkboxes checkbox-sized. */
+.jm-panel input[type="checkbox"] { flex: none; width: 16px; height: 16px; margin: 3px 0 0; accent-color: #6f8f5a; }

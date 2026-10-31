@@ -4,7 +4,7 @@ How to set up and start the RAG chatbot backend locally. Tested 2026-10-09 on an
 
 ## Overview
 
-The backend is a FastAPI app (`Track2Cllg/api.py`) that answers questions using scraped college pages stored in a local Qdrant database, with an LLM writing the final answer. It runs fully on a laptop with Ollama, or calls a RunPod GPU endpoint instead.
+The backend is a FastAPI app (`backend/api.py`) that answers questions using scraped college pages stored in a local Qdrant database, with an LLM writing the final answer. It runs fully on a laptop with Ollama, or calls a RunPod GPU endpoint instead.
 
 Each `/chat` request:
 
@@ -25,7 +25,7 @@ FastAPI backend (api.py, :8000)
 
 | Tool    | Version tested | How to get it |
 | ------- | -------------- | ------------- |
-| Python  | 3.11 (pinned in `Track2Cllg/runtime.txt`) | `brew install python@3.11` |
+| Python  | 3.11 (pinned in `backend/runtime.txt`) | `brew install python@3.11` |
 | Ollama  | 0.40.2 | [ollama.com](https://ollama.com), then `ollama pull gemma4:e4b` (9.6 GB) |
 | Qdrant  | 1.19.2 | Standalone binary, no Docker needed (below) |
 | Node.js | 25.9 | Only for the frontend: `brew install node` |
@@ -45,7 +45,7 @@ If you have Docker, `docker run -p 6333:6333 -v ~/qdrant/storage:/qdrant/storage
 Create a virtual environment and install the Python packages. On macOS, skip `pysqlite3-binary`: it only ships Linux wheels, and only `evaluate_rag.py` uses it.
 
 ```bash
-cd Track2College-RAG-ChatBot-Team-Godzilla/Track2Cllg
+cd Track2College-RAG-ChatBot-Team-Godzilla/backend
 python3.11 -m venv .venv && source .venv/bin/activate
 grep -v pysqlite3 requirements.txt > /tmp/req-mac.txt
 pip install -r /tmp/req-mac.txt        # Linux: pip install -r requirements.txt
@@ -87,10 +87,10 @@ Qdrant starts empty, so the knowledge base is built once: scrape the pages, then
    ```
 
 2. **Scrape the URLs** in `URLScrapePipeline/clgUrls.txt` (1,682 URLs). Ingestion expects:
-   - `Track2Cllg/outputs_aiohttp/` — one `.txt` file per page
-   - `Track2Cllg/scraped_metadata.json` — maps each file to its URL. Without it, answers cite `file://` paths instead of real links.
+   - `backend/outputs_aiohttp/` — one `.txt` file per page
+   - `backend/scraped_metadata.json` — maps each file to its URL. Without it, answers cite `file://` paths instead of real links.
 
-   `Track2Cllg/run_pipeline.py` is meant to do this, but it imports `scrap.py`, which is **not committed**. Until it is, use the stand-in scraper from this setup (not yet in the repo).
+   `backend/run_pipeline.py` is meant to do this, but it imports `scrap.py`, which is **not committed**. Until it is, use the stand-in scraper from this setup (not yet in the repo).
 
    Do **not** use `URLScrapePipeline/scrape_pipeline.py` for this: it writes to a different folder, needs `OPENAI_API_KEY`, and rewrites `clgUrls.txt` without its comment lines.
 
@@ -99,7 +99,7 @@ Qdrant starts empty, so the knowledge base is built once: scrape the pages, then
 3. **Run ingestion** (clean → chunk → embed into Qdrant):
 
    ```bash
-   cd Track2Cllg && source .venv/bin/activate
+   cd backend && source .venv/bin/activate
    python run_ingestion.py
    ```
 
@@ -124,7 +124,7 @@ Use one terminal per process. Ollama runs as a Mac app and usually starts on its
 cd ~/qdrant && QDRANT__STORAGE__STORAGE_PATH=$HOME/qdrant/storage ./qdrant
 
 # Terminal 2 — API (http://localhost:8000)
-cd Track2College-RAG-ChatBot-Team-Godzilla/Track2Cllg
+cd Track2College-RAG-ChatBot-Team-Godzilla/backend
 source .venv/bin/activate
 python api.py
 
@@ -188,7 +188,7 @@ lsof -nP -iTCP:5500,8000,6333 -sTCP:LISTEN
 | Symptom | Cause | Fix |
 | ------- | ----- | --- |
 | `pip` fails on `pysqlite3-binary` | Linux-only package | Install with it filtered out (One-time setup) |
-| `RuntimeError: Missing API_KEY in .env` | `.env` missing or empty `API_KEY` | Set `API_KEY` in `Track2Cllg/.env` |
+| `RuntimeError: Missing API_KEY in .env` | `.env` missing or empty `API_KEY` | Set `API_KEY` in `backend/.env` |
 | Frontend says the server is unreachable | API not running, or page not on port 5500 | Start `python api.py`; the API only accepts browser requests from `localhost:5500` / `127.0.0.1:5500` |
 | `npm run dev` fails: port 5500 in use | Another server on 5500 | Stop it; Vite is locked to 5500 to match the API's CORS list |
 | Laptop freezes, answers time out | Model + embeddings exceed RAM on 16 GB | Use `OLLAMA_MODEL=gemma4:e2b`; close other apps; don't run ingestion and the API at the same time |

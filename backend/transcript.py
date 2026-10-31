@@ -74,10 +74,11 @@ def extract_text(file_name: str, mime_type: str, content_base64: str) -> str:
             raw = "\n".join(page.extract_text() or "" for page in reader.pages)
         except Exception as exc:
             raise TranscriptError("That PDF couldn't be opened. Is it password-protected?") from exc
-    elif name.endswith((".txt", ".csv")) or mime_type.startswith("text/"):
+    elif name.endswith((".txt", ".csv", ".md")) or mime_type.startswith("text/"):
+        # .md is accepted even when the browser leaves MIME empty.
         raw = data.decode("utf-8", errors="replace")
     else:
-        raise TranscriptError("Upload a PDF, TXT, or CSV file.")
+        raise TranscriptError("Upload a PDF, TXT, CSV, or Markdown (.md) file.")
 
     cleaned = "\n".join(line.strip() for line in raw.splitlines() if line.strip())
     if len(cleaned) < MIN_TEXT_CHARS:

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-export const ROUTES = ["overview", "profile", "explore", "advisor", "insights"] as const;
+export const ROUTES = ["materials", "profile", "advisor", "map"] as const;
 export type Route = (typeof ROUTES)[number];
 
 export interface Location {
@@ -10,9 +10,28 @@ export interface Location {
 }
 
 function parseHash(): Location {
-  const [name = "", param = null] = window.location.hash.replace(/^#\/?/, "").split("/");
-  const route = (ROUTES as readonly string[]).includes(name) ? (name as Route) : "overview";
-  return { route, param: route === name ? param || null : null };
+  const [rawName = "", rawParam = null] = window.location.hash.replace(/^#\/?/, "").split("/");
+  // Legacy bookmarks → Materials.
+  const name =
+    rawName === "overview" || rawName === "home" || rawName === "insights" || rawName === "explore"
+      ? "materials"
+      : rawName;
+  const param =
+    rawName === "insights"
+      ? rawParam === "essays" || rawParam === "plan"
+        ? rawParam
+        : null
+      : rawName === "explore"
+        ? null
+        : rawParam;
+  // Empty / unknown hashes open Advisor (not Materials).
+  const route = (ROUTES as readonly string[]).includes(name) ? (name as Route) : "advisor";
+  const keepParam =
+    route === name ||
+    rawName === "overview" ||
+    rawName === "home" ||
+    rawName === "insights";
+  return { route, param: keepParam ? param || null : null };
 }
 
 export function href(route: Route, param?: string) {

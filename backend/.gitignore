@@ -4,8 +4,10 @@ __pycache__/
 *.pyo
 .ipynb_checkpoints/
 
-# Environment variables
+# Environment variables / secrets (never commit real keys)
 .env
+.env.*
+!.env.example
 .venv
 keyavenv/
 venv/

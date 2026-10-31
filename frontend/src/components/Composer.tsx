@@ -6,11 +6,12 @@ interface ComposerProps {
   onSend: (text: string) => void;
   onStop: () => void;
   focusKey: string;
+  placeholder?: string;
 }
 
 const MAX_HEIGHT = 220;
 
-export function Composer({ busy, onSend, onStop, focusKey }: ComposerProps) {
+export function Composer({ busy, onSend, onStop, focusKey, placeholder }: ComposerProps) {
   const [value, setValue] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -55,7 +56,7 @@ export function Composer({ busy, onSend, onStop, focusKey }: ComposerProps) {
           value={value}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Ask about admissions, financial aid, scholarships…"
+          placeholder={placeholder ?? "Ask about admissions, financial aid, scholarships…"}
           rows={1}
           aria-label="Message Track2College"
         />
