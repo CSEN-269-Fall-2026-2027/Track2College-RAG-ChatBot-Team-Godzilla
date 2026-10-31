@@ -1,9 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { Message } from "../types";
 import { AssistantMessage, ThinkingMessage, UserMessage } from "./Message";
 import { ArrowUpIcon } from "./icons";
 
 interface ChatViewProps {
+  /** Shown above the first message (e.g. the guide's opening line). */
+  intro?: ReactNode;
   messages: Message[];
   pending: boolean;
   busy: boolean;
@@ -14,7 +16,7 @@ interface ChatViewProps {
 
 const STICK_THRESHOLD = 96;
 
-export function ChatView({ messages, pending, busy, freshId, onFollowup, onRetry }: ChatViewProps) {
+export function ChatView({ intro, messages, pending, busy, freshId, onFollowup, onRetry }: ChatViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -56,6 +58,7 @@ export function ChatView({ messages, pending, busy, freshId, onFollowup, onRetry
     <div className="chat-area">
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
         <div className="chat-content" ref={contentRef}>
+          {intro}
         {messages.map((message, index) =>
           message.role === "user" ? (
             <UserMessage key={message.id} message={message} />

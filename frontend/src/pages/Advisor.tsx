@@ -2,123 +2,133 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, clearSession, sendChat } from "../api";
 import { parseAssistantResponse } from "../parse";
 import { displayName, profileSummary, useProfile } from "../profile";
-import { getStore } from "../data";
-import { makeTitle, newId, readJSON, userKey, writeJSON } from "../storage";
+import { makeTitle, newId } from "../storage";
 import type { Handoff, Health } from "../App";
-import type { Conversation, Message, Profile } from "../types";
-import { Sidebar } from "../components/Sidebar";
-import { ChatView } from "../components/ChatView";
+import type { Conversation, Message } from "../types";
 import { Composer } from "../components/Composer";
-import { EmptyState } from "../components/EmptyState";
-import { PlusIcon, SidebarIcon, UserIcon } from "../components/icons";
+import { GuidedView } from "../components/story/GuidedView";
+import { StoryView, type AskOptions } from "../components/story/StoryView";
 import { useAuth } from "../auth";
-
-const isDesktop = () => window.matchMedia("(min-width: 900px)").matches;
+import { useGame } from "../game/GameProvider";
+import { getStore } from "../data";
+import { mentorById } from "../game/characters";
+import { openerFor } from "../game/openers";
 
 interface AdvisorProps {
   userId: string;
   visible: boolean;
-  health: Health;
   onHealth: (health: Health) => void;
   handoff: Handoff | null;
 }
 
-function suggestionsFor(p: Profile) {
-  const college = p.colleges[0]?.name;
-  const major = p.goals.majors.find((m) => m !== "Undecided");
-  const list = [
-    college
-      ? { title: college, prompt: `What does ${college} look for in freshman applicants?` }
-      : { title: "Applications", prompt: "What do UC schools look for in freshman applicants?" },
-    { title: "Financial aid", prompt: "What do I need to complete the FAFSA, and when is it due?" },
-    major
-      ? { title: major, prompt: `Which schools have strong ${major} programs, and how competitive are they?` }
-      : { title: "Choosing a major", prompt: "Do I need to pick a major when I apply?" },
-    { title: "Requirements", prompt: "What are the A–G course requirements for UC and CSU?" },
-  ];
-  return list;
-}
+type Chats = Record<string, Conversation>;
 
-export function Advisor({ userId, visible, health, onHealth, handoff }: AdvisorProps) {
+/** Each advisor keeps its own chat, saved to the account so it survives logout and reloads. */
+export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
   const { account } = useAuth();
   const { profile } = useProfile();
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const savedVersions = useRef(new Map<string, number>());
-  const [pendingId, setPendingId] = useState<string | null>(null);
+  const { mentor, updateSettings, state } = useGame();
+  const storyMode = state.storyMode;
+
+  const mentorRef = useRef(mentor);
+  mentorRef.current = mentor;
+
+  const [chats, setChats] = useState<Chats>({});
+  /** Advisor whose reply is in flight (only one request at a time). */
+  const [pendingFor, setPendingFor] = useState<string | null>(null);
+  const pending = pendingFor !== null;
   const [freshId, setFreshId] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(isDesktop);
-  const [personalize, setPersonalize] = useState(() => readJSON(userKey(userId, "personalize"), true));
+  const conversation = chats[mentor.id] ?? null;
 
   const abortRef = useRef<AbortController | null>(null);
-  const conversationsRef = useRef(conversations);
-  conversationsRef.current = conversations;
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+  const nameRef = useRef("");
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
+  /** Conversation id → updatedAt last written to the store. */
+  const savedRef = useRef(new Map<string, number>());
   const contextRef = useRef<string | null>(null);
   const summary = useMemo(() => profileSummary(profile), [profile]);
-  contextRef.current = personalize && summary ? summary : null;
+  contextRef.current = summary || null;
 
-  const active = conversations.find((c) => c.id === activeId) ?? null;
-  const busy = pendingId !== null;
+  const setChat = useCallback((mentorId: string, change: (c: Conversation | null) => Conversation | null) => {
+    setChats((all) => {
+      const next = change(all[mentorId] ?? null);
+      if (!next) {
+        const { [mentorId]: _removed, ...rest } = all;
+        return rest;
+      }
+      return { ...all, [mentorId]: next };
+    });
+  }, []);
 
   useEffect(() => {
+    setChats({});
+    setFreshId(null);
+    setPendingFor(null);
+    abortRef.current?.abort();
+    abortRef.current = null;
+    savedRef.current = new Map();
+
     let cancelled = false;
     getStore()
       .then((store) => store.conversations.list(userId))
-      .catch(() => [] as Conversation[])
-      .then((stored) => {
+      .then((list) => {
         if (cancelled) return;
-        for (const c of stored) savedVersions.current.set(c.id, c.updatedAt);
-        // Merge, since a handoff may have started a conversation before history finished loading.
-        setConversations((current) => [...current, ...stored.filter((s) => !current.some((c) => c.id === s.id))]);
-        const lastActive = readJSON<string | null>(userKey(userId, "activeChat"), null);
-        setActiveId((current) => current ?? (stored.some((c) => c.id === lastActive) ? lastActive : null));
-        setLoaded(true);
-      });
+        // Newest first: keep each advisor's latest chat, without clobbering one started while loading.
+        const loaded: Chats = {};
+        for (const c of list) {
+          const id = c.mentorId ?? "sage";
+          if (!loaded[id]) loaded[id] = { ...c, mentorId: id };
+          savedRef.current.set(c.id, c.updatedAt);
+        }
+        setChats((current) => ({ ...loaded, ...current }));
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [userId]);
 
+  // Persist any chat that changed since it was last saved.
   useEffect(() => {
-    if (!loaded) return;
-    const changed = conversations.filter((c) => savedVersions.current.get(c.id) !== c.updatedAt);
-    if (!changed.length) return;
-    for (const c of changed) savedVersions.current.set(c.id, c.updatedAt);
-    getStore().then((store) => Promise.all(changed.map((c) => store.conversations.save(userId, c)))).catch(() => {});
-  }, [userId, loaded, conversations]);
-
-  useEffect(() => writeJSON(userKey(userId, "activeChat"), activeId), [userId, activeId]);
-  useEffect(() => writeJSON(userKey(userId, "personalize"), personalize), [userId, personalize]);
+    for (const c of Object.values(chats)) {
+      if (!c.messages.length || savedRef.current.get(c.id) === c.updatedAt) continue;
+      savedRef.current.set(c.id, c.updatedAt);
+      getStore()
+        .then((store) => store.conversations.save(userId, c))
+        .catch(() => savedRef.current.delete(c.id));
+    }
+  }, [chats, userId]);
 
   useEffect(() => {
-    if (visible) document.title = active ? `${active.title} · Track2College` : "Advisor · Track2College";
-  }, [visible, active?.title]);
-
-  const updateConversation = useCallback((id: string, update: (c: Conversation) => Conversation) => {
-    setConversations((prev) => prev.map((c) => (c.id === id ? update(c) : c)));
-  }, []);
+    if (visible) {
+      document.title = storyMode
+        ? "Story · Track2College"
+        : conversation?.messages.length
+          ? `${conversation.title} · Track2College`
+          : "Advisor · Track2College";
+    }
+  }, [visible, storyMode, conversation?.title, conversation?.messages.length]);
 
   const appendMessage = useCallback(
-    (id: string, message: Message, sessionId?: string) => {
-      updateConversation(id, (c) => ({
-        ...c,
-        sessionId: sessionId ?? c.sessionId,
-        messages: [...c.messages, message],
-        updatedAt: Date.now(),
-      }));
+    (mentorId: string, message: Message, sessionId?: string) => {
+      setChat(mentorId, (c) =>
+        c ? { ...c, sessionId: sessionId ?? c.sessionId, messages: [...c.messages, message], updatedAt: Date.now() } : c,
+      );
     },
-    [updateConversation],
+    [setChat],
   );
 
   const request = useCallback(
-    async (conversationId: string, query: string, sessionId: string | null) => {
+    async (query: string, sessionId: string | null, persona: string) => {
       const controller = new AbortController();
       abortRef.current = controller;
-      setPendingId(conversationId);
+      setPendingFor(persona);
 
       try {
-        const response = await sendChat(query, sessionId, contextRef.current, controller.signal);
+        const response = await sendChat(query, sessionId, contextRef.current, controller.signal, persona);
         const parsed = parseAssistantResponse(response.answer);
         const message: Message = {
           id: newId(),
@@ -126,21 +136,23 @@ export function Advisor({ userId, visible, health, onHealth, handoff }: AdvisorP
           content: parsed.answer || response.answer,
           sources: parsed.sources,
           followups: parsed.followups,
+          ...(parsed.mood ? { mood: parsed.mood } : {}),
+          mentorId: persona,
           responseTimeMs: response.response_time_ms,
           createdAt: Date.now(),
         };
-        appendMessage(conversationId, message, response.session_id);
+        appendMessage(persona, message, response.session_id);
         setFreshId(message.id);
         onHealth("online");
       } catch (error) {
         if (controller.signal.aborted) return;
         const content = error instanceof ApiError ? error.message : "Something went wrong while generating a response.";
         if (error instanceof ApiError && error.offline) onHealth("offline");
-        appendMessage(conversationId, { id: newId(), role: "assistant", content, error: true, createdAt: Date.now() });
+        appendMessage(persona, { id: newId(), role: "assistant", content, error: true, createdAt: Date.now() });
       } finally {
         if (abortRef.current === controller) {
           abortRef.current = null;
-          setPendingId(null);
+          setPendingFor(null);
         }
       }
     },
@@ -148,180 +160,138 @@ export function Advisor({ userId, visible, health, onHealth, handoff }: AdvisorP
   );
 
   const send = useCallback(
-    (text: string, fresh = false) => {
+    (text: string, fresh = false, options: AskOptions = {}) => {
       const query = text.trim();
       if (!query || abortRef.current) return;
 
+      const persona = options.mentorId ?? mentorRef.current.id;
+      if (options.mentorId && options.mentorId !== mentorRef.current.id) {
+        updateSettings({ mentorId: options.mentorId });
+      }
+
       const now = Date.now();
       const userMessage: Message = { id: newId(), role: "user", content: query, createdAt: now };
-      const existing = fresh ? undefined : conversationsRef.current.find((c) => c.id === activeId);
+      const current = chatsRef.current[persona] ?? null;
 
-      if (existing) {
-        appendMessage(existing.id, userMessage);
-        request(existing.id, query, existing.sessionId);
+      if (current && current.messages.length > 0 && !fresh) {
+        setChat(persona, () => ({ ...current, messages: [...current.messages, userMessage], updatedAt: now }));
+        request(query, current.sessionId, persona);
         return;
       }
 
-      const conversation: Conversation = {
-        id: newId(),
+      if (fresh && current?.sessionId) clearSession(current.sessionId);
+      const next: Conversation = {
+        id: current && !fresh ? current.id : newId(),
         title: makeTitle(query),
-        sessionId: null,
+        sessionId: fresh ? null : (current?.sessionId ?? null),
+        mentorId: persona,
+        // Freeze the opening message the student saw, so it stays even as the profile changes.
+        intro: current?.intro ?? openerFor(mentorById(persona), profileRef.current, nameRef.current).text,
         messages: [userMessage],
-        createdAt: now,
+        createdAt: current && !fresh ? current.createdAt : now,
         updatedAt: now,
       };
-      setConversations((prev) => [conversation, ...prev]);
-      setActiveId(conversation.id);
+      setChat(persona, () => next);
       setFreshId(null);
-      request(conversation.id, query, null);
+      request(query, next.sessionId, persona);
     },
-    [activeId, appendMessage, request],
+    [request, updateSettings, setChat],
   );
 
   const retry = useCallback(() => {
-    const convo = conversationsRef.current.find((c) => c.id === activeId);
+    const persona = mentorRef.current.id;
+    const convo = chatsRef.current[persona];
     if (!convo || abortRef.current) return;
     const lastUser = [...convo.messages].reverse().find((m) => m.role === "user");
     if (!lastUser) return;
-    updateConversation(convo.id, (c) => ({
-      ...c,
-      messages: c.messages.at(-1)?.error ? c.messages.slice(0, -1) : c.messages,
+    setChat(persona, () => ({
+      ...convo,
+      messages: convo.messages.at(-1)?.error ? convo.messages.slice(0, -1) : convo.messages,
+      updatedAt: Date.now(),
     }));
-    request(convo.id, lastUser.content, convo.sessionId);
-  }, [activeId, request, updateConversation]);
+    request(lastUser.content, convo.sessionId, persona);
+  }, [request, setChat]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
-    setPendingId(null);
+    setPendingFor(null);
   }, []);
 
-  const closeSidebarOnMobile = () => {
-    if (!isDesktop()) setSidebarOpen(false);
-  };
-
-  const newChat = useCallback(() => {
-    setActiveId(null);
-    setFreshId(null);
-    closeSidebarOnMobile();
-  }, []);
-
-  const selectConversation = useCallback((id: string) => {
-    setActiveId(id);
-    setFreshId(null);
-    closeSidebarOnMobile();
-  }, []);
-
-  const deleteConversation = useCallback(
-    (id: string) => {
-      const convo = conversationsRef.current.find((c) => c.id === id);
-      if (!convo) return;
-      if (pendingId === id) stop();
-      if (convo.sessionId) clearSession(convo.sessionId);
-      savedVersions.current.delete(id);
-      getStore().then((store) => store.conversations.remove(userId, id)).catch(() => {});
-      setConversations((prev) => prev.filter((c) => c.id !== id));
-      if (activeId === id) setActiveId(null);
-    },
-    [userId, activeId, pendingId, stop],
-  );
-
-  // Stable handlers keep memoized message rows from re-rendering on every keystroke or reveal frame.
   const sendRef = useRef(send);
   const retryRef = useRef(retry);
+  const storyRef = useRef(storyMode);
   sendRef.current = send;
   retryRef.current = retry;
-  const onFollowup = useCallback((question: string) => sendRef.current(question), []);
+  storyRef.current = storyMode;
+
+  const onAsk = useCallback((question: string, options?: AskOptions) => {
+    const persona = options?.mentorId ?? mentorRef.current.id;
+    const hasHistory = (chatsRef.current[persona]?.messages.length ?? 0) > 0;
+    sendRef.current(question, hasHistory ? false : !!options?.fresh, options);
+  }, []);
   const onRetry = useCallback(() => retryRef.current(), []);
+  /** Story mode hands a question to a guide: switch to Manual and ask it there. */
+  const onGuidedAsk = useCallback(
+    (prompt: string, mentorId: string) => {
+      updateSettings({ storyMode: false });
+      onAsk(prompt, { mentorId: mentorId as AskOptions["mentorId"] });
+    },
+    [onAsk, updateSettings],
+  );
   const onSend = useCallback((text: string) => sendRef.current(text), []);
 
-  // Questions handed off from other pages always start a new conversation.
   const handled = useRef<string | null>(null);
   useEffect(() => {
     if (!handoff || handled.current === handoff.id) return;
     handled.current = handoff.id;
     if (abortRef.current) stop();
-    sendRef.current(handoff.text, true);
-  }, [handoff, stop]);
+    if (storyRef.current) updateSettings({ storyMode: false });
+    const hasHistory = (chatsRef.current[mentorRef.current.id]?.messages.length ?? 0) > 0;
+    sendRef.current(handoff.text, !hasHistory);
+  }, [handoff, stop, updateSettings]);
 
   useEffect(() => {
     if (!visible) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "o") {
-        event.preventDefault();
-        newChat();
-      }
       if (event.key === "Escape" && abortRef.current) stop();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [visible, newChat, stop]);
+  }, [visible, stop]);
 
   const name = displayName(profile, account?.name ?? "");
-  const suggestions = useMemo(() => suggestionsFor(profile), [profile]);
+  nameRef.current = name;
 
   return (
-    <div className={`advisor ${sidebarOpen ? "sidebar-open" : ""}`} hidden={!visible}>
-      <Sidebar
-        conversations={conversations}
-        activeId={activeId}
-        open={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-        onNew={newChat}
-        onSelect={selectConversation}
-        onDelete={deleteConversation}
-      />
-
+    <div className="advisor" hidden={!visible}>
       <div className="main">
-        <header className="topbar">
-          <div className="topbar-left">
-            {!sidebarOpen && (
-              <>
-                <button className="icon-btn" onClick={() => setSidebarOpen(true)} aria-label="Show conversations" title="Show conversations">
-                  <SidebarIcon />
-                </button>
-                <button className="icon-btn" onClick={newChat} aria-label="New chat" title="New chat (⌘⇧O)">
-                  <PlusIcon />
-                </button>
-              </>
-            )}
-            <span className="topbar-title">{active?.title ?? "Advisor"}</span>
-          </div>
-          <div className="topbar-right">
-            <button
-              className={`toggle-pill ${personalize ? "on" : ""}`}
-              onClick={() => setPersonalize((v) => !v)}
-              aria-pressed={personalize}
-              title={summary ? "Share your profile with the advisor to get tailored answers" : "Fill out your profile to personalize answers"}
-              disabled={!summary}
-            >
-              <UserIcon width={15} height={15} />
-              <span>{personalize && summary ? "Using my profile" : "Profile off"}</span>
-            </button>
-            {health === "offline" && (
-              <span className="status status-offline">
-                <span className="status-dot" />
-                Offline
-              </span>
-            )}
-          </div>
-        </header>
-
-        {active && active.messages.length > 0 ? (
-          <ChatView
-            key={active.id}
-            messages={active.messages}
-            pending={pendingId === active.id}
-            busy={busy}
-            freshId={freshId}
-            onFollowup={onFollowup}
-            onRetry={onRetry}
-          />
+        {storyMode ? (
+          <GuidedView visible={visible} studentName={name} userId={userId} onAsk={onGuidedAsk} />
         ) : (
-          <EmptyState name={name} personalized={personalize && !!summary} suggestions={suggestions} onPick={onSend} />
+          <>
+            <StoryView
+              messages={conversation?.messages ?? []}
+              pending={!!conversation && pendingFor === mentor.id}
+              busy={pending}
+              freshId={freshId}
+              visible={visible}
+              studentName={name}
+              intro={conversation?.intro ?? mentor.greeting(name)}
+              onAsk={onAsk}
+              onRetry={onRetry}
+              composer={
+                <Composer
+                  busy={pending}
+                  onSend={onSend}
+                  onStop={stop}
+                  focusKey={visible ? (conversation?.id ?? "new") : "hidden"}
+                  placeholder={`Message ${mentor.name}…`}
+                />
+              }
+            />
+          </>
         )}
-
-        <Composer busy={busy} onSend={onSend} onStop={stop} focusKey={visible ? (activeId ?? "new") : "hidden"} />
       </div>
     </div>
   );

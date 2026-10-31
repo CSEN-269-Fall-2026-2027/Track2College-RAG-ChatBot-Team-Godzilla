@@ -1,18 +1,20 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { checkHealth } from "./api";
 import { AnalysisProvider } from "./analysis";
 import { AuthProvider, useAuth } from "./auth";
-import { ProfileProvider } from "./profile";
-import { useLocation, type Route } from "./router";
+import { ProfileProvider, useProfile } from "./profile";
+import { navigate, useLocation, type Route } from "./router";
 import { AuthPage } from "./pages/AuthPage";
-import { Overview } from "./pages/Overview";
+import { Materials } from "./pages/Materials";
 import { ProfilePage } from "./pages/ProfilePage";
 import { Advisor } from "./pages/Advisor";
-import { Insights } from "./pages/Insights";
-import { Explore } from "./pages/Explore";
 import { PlanningProvider } from "./planning";
-import { NavRail } from "./components/NavRail";
+import { GameProvider } from "./game/GameProvider";
+import { AppTopbar } from "./components/AppTopbar";
 import { Logo } from "./components/icons";
+import { OnboardingPage } from "./onboarding/OnboardingPage";
+import { JourneyMap } from "./journey/JourneyMap";
+import { isOnboardingComplete } from "./onboarding/logic";
 
 export type Theme = "light" | "dark";
 export type Health = "checking" | "online" | "offline";
@@ -23,11 +25,10 @@ export interface Handoff {
 }
 
 const TITLES: Record<Route, string> = {
-  overview: "Home",
-  profile: "My profile",
-  explore: "Explore colleges",
+  materials: "Materials",
+  profile: "Profile",
   advisor: "Advisor",
-  insights: "Insights",
+  map: "UC Journey Map",
 };
 
 function useTheme() {
@@ -69,12 +70,27 @@ function LoadingScreen() {
   );
 }
 
-function Shell() {
-  const { account, loading } = useAuth();
+/** After profile load: onboarding gate or main shell. */
+function GatedApp({
+  userId,
+  theme,
+  toggleTheme,
+  health,
+  setHealth,
+}: {
+  userId: string;
+  theme: Theme;
+  toggleTheme: () => void;
+  health: Health;
+  setHealth: (h: Health) => void;
+}) {
+  const { profile } = useProfile();
   const { route, param } = useLocation();
-  const [theme, toggleTheme] = useTheme();
-  const [health, setHealth] = useHealth();
   const [handoff, setHandoff] = useState<Handoff | null>(null);
+  const complete = isOnboardingComplete(profile);
+  // Where the map's Back button returns to.
+  const lastRoute = useRef<Route>("advisor");
+  if (route !== "map") lastRoute.current = route;
 
   const askAdvisor = useCallback((text: string) => {
     setHandoff({ id: crypto.randomUUID(), text });
@@ -82,8 +98,39 @@ function Shell() {
   }, []);
 
   useEffect(() => {
+    if (!complete) return;
     if (route !== "advisor") document.title = `${TITLES[route]} · Track2College`;
-  }, [route]);
+  }, [route, complete]);
+
+  if (!complete) {
+    return (
+      <OnboardingPage
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        onFinished={() => {
+          window.location.hash = "/advisor";
+        }}
+      />
+    );
+  }
+
+  return (
+    <div className="shell shell-immersive">
+      <main className="page">
+        <AppTopbar route={route} health={health} theme={theme} onToggleTheme={toggleTheme} />
+        {route === "map" && <JourneyMap userId={userId} onBack={() => navigate(lastRoute.current)} />}
+        {route === "materials" && <Materials tab={param} onAsk={askAdvisor} />}
+        {route === "profile" && <ProfilePage section={param} onAsk={askAdvisor} />}
+        <Advisor userId={userId} visible={route === "advisor"} onHealth={setHealth} handoff={handoff} />
+      </main>
+    </div>
+  );
+}
+
+function Shell() {
+  const { account, loading } = useAuth();
+  const [theme, toggleTheme] = useTheme();
+  const [health, setHealth] = useHealth();
 
   if (loading) return <LoadingScreen />;
   if (!account) return <AuthPage theme={theme} onToggleTheme={toggleTheme} />;
@@ -92,16 +139,9 @@ function Shell() {
     <ProfileProvider key={account.id} userId={account.id} name={account.name} fallback={<LoadingScreen />}>
       <AnalysisProvider userId={account.id}>
         <PlanningProvider userId={account.id}>
-          <div className="shell">
-            <NavRail route={route} health={health} theme={theme} onToggleTheme={toggleTheme} />
-            <main className="page">
-              {route === "overview" && <Overview onAsk={askAdvisor} />}
-              {route === "profile" && <ProfilePage section={param} onAsk={askAdvisor} />}
-              {route === "explore" && <Explore onAsk={askAdvisor} />}
-              {route === "insights" && <Insights tab={param} onAsk={askAdvisor} />}
-              <Advisor userId={account.id} visible={route === "advisor"} health={health} onHealth={setHealth} handoff={handoff} />
-            </main>
-          </div>
+          <GameProvider userId={account.id}>
+            <GatedApp userId={account.id} theme={theme} toggleTheme={toggleTheme} health={health} setHealth={setHealth} />
+          </GameProvider>
         </PlanningProvider>
       </AnalysisProvider>
     </ProfileProvider>

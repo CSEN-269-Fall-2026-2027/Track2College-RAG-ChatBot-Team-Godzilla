@@ -1,4 +1,4 @@
-import { useId, type SVGProps } from "react";
+import type { SVGProps } from "react";
 
 type IconProps = SVGProps<SVGSVGElement>;
 
@@ -129,6 +129,28 @@ export const LogoutIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const MailIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3.5" y="5.5" width="17" height="13" rx="2" />
+    <path d="M4 7.5l8 6 8-6" />
+  </Icon>
+);
+
+export const LockIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="5.5" y="11" width="13" height="9.5" rx="2" />
+    <path d="M8.5 11V8.5a3.5 3.5 0 0 1 7 0V11" />
+  </Icon>
+);
+
+export const EyeIcon = ({ crossed, ...p }: IconProps & { crossed?: boolean }) => (
+  <Icon {...p}>
+    <path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z" />
+    <circle cx="12" cy="12" r="2.5" />
+    {crossed && <path d="M4 4l16 16" />}
+  </Icon>
+);
+
 export const CalendarIcon = (p: IconProps) => (
   <Icon {...p}>
     <rect x="4" y="5" width="16" height="15" rx="2.5" />
@@ -188,17 +210,48 @@ export const BookIcon = (p: IconProps) => (
 );
 
 export function Logo({ size = 28 }: { size?: number }) {
-  const gradientId = useId();
-  return (
-    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" className="logo">
-      <defs>
-        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#7c7cf0" />
-          <stop offset="1" stopColor="#4646c4" />
-        </linearGradient>
-      </defs>
-      <rect width="32" height="32" rx="9" fill={`url(#${gradientId})`} />
-      <path d="M16 7l10 5-10 5-10-5 10-5zm-6 8.2V20c0 1.8 2.7 3.5 6 3.5s6-1.7 6-3.5v-4.8l-6 3-6-3z" fill="#fff" />
-    </svg>
-  );
+  return <img src="/logo.png" width={size} height={size} alt="" aria-hidden="true" className="logo" draggable={false} />;
 }
+
+export const VolumeIcon = ({ muted, ...p }: IconProps & { muted?: boolean }) => (
+  <Icon {...p}>
+    <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+    {muted ? <path d="M16 9.5l5 5M21 9.5l-5 5" /> : <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" />}
+  </Icon>
+);
+
+export const ReadAloudIcon = ({ off, ...p }: IconProps & { off?: boolean }) => (
+  <Icon {...p}>
+    <path d="M14 12a6 6 0 0 1-8.7 5.4L2.5 18l.7-2.9A6 6 0 1 1 14 12z" />
+    <path d="M17.5 8.5a5 5 0 0 1 0 7M20 6a8.5 8.5 0 0 1 0 12" />
+    {off && <path d="M3 3l18 18" />}
+  </Icon>
+);
+
+export const FlagIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M5 21V4M5 4h11l-2 4 2 4H5" />
+  </Icon>
+);
+
+export const UsersIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="9" cy="8.5" r="3.5" />
+    <path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 5.2a3.5 3.5 0 0 1 0 6.6M18 14.5a6.5 6.5 0 0 1 3.5 5.5" />
+  </Icon>
+);
+
+/** Tiny pixel-art folded map (crisp 12×12 grid) for the header Map button. */
+export const PixelMapIcon = ({ size = 18 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 12 12" shapeRendering="crispEdges" aria-hidden="true" className="pixel-map-icon">
+    <rect x="0" y="2" width="4" height="9" fill="#e9dcb8" />
+    <rect x="4" y="1" width="4" height="9" fill="#d6c494" />
+    <rect x="8" y="2" width="4" height="9" fill="#e9dcb8" />
+    <rect x="1" y="4" width="2" height="1" fill="#6f8f5a" />
+    <rect x="2" y="7" width="3" height="1" fill="#c9a23f" />
+    <rect x="5" y="5" width="1" height="3" fill="#c9a23f" />
+    <rect x="6" y="4" width="3" height="1" fill="#c9a23f" />
+    <rect x="9" y="5" width="2" height="2" fill="#4f6280" />
+    <rect x="9" y="8" width="1" height="1" fill="#b5523b" />
+  </svg>
+);

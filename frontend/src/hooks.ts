@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const prefersReducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -45,4 +45,48 @@ export function useElapsed(active: boolean) {
   }, [active]);
 
   return seconds;
+}
+
+/**
+ * Visual-novel style typewriter: reveals `text` at a steady speed and calls
+ * `onChar` for each revealed letter (used for voice blips). `skip()` jumps to the end.
+ */
+export function useTypewriter(text: string, enabled: boolean, onChar?: (char: string) => void, charsPerSecond = 52) {
+  const [count, setCount] = useState(() => (enabled ? 0 : text.length));
+  const onCharRef = useRef(onChar);
+  onCharRef.current = onChar;
+  const skipped = useRef(false);
+
+  useEffect(() => {
+    if (!enabled || prefersReducedMotion()) {
+      setCount(text.length);
+      return;
+    }
+    skipped.current = false;
+    setCount(0);
+    // Long pages type a little faster so nobody waits more than ~4s.
+    const speed = Math.max(charsPerSecond, text.length / 4);
+    const start = performance.now();
+    let shown = 0;
+    let frame = 0;
+    const tick = (now: number) => {
+      if (skipped.current) return;
+      const target = Math.min(text.length, Math.floor(((now - start) / 1000) * speed));
+      if (target > shown) {
+        const char = text[target - 1];
+        if (/[a-z0-9]/i.test(char)) onCharRef.current?.(char);
+        shown = target;
+        setCount(target);
+      }
+      if (target < text.length) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [text, enabled, charsPerSecond]);
+
+  const skip = useCallback(() => {
+    skipped.current = true;
+    setCount(text.length);
+  }, [text]);
+  return { visible: text.slice(0, count), done: count >= text.length, skip };
 }

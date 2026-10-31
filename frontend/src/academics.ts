@@ -1,6 +1,6 @@
 import type { AgArea, CourseLevel, TranscriptCourse } from "./types";
 
-export const AG_AREAS: { id: Exclude<AgArea, "none">; label: string; years: number }[] = [
+export const AG_AREAS: { id: Exclude<AgArea, "none" | "unknown">; label: string; years: number }[] = [
   { id: "a", label: "History / social science", years: 2 },
   { id: "b", label: "English", years: 4 },
   { id: "c", label: "Mathematics", years: 3 },
@@ -11,8 +11,9 @@ export const AG_AREAS: { id: Exclude<AgArea, "none">; label: string; years: numb
 ];
 
 export const AREA_LABEL: Record<AgArea, string> = {
-  ...(Object.fromEntries(AG_AREAS.map((a) => [a.id, a.label])) as Record<Exclude<AgArea, "none">, string>),
+  ...(Object.fromEntries(AG_AREAS.map((a) => [a.id, a.label])) as Record<Exclude<AgArea, "none" | "unknown">, string>),
   none: "Not A–G",
+  unknown: "Unknown — review later",
 };
 
 export const LEVEL_LABEL: Record<CourseLevel, string> = {
@@ -66,7 +67,13 @@ export function computeGpa(courses: TranscriptCourse[]): GpaSummary {
   let honorsUsed = 0;
   let honorsUsed10th = 0;
   const ucCourses = graded
-    .filter(({ course }) => (course.gradeLevel === "10" || course.gradeLevel === "11") && course.area !== "none")
+    .filter(
+      ({ course }) =>
+        (course.gradeLevel === "10" || course.gradeLevel === "11") &&
+        course.area !== "none" &&
+        course.area !== "unknown" &&
+        (course.status ?? "completed") !== "planned",
+    )
     .sort((a, b) => a.course.gradeLevel.localeCompare(b.course.gradeLevel));
   for (const { course, points, weight } of ucCourses) {
     for (let s = 0; s < weight; s++) {
@@ -90,7 +97,7 @@ export function computeGpa(courses: TranscriptCourse[]): GpaSummary {
 }
 
 export interface AreaProgress {
-  id: Exclude<AgArea, "none">;
+  id: Exclude<AgArea, "none" | "unknown">;
   label: string;
   required: number;
   completed: number;
@@ -100,7 +107,10 @@ export interface AreaProgress {
 export function agProgress(courses: TranscriptCourse[]): AreaProgress[] {
   const done: Record<string, number> = {};
   for (const course of courses) {
-    if (course.area !== "none" && isPassing(course)) done[course.area] = (done[course.area] ?? 0) + semestersOf(course);
+    const area = course.area;
+    if (area === "none" || area === "unknown") continue;
+    if ((course.status ?? "completed") === "planned") continue;
+    if (isPassing(course)) done[area] = (done[area] ?? 0) + semestersOf(course);
   }
   const overflow = AG_AREAS.filter((a) => a.id !== "g").reduce((sum, a) => sum + Math.max(0, (done[a.id] ?? 0) - a.years * 2), 0);
   return AG_AREAS.map((a) => ({

@@ -1,4 +1,5 @@
 import { createClient, type Session as SupabaseSession } from "@supabase/supabase-js";
+import type { GameState } from "../game/progress";
 import type { Conversation, CoursePlan, Profile, ProfileAnalysis, Transcript } from "../types";
 import { AuthError, type DataStore, type Session } from "./store";
 
@@ -11,6 +12,7 @@ const TABLES = {
   conversations: "conversations",
   transcripts: "transcripts",
   coursePlans: "course_plans",
+  game: "game_progress",
 } as const;
 const TRANSCRIPT_BUCKET = "transcripts";
 
@@ -62,6 +64,7 @@ export function createSupabaseStore(url: string, anonKey: string): DataStore {
 
   const profiles = singleton<Profile>(TABLES.profiles);
   const analyses = singleton<ProfileAnalysis>(TABLES.analyses);
+  const game = singleton<Partial<GameState>>(TABLES.game);
   const conversations = collection<Conversation>(TABLES.conversations);
   const transcripts = collection<Transcript>(TABLES.transcripts);
   const coursePlans = collection<CoursePlan>(TABLES.coursePlans);
@@ -103,6 +106,77 @@ export function createSupabaseStore(url: string, anonKey: string): DataStore {
     },
     profiles,
     analyses,
+    game,
+    async resetAllData(userId, email, password) {
+      // Re-authenticate first so a stolen session alone can't wipe everything.
+      const { error: authError } = await client.auth.signInWithPassword({ email: email.trim(), password });
+      if (authError) throw new AuthError(authError.message === "Invalid login credentials" ? "That password isn't right." : authError.message);
+
+      // Uploaded transcript files live at <userId>/<transcriptId>/<file>.
+      const bucket = client.storage.from(TRANSCRIPT_BUCKET);
+      const { data: folders } = await bucket.list(userId, { limit: 1000 });
+      const paths: string[] = [];
+      for (const entry of folders ?? []) {
+        const { data: files } = await bucket.list(`${userId}/${entry.name}`, { limit: 1000 });
+        if (files?.length) paths.push(...files.map((f) => `${userId}/${entry.name}/${f.name}`));
+        else paths.push(`${userId}/${entry.name}`);
+      }
+      if (paths.length) check(await bucket.remove(paths));
+
+      for (const table of Object.values(TABLES)) {
+        const { error } = await client.from(table).delete().eq("user_id", userId);
+        // Skip tables that haven't been migrated yet (e.g. game_progress on older projects).
+        if (error && /schema cache|does not exist|Could not find the table/i.test(error.message)) continue;
+        if (error) throw new Error(error.message);
+      }
+
+      // Seed a blank profile so the next load starts onboarding (completed: false), not a half-filled row.
+      const blank = {
+        basics: { firstName: "", lastName: "", gradeLevel: "", graduationYear: "", highSchool: "", city: "", state: "", firstGen: "" },
+        academics: {
+          gpaUnweighted: "",
+          gpaWeighted: "",
+          exams: "",
+          classRank: "",
+          apIbCourses: "",
+          sat: "",
+          act: "",
+          testPlan: "",
+          coursework: "",
+        },
+        goals: { majors: [], careers: "", whyCollege: "" },
+        activities: [],
+        awards: [],
+        colleges: [],
+        preferences: {
+          regions: "",
+          campusSize: "",
+          setting: "",
+          maxAnnualCost: "",
+          needsAid: "",
+          incomeRange: "",
+          fafsa: "",
+          essays: "",
+          recommendations: "",
+        },
+        checklistDone: {},
+        onboarding: {
+          completed: false,
+          checkpoint: 0,
+          subjects: [],
+          exploringMajors: false,
+          gpaScale: "",
+          distance: "",
+          priorities: [],
+          biggestQuestion: "",
+          helpFocus: "",
+          activityNote: "",
+          completedAt: null,
+        },
+        updatedAt: Date.now(),
+      };
+      check(await client.from(TABLES.profiles).upsert({ user_id: userId, data: blank, updated_at: new Date().toISOString() }));
+    },
     conversations,
     transcripts: {
       list: transcripts.list,

@@ -13,7 +13,7 @@ const GRADE_TITLE = { "9": "9th grade", "10": "10th grade", "11": "11th grade", 
 export function CoursePlanTab({ onAsk }: { onAsk: (text: string) => void }) {
   const { profile } = useProfile();
   const { plans, planning, planError, buildPlan, removePlan, transcripts } = usePlanning();
-  const [college, setCollege] = useState(profile.colleges[0]?.name ?? "");
+  const [college, setCollege] = useState("");
   const [major, setMajor] = useState(profile.goals.majors.find((m) => m !== "Undecided") ?? "");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const plan = plans.find((p) => p.id === selectedId) ?? plans[0];
@@ -26,21 +26,21 @@ export function CoursePlanTab({ onAsk }: { onAsk: (text: string) => void }) {
     if (created) setSelectedId(created.id);
   };
 
-  const suggestions = [...new Set([...profile.colleges.map((c) => c.name), ...COLLEGE_NAMES])];
+  const suggestions = COLLEGE_NAMES;
 
   return (
     <>
       <section className="card">
         <header className="card-head">
           <h2>Build a course plan</h2>
-          <p>Choose a target college. The plan uses that school's official requirements and the courses you've already taken.</p>
+          <p>Choose a UC campus. The plan uses that school's requirements and the courses you've already taken.</p>
         </header>
         <form className="plan-form" onSubmit={submit}>
           <div className="field">
             <label className="field-label" htmlFor="plan-college">
               Target college
             </label>
-            <input id="plan-college" value={college} onChange={(e) => setCollege(e.target.value)} list="plan-colleges" placeholder="UC Davis" required />
+            <input id="plan-college" value={college} onChange={(e) => setCollege(e.target.value)} list="plan-colleges" placeholder="UCLA" required />
             <datalist id="plan-colleges">
               {suggestions.map((name) => (
                 <option key={name} value={name} />
@@ -65,7 +65,7 @@ export function CoursePlanTab({ onAsk }: { onAsk: (text: string) => void }) {
             </>
           ) : (
             <>
-              No transcript yet. <a href={href("profile", "transcript")}>Upload one</a> so the plan accounts for what you've completed.
+              No courses yet. <a href={href("profile", "academics")}>Add academic history</a> so the plan accounts for what you've completed.
             </>
           )}
           {!profile.basics.gradeLevel && (

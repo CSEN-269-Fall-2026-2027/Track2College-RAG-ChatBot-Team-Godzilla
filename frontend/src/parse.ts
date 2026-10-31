@@ -1,8 +1,14 @@
+import type { Mood } from "./types";
+
 export interface ParsedAnswer {
   answer: string;
   sources: string[];
   followups: string[];
+  mood?: Mood;
 }
+
+const MOODS: readonly Mood[] = ["neutral", "happy", "thinking", "concerned", "excited"];
+const MOOD_LINE = /^\s*\**Mood\**\s*:\s*\**\s*([a-z]+)\**\s*$/gim;
 
 const FOLLOWUP_HEADER = /Follow-up Questions[^\n]*:/i;
 const SOURCES_HEADER = /(^|\n)\s*Sources:/i;
@@ -21,6 +27,16 @@ function splitLines(block: string, prefix: RegExp): string[] {
  */
 export function parseAssistantResponse(raw: string): ParsedAnswer {
   let text = raw.replace(/\r\n/g, "\n").trim();
+
+  // Story mode adds a "Mood: <word>" line (leading from the backend, but models may put it anywhere).
+  let mood: Mood | undefined;
+  text = text
+    .replace(MOOD_LINE, (_, word: string) => {
+      const candidate = word.toLowerCase() as Mood;
+      if (MOODS.includes(candidate)) mood = candidate;
+      return "";
+    })
+    .trim();
 
   let followups: string[] = [];
   const followupIndex = text.search(FOLLOWUP_HEADER);
@@ -42,5 +58,6 @@ export function parseAssistantResponse(raw: string): ParsedAnswer {
     answer: text.replace(/^Answer:\s*/i, "").trim(),
     sources: [...new Set(sources)],
     followups: [...new Set(followups)],
+    ...(mood ? { mood } : {}),
   };
 }
