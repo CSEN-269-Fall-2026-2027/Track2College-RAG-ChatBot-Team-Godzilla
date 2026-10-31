@@ -58,8 +58,9 @@ export function sendChat(
   sessionId: string | null,
   profileContext: string | null,
   signal?: AbortSignal,
+  persona: string | null = null,
 ): Promise<ChatResponse> {
-  return post("/chat", { query, session_id: sessionId, profile_context: profileContext || null }, signal);
+  return post("/chat", { query, session_id: sessionId, profile_context: profileContext || null, persona }, signal);
 }
 
 export function analyzeProfile(
@@ -170,6 +171,28 @@ export function generateEssay(
   signal?: AbortSignal,
 ): Promise<EssayResult> {
   return post("/essay/generate", { prompt, profile_summary: profileSummary, mode }, signal);
+}
+
+export interface PiqDraftResult {
+  id: string;
+  question: string;
+  essay: string;
+  wordCount: number;
+}
+
+/** Drafts the chosen UC PIQs (≤350 words each) from the profile and the student's follow-up answers. */
+export async function generatePiqDrafts(
+  piqs: { id: string; answers: { question: string; answer: string }[] }[],
+  profileSummary: string,
+  signal?: AbortSignal,
+  opts?: { regenerate?: boolean },
+): Promise<PiqDraftResult[]> {
+  const result = await post<{ essays: { id: string; question: string; essay: string; word_count: number }[] }>(
+    "/essay/piqs",
+    { piqs, profile_summary: profileSummary, regenerate: !!opts?.regenerate },
+    signal,
+  );
+  return result.essays.map((e) => ({ id: e.id, question: e.question, essay: e.essay, wordCount: e.word_count }));
 }
 
 export async function clearSession(sessionId: string): Promise<void> {

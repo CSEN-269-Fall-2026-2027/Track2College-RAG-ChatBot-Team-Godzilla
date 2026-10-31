@@ -3,14 +3,12 @@ import { useAuth } from "../auth";
 import { completeness, useProfile } from "../profile";
 import { href, type Route } from "../router";
 import type { Health, Theme } from "../App";
-import { ChatIcon, CompassIcon, HomeIcon, Logo, LogoutIcon, MoonIcon, SparkIcon, SunIcon, UserIcon } from "./icons";
+import { FileIcon, HomeIcon, Logo, LogoutIcon, MoonIcon, SunIcon, UserIcon } from "./icons";
 
-const ITEMS: { route: Route; label: string; Icon: typeof HomeIcon }[] = [
-  { route: "overview", label: "Home", Icon: HomeIcon },
-  { route: "profile", label: "My profile", Icon: UserIcon },
-  { route: "explore", label: "Explore", Icon: CompassIcon },
-  { route: "advisor", label: "Advisor", Icon: ChatIcon },
-  { route: "insights", label: "Insights", Icon: SparkIcon },
+const ITEMS: { route: Route; label: string; Icon: typeof FileIcon }[] = [
+  { route: "advisor", label: "Home", Icon: HomeIcon },
+  { route: "materials", label: "Materials", Icon: FileIcon },
+  { route: "profile", label: "Profile", Icon: UserIcon },
 ];
 
 interface NavRailProps {
@@ -47,7 +45,7 @@ export const NavRail = memo(function NavRail({ route, health, theme, onToggleThe
 
   return (
     <nav className="rail" aria-label="Main">
-      <a className="rail-brand" href={href("overview")}>
+      <a className="rail-brand" href={href("advisor")}>
         <Logo size={28} />
         <span>Track2College</span>
       </a>

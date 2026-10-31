@@ -1,20 +1,15 @@
 import { useState, type FormEvent } from "react";
 import { AuthError, useAuth } from "../auth";
 import type { Theme } from "../App";
-import { ChatIcon, Logo, MoonIcon, SparkIcon, SunIcon, UserIcon } from "../components/icons";
-
-const FEATURES = [
-  { Icon: UserIcon, title: "One profile, everything in one place", text: "Grades, tests, activities, and your college list." },
-  { Icon: ChatIcon, title: "An advisor that knows you", text: "Ask anything; answers are tailored to your profile and cite official sources." },
-  { Icon: SparkIcon, title: "A clear readiness plan", text: "Grade-aware checklist, essay coach, and course planning in one place." },
-];
+import { EyeIcon, LockIcon, Logo, MailIcon, MoonIcon, SunIcon, UserIcon } from "../components/icons";
 
 export function AuthPage({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => void }) {
   const { signIn, signUp, resetPassword } = useAuth();
-  const [mode, setMode] = useState<"signup" | "signin" | "reset">("signup");
+  const [mode, setMode] = useState<"signup" | "signin" | "reset">("signin");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -39,7 +34,7 @@ export function AuthPage({ theme, onToggleTheme }: { theme: Theme; onToggleTheme
       if (mode === "signup") {
         const result = await signUp(name, email, password);
         if ("confirmEmail" in result) {
-          setNotice("Check your inbox to confirm your email, then sign in.");
+          setNotice("Check your inbox to confirm your email, then log in.");
           setMode("signin");
           setSubmitting(false);
           return;
@@ -47,86 +42,91 @@ export function AuthPage({ theme, onToggleTheme }: { theme: Theme; onToggleTheme
       } else {
         await signIn(email, password);
       }
-      window.location.hash = mode === "signup" ? "/profile" : "/overview";
+      window.location.hash = mode === "signup" ? "/profile" : "/materials";
     } catch (err) {
       setError(err instanceof AuthError ? err.message : "Something went wrong. Please try again.");
       setSubmitting(false);
     }
   };
 
-  const switchMode = () => {
-    setMode((m) => (m === "signup" ? "signin" : "signup"));
-    setError(null);
-    setNotice(null);
-  };
+  const title = mode === "signup" ? "Create your account" : mode === "reset" ? "Reset your password" : "Welcome back";
+  const subtitle =
+    mode === "signup"
+      ? "Build a student profile once. Advisor answers, readiness checklist, and your college list stay in sync."
+      : mode === "reset"
+        ? "Enter your email and we’ll send a link to choose a new password."
+        : "Your path to your dream UC school.";
+
+  const cta = submitting
+    ? "One moment…"
+    : mode === "signup"
+      ? "Create account"
+      : mode === "reset"
+        ? "Send reset link"
+        : "Log in";
 
   return (
     <div className="auth">
-      <section className="auth-hero">
-        <div className="auth-brand">
-          <Logo size={32} />
-          <span>Track2College</span>
-        </div>
-        <div className="auth-pitch">
-          <h1>Your path to college, planned around you.</h1>
-          <p>Build your student profile once. Track2College uses it to answer your questions and analyze your college list.</p>
-          <ul className="auth-features">
-            {FEATURES.map(({ Icon, title, text }) => (
-              <li key={title}>
-                <span className="auth-feature-icon">
-                  <Icon width={18} height={18} />
-                </span>
-                <span>
-                  <strong>{title}</strong>
-                  <span>{text}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <p className="auth-foot">Built for first-gen and college-bound high school students.</p>
-      </section>
+      <div className="auth-sky" aria-hidden="true">
+        <span className="auth-cloud auth-cloud-a" />
+        <span className="auth-cloud auth-cloud-b" />
+      </div>
 
-      <section className="auth-panel">
-        <button className="icon-btn auth-theme" onClick={onToggleTheme} aria-label="Toggle theme" title="Toggle theme">
-          {theme === "dark" ? <SunIcon /> : <MoonIcon />}
-        </button>
+      <a className="auth-brand" href="#/">
+        <Logo size={28} />
+        <span>Track2College</span>
+      </a>
 
-        <form className="auth-form" onSubmit={submit} noValidate={false}>
-          <div className="auth-mobile-brand">
-            <Logo size={40} />
-          </div>
-          <h2>{mode === "signup" ? "Create your account" : mode === "reset" ? "Reset password" : "Welcome back"}</h2>
-          <p className="auth-sub">
-            {mode === "signup"
-              ? "It takes a minute, and you can fill in your profile at your own pace."
-              : mode === "reset"
-                ? "We'll email you a link to choose a new password."
-                : "Sign in to pick up where you left off."}
-          </p>
+      <button className="icon-btn auth-theme" onClick={onToggleTheme} aria-label="Toggle theme" title="Toggle theme">
+        {theme === "dark" ? <SunIcon /> : <MoonIcon />}
+      </button>
 
+      <div className="auth-card">
+        <h1>{title}</h1>
+        <p className="auth-sub">{subtitle}</p>
+
+        <form className="auth-form" onSubmit={submit}>
           {mode === "signup" && (
-            <label className="field">
-              <span className="field-label">Full name</span>
-              <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" required placeholder="Maya Rodriguez" />
+            <label className="auth-field">
+              <span className="auth-field-icon">
+                <UserIcon width={16} height={16} />
+              </span>
+              <span className="visually-hidden">Full name</span>
+              <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" required placeholder="Full name" />
             </label>
           )}
-          <label className="field">
-            <span className="field-label">Email</span>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required placeholder="you@example.com" />
+
+          <label className="auth-field">
+            <span className="auth-field-icon">
+              <MailIcon width={16} height={16} />
+            </span>
+            <span className="visually-hidden">Email</span>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required placeholder="Email" />
           </label>
+
           {mode !== "reset" && (
-            <label className="field">
-              <span className="field-label">Password</span>
+            <label className="auth-field">
+              <span className="auth-field-icon">
+                <LockIcon width={16} height={16} />
+              </span>
+              <span className="visually-hidden">Password</span>
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete={mode === "signup" ? "new-password" : "current-password"}
                 minLength={mode === "signup" ? 8 : undefined}
                 required
-                placeholder={mode === "signup" ? "At least 8 characters" : ""}
+                placeholder={mode === "signup" ? "Password (8+ characters)" : "Password"}
               />
+              <button
+                type="button"
+                className="auth-eye"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                <EyeIcon width={16} height={16} crossed={showPassword} />
+              </button>
             </label>
           )}
 
@@ -141,38 +141,77 @@ export function AuthPage({ theme, onToggleTheme }: { theme: Theme; onToggleTheme
             </p>
           )}
 
-          <button className="btn-primary btn-block" disabled={submitting}>
-            {submitting ? "One moment…" : mode === "signup" ? "Create account" : mode === "reset" ? "Send reset link" : "Sign in"}
+          <button className="auth-cta" disabled={submitting}>
+            {cta}
           </button>
 
           {mode === "signin" && (
-            <p className="auth-switch">
-              <button type="button" onClick={() => { setMode("reset"); setError(null); setNotice(null); }}>
+            <div className="auth-forgot-row">
+              <button
+                type="button"
+                className="auth-forgot"
+                onClick={() => {
+                  setMode("reset");
+                  setError(null);
+                  setNotice(null);
+                }}
+              >
                 Forgot password?
               </button>
-            </p>
+            </div>
           )}
-
-          <p className="auth-switch">
-            {mode === "reset" ? (
-              <>
-                Remembered it?{" "}
-                <button type="button" onClick={() => { setMode("signin"); setError(null); setNotice(null); }}>
-                  Sign in
-                </button>
-              </>
-            ) : (
-              <>
-                {mode === "signup" ? "Already have an account?" : "New to Track2College?"}{" "}
-                <button type="button" onClick={switchMode}>
-                  {mode === "signup" ? "Sign in" : "Create one"}
-                </button>
-              </>
-            )}
-          </p>
-          <p className="auth-note">Your account syncs across devices with Supabase.</p>
         </form>
-      </section>
+
+        <div className="auth-divider" role="presentation">
+          <span>or</span>
+        </div>
+
+        <p className="auth-switch">
+          {mode === "reset" ? (
+            <>
+              Remembered it?{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("signin");
+                  setError(null);
+                  setNotice(null);
+                }}
+              >
+                Log in
+              </button>
+            </>
+          ) : mode === "signup" ? (
+            <>
+              Already have an account?{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("signin");
+                  setError(null);
+                  setNotice(null);
+                }}
+              >
+                Log in
+              </button>
+            </>
+          ) : (
+            <>
+              New to Track2College?{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("signup");
+                  setError(null);
+                  setNotice(null);
+                }}
+              >
+                Create an account
+              </button>
+            </>
+          )}
+        </p>
+      </div>
     </div>
   );
 }

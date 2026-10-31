@@ -1,6 +1,36 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { PIQ_PROMPTS } from "./journey/logic";
 import { getStore } from "./data";
-import type { Profile, TargetCollege } from "./types";
+import type { Activity, ActivityCategory, Profile, TargetCollege, Transcript } from "./types";
+
+export function emptyOnboarding(): Profile["onboarding"] {
+  return {
+    completed: false,
+    checkpoint: 0,
+    subjects: [],
+    exploringMajors: false,
+    gpaScale: "",
+    distance: "",
+    priorities: [],
+    biggestQuestion: "",
+    helpFocus: "",
+    activityNote: "",
+    completedAt: null,
+  };
+}
+
+export function emptyActivity(partial: Partial<Activity> & { id: string }): Activity {
+  return {
+    id: partial.id,
+    name: partial.name ?? "",
+    role: partial.role ?? "",
+    hoursPerWeek: partial.hoursPerWeek ?? "",
+    weeksPerYear: partial.weeksPerYear ?? "",
+    years: partial.years ?? "",
+    description: partial.description ?? "",
+    category: partial.category ?? "",
+  };
+}
 
 export function emptyProfile(firstName = "", lastName = ""): Profile {
   return {
@@ -8,6 +38,7 @@ export function emptyProfile(firstName = "", lastName = ""): Profile {
     academics: {
       gpaUnweighted: "",
       gpaWeighted: "",
+      exams: "",
       classRank: "",
       apIbCourses: "",
       sat: "",
@@ -31,6 +62,7 @@ export function emptyProfile(firstName = "", lastName = ""): Profile {
       recommendations: "",
     },
     checklistDone: {},
+    onboarding: emptyOnboarding(),
     updatedAt: 0,
   };
 }
@@ -38,66 +70,92 @@ export function emptyProfile(firstName = "", lastName = ""): Profile {
 /** Merge stored data over defaults so profiles saved by older versions gain new fields. */
 function hydrate(stored: Partial<Profile> | null, fallback: Profile): Profile {
   if (!stored) return fallback;
+  const academics = { ...fallback.academics, ...stored.academics };
+  if (!("exams" in (stored.academics ?? {})) && stored.academics?.apIbCourses) {
+    // Soft-migrate: keep legacy apIbCourses; exams stay empty until the student fills them.
+    academics.exams = academics.exams ?? "";
+  }
   return {
     ...fallback,
     ...stored,
     basics: { ...fallback.basics, ...stored.basics },
-    academics: { ...fallback.academics, ...stored.academics },
+    academics,
     goals: { ...fallback.goals, ...stored.goals },
     preferences: { ...fallback.preferences, ...stored.preferences },
+    activities: (stored.activities ?? fallback.activities).map((a) => emptyActivity({ ...a, id: a.id })),
+    awards: stored.awards ?? fallback.awards,
+    colleges: stored.colleges ?? fallback.colleges,
     checklistDone: { ...fallback.checklistDone, ...stored.checklistDone },
+    onboarding: { ...fallback.onboarding, ...stored.onboarding },
+    ucJourney: stored.ucJourney ?? fallback.ucJourney,
+    piqWork: stored.piqWork ?? fallback.piqWork,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Completeness
+// Completeness — core profile setup only (About You basics)
 // ---------------------------------------------------------------------------
 
 export const PROFILE_SECTIONS = [
-  { id: "basics", title: "About you", blurb: "Grade, school, and location" },
-  { id: "academics", title: "Academics", blurb: "GPA, coursework, and testing" },
-  { id: "transcript", title: "Transcript", blurb: "Upload and review your courses" },
-  { id: "goals", title: "Interests & goals", blurb: "Majors and what you want from college" },
-  { id: "activities", title: "Activities & awards", blurb: "What you do outside class" },
-  { id: "colleges", title: "College list", blurb: "Schools, plans, and deadlines" },
-  { id: "finances", title: "Cost & preferences", blurb: "Budget, aid, and campus fit" },
+  { id: "basics", title: "About you", blurb: "Name, grade, school, and location" },
+  { id: "academics", title: "Academic history", blurb: "Courses, grades, and exams" },
+  { id: "campuses", title: "UC campuses & majors", blurb: "Campuses and intended majors" },
+  { id: "finances", title: "Cost & support", blurb: "Optional budget and aid context" },
 ] as const;
 
+/** Dedicated workspace route — not part of profile completeness. */
+export const PROFILE_WORKSPACES = [{ id: "activities", title: "Activities & awards", blurb: "UC activities list workspace" }] as const;
+
 export type SectionId = (typeof PROFILE_SECTIONS)[number]["id"];
+export type ProfileRouteId = SectionId | (typeof PROFILE_WORKSPACES)[number]["id"];
 
 const filled = (value: string) => value.trim().length > 0;
 
+export const ACTIVITY_CATEGORY_LABELS: Record<Exclude<ActivityCategory, "">, string> = {
+  award: "Award or honor",
+  "educational-prep": "Educational preparation",
+  extracurricular: "Extracurricular activity",
+  "other-coursework": "Other coursework",
+  volunteering: "Volunteering / community service",
+  work: "Work experience / paid work",
+};
+
 export function sectionChecks(p: Profile): Partial<Record<SectionId, boolean[]>> {
-  const { basics: b, academics: a, goals: g, preferences: f } = p;
+  const { basics: b } = p;
   return {
-    basics: [filled(b.firstName), b.gradeLevel !== "", filled(b.graduationYear), filled(b.highSchool), filled(b.state)],
-    academics: [
-      filled(a.gpaUnweighted) || filled(a.gpaWeighted),
-      a.testPlan !== "",
-      filled(a.sat) || filled(a.act) || a.testPlan === "test-optional",
-      filled(a.apIbCourses) || filled(a.coursework),
-    ],
-    goals: [g.majors.length > 0, filled(g.careers), filled(g.whyCollege)],
-    activities: [p.activities.length >= 1, p.activities.length >= 3, p.awards.length >= 1],
-    colleges: [
-      p.colleges.length >= 1,
-      p.colleges.length >= 4,
-      p.colleges.length > 0 && p.colleges.every((c) => c.plan !== "" && filled(c.deadline)),
-    ],
-    finances: [f.needsAid !== "", filled(f.maxAnnualCost), f.fafsa !== "", f.campusSize !== "" || f.setting !== ""],
+    basics: [filled(b.firstName), b.gradeLevel !== "" && b.gradeLevel !== "transfer", filled(b.graduationYear), filled(b.highSchool), filled(b.state)],
   };
 }
 
+/** Core profile setup only. Optional GPA, aid, activities, and campuses do not reduce this. */
 export function completeness(p: Profile) {
   const checks = sectionChecks(p);
-  const sections = Object.fromEntries(
-    PROFILE_SECTIONS.map(({ id }) => {
-      const list = checks[id];
-      return [id, list && list.length ? list.filter(Boolean).length / list.length : 0];
-    }),
-  ) as Record<SectionId, number>;
-  const all = Object.values(checks).flat();
-  return { overall: all.length ? all.filter(Boolean).length / all.length : 0, sections };
+  const basicsList = checks.basics ?? [];
+  const basics = basicsList.length ? basicsList.filter(Boolean).length / basicsList.length : 0;
+  const sections = Object.fromEntries(PROFILE_SECTIONS.map(({ id }) => [id, id === "basics" ? basics : 0])) as Record<SectionId, number>;
+  return { overall: basics, sections };
+}
+
+export type AcademicHistoryStatus = {
+  started: boolean;
+  courseCount: number;
+  hasReportedGpa: boolean;
+  hasUpload: boolean;
+  /** Honest label — never treats an upload alone as “complete.” */
+  label: string;
+};
+
+/** Separate from profile completeness; upload ≠ finished academic history. */
+export function academicHistoryStatus(p: Profile, transcripts: Transcript[] = []): AcademicHistoryStatus {
+  const courseCount = transcripts.reduce((n, t) => n + t.courses.length, 0);
+  const hasReportedGpa = filled(p.academics.gpaUnweighted) || filled(p.academics.gpaWeighted);
+  const hasUpload = transcripts.some((t) => !!t.fileName && t.fileName !== "Manual entry");
+  const started = courseCount > 0 || hasReportedGpa;
+  let label = "Not started";
+  if (started && courseCount === 0) label = "Reported GPA only — add courses when ready";
+  else if (courseCount > 0 && courseCount < 4) label = `In progress · ${courseCount} course${courseCount === 1 ? "" : "s"} saved`;
+  else if (courseCount >= 4) label = `In progress · ${courseCount} courses — review A–G and grades before applying`;
+  return { started, courseCount, hasReportedGpa, hasUpload, label };
 }
 
 // ---------------------------------------------------------------------------
@@ -133,8 +191,8 @@ export function upcomingDeadlines(p: Profile, now = Date.now()) {
 }
 
 /**
- * Compact, plain-text profile for the LLM. Only filled fields are included so
- * the prompt stays short; the backend treats it as personalization, not facts.
+ * Compact, plain-text profile for the LLM. Only filled, UC-relevant fields.
+ * Deprecated SAT/ACT/test-plan and removed preference fields are omitted.
  */
 export function profileSummary(p: Profile): string {
   const { basics: b, academics: a, goals: g, preferences: f } = p;
@@ -147,23 +205,25 @@ export function profileSummary(p: Profile): string {
   add("Grade", GRADE_LABEL[b.gradeLevel]);
   add("Graduation year", b.graduationYear);
   add("High school", [b.highSchool, b.city, b.state].filter(Boolean).join(", "));
+  if (b.state === "CA") {
+    lines.push("Note: Living in California is not the same as qualifying for California residency for tuition.");
+  }
   add("First-generation college student", b.firstGen === "yes" ? "yes" : b.firstGen === "no" ? "no" : "");
-  add("Unweighted GPA", a.gpaUnweighted);
-  add("Weighted GPA", a.gpaWeighted);
-  add("Class rank", a.classRank);
-  add("AP/IB/honors courses", a.apIbCourses);
-  add("SAT", a.sat);
-  add("ACT", a.act);
-  add("Testing plan", a.testPlan.replace("-", " "));
-  add("Notable coursework", a.coursework);
-  add("Intended majors", g.majors.join(", "));
-  add("Career interests", g.careers);
-  add("What they want from college", g.whyCollege);
+  add("Reported unweighted GPA", a.gpaUnweighted);
+  add("Reported weighted GPA", a.gpaWeighted);
+  add("AP/IB or English-proficiency exams", a.exams);
+  add("General major interests", g.majors.join(", "));
+  if (p.onboarding?.exploringMajors) lines.push("Majors: still exploring");
   if (p.activities.length) {
     lines.push(
       "Activities: " +
         p.activities
-          .map((x) => [x.name, x.role && `(${x.role})`, x.hoursPerWeek && `${x.hoursPerWeek} hrs/wk`].filter(Boolean).join(" "))
+          .map((x) => {
+            const cat = x.category ? ACTIVITY_CATEGORY_LABELS[x.category as Exclude<ActivityCategory, "">] : "";
+            return [cat && `[${cat}]`, x.name, x.role && `(${x.role})`, x.hoursPerWeek && `${x.hoursPerWeek} hrs/wk`, x.weeksPerYear && `${x.weeksPerYear} wks/yr`]
+              .filter(Boolean)
+              .join(" ");
+          })
           .join("; "),
     );
   }
@@ -172,21 +232,30 @@ export function profileSummary(p: Profile): string {
   }
   if (p.colleges.length) {
     lines.push(
-      "College list: " +
+      "UC campus list: " +
         p.colleges
-          .map((c) => [c.name, c.plan && `[${c.plan}]`, c.deadline && `due ${c.deadline}`, `status ${c.status}`].filter(Boolean).join(" "))
+          .map((c) => [c.name, c.major && `major ${c.major}`, c.deadline && `supplemental/deadline note ${c.deadline}`, `status ${c.status}`].filter(Boolean).join(" "))
           .join("; "),
     );
   }
-  add("Preferred regions", f.regions);
-  add("Campus size", f.campusSize);
-  add("Campus setting", f.setting);
-  add("Max annual cost (USD)", f.maxAnnualCost);
   add("Needs financial aid", f.needsAid);
+  add("Student annual budget (USD, not university net cost)", f.maxAnnualCost);
   add("Household income range", f.incomeRange && f.incomeRange !== "prefer-not" ? f.incomeRange : "");
-  add("FAFSA/CADAA status", f.fafsa.replace("-", " "));
-  add("Essays status", f.essays.replace("-", " "));
-  add("Recommendation letters status", f.recommendations.replace("-", " "));
+  add("FAFSA or California Dream Act status", f.fafsa.replace("-", " "));
+  const ob = p.onboarding;
+  if (ob) {
+    add("Favorite subjects", ob.subjects?.length ? ob.subjects.join(", ") : "");
+    add("Biggest college question", ob.biggestQuestion);
+    add("Wants help with first", ob.helpFocus);
+  }
+  const piqs = Object.entries(p.ucJourney?.piqs ?? {});
+  lines.push(
+    "Chosen UC Personal Insight Questions: " +
+      (piqs.length
+        ? piqs.map(([id, status]) => `${PIQ_PROMPTS.find((q) => q.id === id)?.prompt ?? id} (${status.replace("-", " ")})`).join("; ")
+        : "none chosen yet"),
+  );
+  lines.push("Context: Track2College prepares first-year UC applicants; it does not replace the official UC application.");
   return lines.join("\n");
 }
 

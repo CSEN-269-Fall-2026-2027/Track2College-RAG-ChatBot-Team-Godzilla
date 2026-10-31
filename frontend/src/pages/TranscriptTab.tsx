@@ -4,8 +4,9 @@ import { formatDate } from "../format";
 import { TRANSCRIPT_TYPES, usePlanning } from "../planning";
 import { useProfile } from "../profile";
 import { href } from "../router";
-import type { AgArea, CourseLevel, Transcript, TranscriptCourse } from "../types";
-import { BookIcon, ChatIcon, CheckIcon, FileIcon, TrashIcon, UploadIcon } from "../components/icons";
+import { newId } from "../storage";
+import type { AgArea, CourseLevel, CourseStatus, Transcript, TranscriptCourse } from "../types";
+import { BookIcon, ChatIcon, CheckIcon, FileIcon, PlusIcon, TrashIcon, UploadIcon } from "../components/icons";
 
 const GRADE_ORDER: TranscriptCourse["gradeLevel"][] = ["9", "10", "11", "12", "other"];
 const GRADE_TITLE: Record<TranscriptCourse["gradeLevel"], string> = {
@@ -75,7 +76,7 @@ function Dropzone({ compact }: { compact?: boolean }) {
         ) : (
           <>
             <strong>Drop your transcript here or click to upload</strong>
-            <span>PDF, TXT, or CSV up to 5 MB. Unofficial transcripts from your school portal work great.</span>
+            <span>PDF, TXT, CSV, or Markdown (.md) up to 5 MB. Unofficial transcripts from your school portal work great.</span>
           </>
         )}
       </button>
@@ -90,7 +91,7 @@ function Dropzone({ compact }: { compact?: boolean }) {
 }
 
 export function TranscriptTab({ onAsk }: { onAsk: (text: string) => void }) {
-  const { transcripts, updateTranscript, removeTranscript, uploadError, uploading } = usePlanning();
+  const { transcripts, updateTranscript, removeTranscript, uploadError, uploading, ensureManualTranscript } = usePlanning();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const transcript = transcripts.find((t) => t.id === selectedId) ?? transcripts[0];
 
@@ -98,9 +99,12 @@ export function TranscriptTab({ onAsk }: { onAsk: (text: string) => void }) {
     return (
       <section className="card">
         <header className="card-head">
-          <h2>Upload your transcript</h2>
-          <p>We'll pull out every course and grade, calculate your GPA and A–G progress, and point out strengths and gaps.</p>
+          <h2>Courses &amp; transcript</h2>
+          <p>Enter courses manually or optionally upload a transcript. An upload is never required for profile completion.</p>
         </header>
+        <button className="btn-dashed" style={{ marginBottom: 16 }} onClick={() => ensureManualTranscript()}>
+          Add courses manually
+        </button>
         <Dropzone />
       </section>
     );
@@ -152,19 +156,33 @@ function TranscriptView({ transcript, transcripts, onSelect, onChange, onRemove,
   const removeCourse = (id: string) => onChange({ ...transcript, courses: transcript.courses.filter((c) => c.id !== id) });
 
   const applyToProfile = () => {
-    const advanced = [...new Set(transcript.courses.filter((c) => c.level !== "regular").map((c) => c.name))];
     update((p) => ({
       ...p,
       basics: { ...p.basics, highSchool: p.basics.highSchool || transcript.school },
       academics: {
         ...p.academics,
-        gpaUnweighted: gpa.unweighted !== null ? gpa.unweighted.toFixed(2) : p.academics.gpaUnweighted,
-        gpaWeighted: gpa.weighted !== null ? gpa.weighted.toFixed(2) : p.academics.gpaWeighted,
-        apIbCourses: advanced.length ? String(advanced.length) : p.academics.apIbCourses,
-        coursework: advanced.length ? advanced.join(", ") : p.academics.coursework,
+        // Prefer school-reported GPA when present; otherwise keep prior reported values.
+        gpaUnweighted: p.academics.gpaUnweighted || transcript.reportedGpa.unweighted || p.academics.gpaUnweighted,
+        gpaWeighted: p.academics.gpaWeighted || transcript.reportedGpa.weighted || p.academics.gpaWeighted,
       },
     }));
     setApplied(true);
+  };
+
+  const addCourse = () => {
+    const course: TranscriptCourse = {
+      id: newId(),
+      name: "",
+      gradeLevel: "11",
+      term: "",
+      grade: "",
+      level: "regular",
+      area: "unknown",
+      semesters: 1,
+      status: "completed",
+      school: transcript.school || "",
+    };
+    onChange({ ...transcript, courses: [...transcript.courses, course] });
   };
 
   const missing = progress.filter((a) => a.completed < a.required);
@@ -202,14 +220,14 @@ function TranscriptView({ transcript, transcripts, onSelect, onChange, onRemove,
       </section>
 
       <div className="stat-grid">
-        <GpaStat label="Unweighted GPA" value={formatGpa(gpa.unweighted)} hint={transcript.reportedGpa.unweighted && `School reports ${transcript.reportedGpa.unweighted}`} />
-        <GpaStat label="Weighted GPA" value={formatGpa(gpa.weighted)} hint={transcript.reportedGpa.weighted && `School reports ${transcript.reportedGpa.weighted}`} />
-        <GpaStat label="Est. UC GPA" value={formatGpa(gpa.ucCapped)} hint="10th–11th grade A–G, capped honors" />
+        <GpaStat label="Calculated unweighted" value={formatGpa(gpa.unweighted)} hint={transcript.reportedGpa.unweighted && `School reports ${transcript.reportedGpa.unweighted}`} />
+        <GpaStat label="Calculated weighted" value={formatGpa(gpa.weighted)} hint={transcript.reportedGpa.weighted && `School reports ${transcript.reportedGpa.weighted}`} />
+        <GpaStat label="Estimated capped UC GPA" value={formatGpa(gpa.ucCapped)} hint="Unofficial estimate · 10th–11th A–G, capped honors — not an official UC GPA" />
         <GpaStat label="AP / IB / college courses" value={String(gpa.advancedCourses)} hint={`${gpa.gradedSemesters} graded semesters`} />
       </div>
 
       <div className="apply-bar">
-        <span>{applied ? "Your profile's academics were updated from this transcript." : "Use these numbers to fill in the Academics section of your profile."}</span>
+        <span>{applied ? "Reported GPA fields on your profile were updated from school-reported values when available." : "Copy school-reported GPA into your profile (calculated estimates stay here)."}</span>
         {applied ? (
           <a className="btn-ghost" href={href("profile", "academics")}>
             <CheckIcon width={15} height={15} /> Review profile
@@ -225,7 +243,7 @@ function TranscriptView({ transcript, transcripts, onSelect, onChange, onRemove,
         <section className="card">
           <header className="card-head">
             <h2>A–G progress</h2>
-            <p>UC / CSU subject requirements, counting C or better</p>
+            <p>UC A–G subject requirements, counting C or better</p>
           </header>
           <ul className="ag-list">
             {progress.map((area) => {
@@ -283,7 +301,7 @@ function TranscriptView({ transcript, transcripts, onSelect, onChange, onRemove,
               </div>
             )}
           </div>
-          <a className="card-link plan-link" href={href("insights", "plan")}>
+          <a className="card-link plan-link" href={href("materials", "plan")}>
             <BookIcon width={14} height={14} /> Build a course plan from this transcript
           </a>
           <a className="card-link plan-link" href={href("profile", "academics")}>
@@ -296,40 +314,78 @@ function TranscriptView({ transcript, transcripts, onSelect, onChange, onRemove,
         <header className="card-head row-head">
           <div>
             <h2>Courses</h2>
-            <p>Check that the AI read everything correctly; fix the level or A–G area if needed.</p>
+            <p>School, year, term, level, grade, and status. Leave A–G as unknown if you’re unsure — we won’t invent a classification.</p>
           </div>
+          <button className="btn-ghost" onClick={addCourse}>
+            <PlusIcon width={15} height={15} /> Add course
+          </button>
         </header>
+        {transcript.courses.length === 0 && <p className="list-empty">No courses yet — add them manually or upload a transcript above.</p>}
         {byGrade.map(({ grade, courses }) => (
           <div key={grade} className="course-year">
             <h3>{GRADE_TITLE[grade]}</h3>
             <div className="course-table">
               {courses.map((course) => (
-                <div key={course.id} className="course-row">
-                  <span className="course-name">
-                    {course.name}
-                    {course.term && <span className="course-term">{course.term}</span>}
-                  </span>
+                <div key={course.id} className="course-row" style={{ flexWrap: "wrap" }}>
+                  <input
+                    className="course-name"
+                    value={course.name}
+                    onChange={(e) => patchCourse(course.id, { name: e.target.value })}
+                    aria-label="Course name"
+                    placeholder="Course name"
+                  />
+                  <input
+                    className="course-term"
+                    value={course.school ?? ""}
+                    onChange={(e) => patchCourse(course.id, { school: e.target.value })}
+                    aria-label={`School for ${course.name || "course"}`}
+                    placeholder="School"
+                  />
+                  <input
+                    className="course-term"
+                    value={course.term}
+                    onChange={(e) => patchCourse(course.id, { term: e.target.value })}
+                    aria-label={`Term for ${course.name || "course"}`}
+                    placeholder="Term"
+                  />
                   <input
                     className="course-grade"
                     value={course.grade}
                     onChange={(e) => patchCourse(course.id, { grade: e.target.value })}
-                    aria-label={`Grade for ${course.name}`}
+                    aria-label={`Grade for ${course.name || "course"}`}
+                    placeholder="Grade"
                   />
-                  <select value={course.level} onChange={(e) => patchCourse(course.id, { level: e.target.value as CourseLevel })} aria-label={`Level for ${course.name}`}>
+                  <select value={course.gradeLevel} onChange={(e) => patchCourse(course.id, { gradeLevel: e.target.value as TranscriptCourse["gradeLevel"] })} aria-label="Grade level">
+                    {GRADE_ORDER.map((g) => (
+                      <option key={g} value={g}>
+                        {GRADE_TITLE[g]}
+                      </option>
+                    ))}
+                  </select>
+                  <select value={course.level} onChange={(e) => patchCourse(course.id, { level: e.target.value as CourseLevel })} aria-label={`Level for ${course.name || "course"}`}>
                     {(Object.keys(LEVEL_LABEL) as CourseLevel[]).map((l) => (
                       <option key={l} value={l}>
                         {LEVEL_LABEL[l]}
                       </option>
                     ))}
                   </select>
-                  <select value={course.area} onChange={(e) => patchCourse(course.id, { area: e.target.value as AgArea })} aria-label={`A–G area for ${course.name}`}>
-                    {[...AG_AREAS.map((a) => a.id), "none" as const].map((a) => (
+                  <select
+                    value={course.status ?? "completed"}
+                    onChange={(e) => patchCourse(course.id, { status: e.target.value as CourseStatus })}
+                    aria-label={`Status for ${course.name || "course"}`}
+                  >
+                    <option value="completed">Completed</option>
+                    <option value="in-progress">In progress</option>
+                    <option value="planned">Planned</option>
+                  </select>
+                  <select value={course.area} onChange={(e) => patchCourse(course.id, { area: e.target.value as AgArea })} aria-label={`A–G area for ${course.name || "course"}`}>
+                    {(["unknown", ...AG_AREAS.map((a) => a.id), "none"] as AgArea[]).map((a) => (
                       <option key={a} value={a}>
-                        {a === "none" ? AREA_LABEL.none : `${a.toUpperCase()} · ${AREA_LABEL[a]}`}
+                        {a === "unknown" || a === "none" ? AREA_LABEL[a] : `${a.toUpperCase()} · ${AREA_LABEL[a]}`}
                       </option>
                     ))}
                   </select>
-                  <button className="icon-btn" onClick={() => removeCourse(course.id)} aria-label={`Remove ${course.name}`}>
+                  <button className="icon-btn" onClick={() => removeCourse(course.id)} aria-label={`Remove ${course.name || "course"}`}>
                     <TrashIcon width={15} height={15} />
                   </button>
                 </div>

@@ -1,68 +1,56 @@
-import { useState } from "react";
-import { KNOWN_COLLEGES, MAJOR_SUGGESTIONS } from "../constants";
+import { useMemo, useState } from "react";
+import { COLLEGES } from "../colleges";
+import { MAJOR_SUGGESTIONS } from "../constants";
+import { setCampusMajor, toggleCampus } from "../journey/logic";
 import { usePlanning } from "../planning";
-import { PROFILE_SECTIONS, completeness, useProfile, type SaveState, type SectionId } from "../profile";
+import {
+  ACTIVITY_CATEGORY_LABELS,
+  PROFILE_SECTIONS,
+  academicHistoryStatus,
+  completeness,
+  emptyActivity,
+  useProfile,
+  type ProfileRouteId,
+  type SaveState,
+  type SectionId,
+} from "../profile";
 import { href, navigate } from "../router";
 import { newId } from "../storage";
-import type { Activity, Award, Profile, TargetCollege } from "../types";
+import type { ActivityCategory, Award, Profile } from "../types";
 import { ChipsInput, ProgressRing, Segmented, SelectField, TextArea, TextField, type Option } from "../components/Form";
 import { ArrowRightIcon, CheckIcon, PlusIcon, TrashIcon } from "../components/icons";
 import { TranscriptTab } from "./TranscriptTab";
 
 type Group = "basics" | "academics" | "goals" | "preferences";
 type Setter = <G extends Group, K extends keyof Profile[G]>(group: G, key: K) => (value: Profile[G][K]) => void;
+type Update = (change: (p: Profile) => Profile) => void;
 
 const opts = <T extends string>(pairs: [T, string][]): Option<T>[] => pairs.map(([value, label]) => ({ value, label }));
 
-const GRADES = opts<Profile["basics"]["gradeLevel"]>([
+const GRADES = opts<Exclude<Profile["basics"]["gradeLevel"], "transfer" | "">>([
   ["9", "9th grade"],
   ["10", "10th grade"],
   ["11", "11th grade"],
   ["12", "12th grade"],
   ["gap", "Gap year"],
-  ["transfer", "Transfer student"],
 ]);
 const YES_NO = opts<"yes" | "no">([
   ["yes", "Yes"],
   ["no", "No"],
 ]);
-const TEST_PLANS = opts<Profile["academics"]["testPlan"]>([
-  ["submitting", "Submitting scores"],
-  ["test-optional", "Going test-optional"],
-  ["undecided", "Undecided"],
-]);
-const PROGRESS = opts<Profile["preferences"]["fafsa"]>([
-  ["not-started", "Not started"],
-  ["in-progress", "In progress"],
-  ["done", "Done"],
-]);
-const STATUSES = opts<TargetCollege["status"]>([
-  ["researching", "Researching"],
-  ["applying", "Applying"],
-  ["submitted", "Submitted"],
-  ["accepted", "Accepted"],
-  ["waitlisted", "Waitlisted"],
-  ["denied", "Denied"],
-]);
-const PLANS = opts<TargetCollege["plan"]>([
-  ["UC", "UC application"],
-  ["CSU", "Cal State Apply"],
-  ["EA", "Early Action"],
-  ["ED", "Early Decision"],
-  ["REA", "Restrictive EA"],
-  ["RD", "Regular Decision"],
-  ["Rolling", "Rolling"],
-]);
 const AWARD_LEVELS = opts<Award["level"]>([
-  ["school", "School"],
+  ["school", "School / local"],
   ["regional", "Regional"],
   ["state", "State"],
   ["national", "National"],
   ["international", "International"],
 ]);
+const ACTIVITY_CATEGORIES = opts<Exclude<ActivityCategory, "">>(
+  (Object.entries(ACTIVITY_CATEGORY_LABELS) as [Exclude<ActivityCategory, "">, string][]).map(([value, label]) => [value, label]),
+);
 
-function isSection(value: string | null): value is SectionId {
-  return PROFILE_SECTIONS.some((s) => s.id === value);
+function isRoute(value: string | null): value is ProfileRouteId {
+  return PROFILE_SECTIONS.some((s) => s.id === value) || value === "activities";
 }
 
 function SavedIndicator({ state }: { state: SaveState }) {
@@ -78,15 +66,32 @@ function SavedIndicator({ state }: { state: SaveState }) {
 
 export function ProfilePage({ section: param, onAsk }: { section: string | null; onAsk: (text: string) => void }) {
   const { profile, update, saveState } = useProfile();
-  const { transcripts } = usePlanning();
-  const section: SectionId = isSection(param) ? param : "basics";
+  const { transcripts, ensureManualTranscript } = usePlanning();
+  const section: ProfileRouteId = isRoute(param) ? param : "basics";
   const { overall, sections } = completeness(profile);
-  const index = PROFILE_SECTIONS.findIndex((s) => s.id === section);
-  const current = PROFILE_SECTIONS[index];
-  const next = PROFILE_SECTIONS[index + 1];
+  const academic = useMemo(() => academicHistoryStatus(profile, transcripts), [profile, transcripts]);
+  const navIndex = PROFILE_SECTIONS.findIndex((s) => s.id === section);
+  const current = PROFILE_SECTIONS[navIndex] ?? PROFILE_SECTIONS[0];
+  const transferUnsupported = profile.basics.gradeLevel === "transfer";
 
-  const set: Setter = (group, key) => (value) =>
-    update((p) => ({ ...p, [group]: { ...p[group], [key]: value } }));
+  const set: Setter = (group, key) => (value) => update((p) => ({ ...p, [group]: { ...p[group], [key]: value } }));
+
+  const sectionDone = (id: SectionId) => {
+    if (id === "basics") return sections.basics === 1;
+    if (id === "academics") return academic.started;
+    if (id === "campuses") {
+      const ucs = profile.colleges.filter((c) => COLLEGES.some((u) => u.name.toLowerCase() === c.name.toLowerCase()));
+      return ucs.length > 0 && ucs.every((c) => !!c.major?.trim());
+    }
+    return false;
+  };
+
+  const sectionValue = (id: SectionId) => {
+    if (id === "basics") return sections.basics;
+    if (id === "academics") return academic.started ? 0.5 : 0;
+    if (id === "campuses") return sectionDone(id) ? 1 : profile.colleges.length ? 0.5 : 0;
+    return 0;
+  };
 
   return (
     <div className="page-scroll">
@@ -94,24 +99,32 @@ export function ProfilePage({ section: param, onAsk }: { section: string | null;
         <header className="page-head">
           <div>
             <h1>My profile</h1>
-            <p>The more you share, the more specific your advisor and insights can be.</p>
+            <p>UC first-year application prep — this does not replace the official UC application.</p>
           </div>
           <div className="page-head-side">
             <SavedIndicator state={saveState} />
             <div className="overall">
               <ProgressRing value={overall} size={40} />
               <span>
-                <strong>{Math.round(overall * 100)}%</strong> complete
+                <strong>{Math.round(overall * 100)}%</strong> basics complete
               </span>
             </div>
           </div>
         </header>
 
+        {transferUnsupported && (
+          <div className="error-card" role="status">
+            <p>
+              This profile flow supports <strong>first-year</strong> UC applicants (including gap-year students). Transfer applicants use a different UC process. Your saved data is kept, but we can’t guide a transfer application here.
+            </p>
+          </div>
+        )}
+
         <div className="profile-layout">
           <nav className="section-nav" aria-label="Profile sections">
             {PROFILE_SECTIONS.map((s) => {
-              const done = s.id === "transcript" ? transcripts.length > 0 : sections[s.id] === 1;
-              const value = s.id === "transcript" ? (transcripts.length > 0 ? 1 : 0) : sections[s.id];
+              const done = sectionDone(s.id);
+              const value = sectionValue(s.id);
               return (
                 <a key={s.id} href={href("profile", s.id)} className={`section-link ${s.id === section ? "active" : ""}`}>
                   <span className={`section-dot ${done ? "done" : ""}`}>
@@ -126,21 +139,28 @@ export function ProfilePage({ section: param, onAsk }: { section: string | null;
             })}
           </nav>
 
-          {section === "transcript" ? (
+          {section === "academics" ? (
             <div className="profile-transcript" key={section}>
-              <TranscriptTab onAsk={onAsk} />
+              <AcademicsSection profile={profile} set={set} academic={academic} onAsk={onAsk} onManual={() => ensureManualTranscript()} />
               <footer className="form-foot card">
-                {next ? (
-                  <button className="btn-primary" onClick={() => navigate("profile", next.id)}>
-                    Next: {next.title} <ArrowRightIcon width={16} height={16} />
-                  </button>
-                ) : (
-                  <button className="btn-primary" onClick={() => navigate("insights")}>
-                    See my insights <ArrowRightIcon width={16} height={16} />
-                  </button>
-                )}
+                <button className="btn-primary" onClick={() => navigate("profile", "campuses")}>
+                  Next: UC campuses &amp; majors <ArrowRightIcon width={16} height={16} />
+                </button>
               </footer>
             </div>
+          ) : section === "activities" ? (
+            <section className="card form-card" key={section}>
+              <header className="card-head">
+                <h2>Activities &amp; awards</h2>
+                <p>UC lets you list up to 20 entries across six categories. Quality matters more than filling every slot — awards and activities are optional.</p>
+              </header>
+              <ActivitiesWorkspace profile={profile} update={update} />
+              <footer className="form-foot">
+                <button className="btn-primary" onClick={() => navigate("map")}>
+                  Back to Journey Map <ArrowRightIcon width={16} height={16} />
+                </button>
+              </footer>
+            </section>
           ) : (
             <section className="card form-card" key={section}>
               <header className="card-head">
@@ -149,20 +169,21 @@ export function ProfilePage({ section: param, onAsk }: { section: string | null;
               </header>
 
               {section === "basics" && <BasicsForm profile={profile} set={set} />}
-              {section === "academics" && <AcademicsForm profile={profile} set={set} />}
-              {section === "goals" && <GoalsForm profile={profile} set={set} />}
-              {section === "activities" && <ActivitiesForm profile={profile} update={update} />}
-              {section === "colleges" && <CollegesForm profile={profile} update={update} />}
+              {section === "campuses" && <CampusesForm profile={profile} set={set} update={update} />}
               {section === "finances" && <FinancesForm profile={profile} set={set} />}
 
               <footer className="form-foot">
-                {next ? (
-                  <button className="btn-primary" onClick={() => navigate("profile", next.id)}>
-                    Next: {next.title} <ArrowRightIcon width={16} height={16} />
+                {section === "basics" ? (
+                  <button className="btn-primary" onClick={() => navigate("profile", "academics")}>
+                    Next: Academic history <ArrowRightIcon width={16} height={16} />
+                  </button>
+                ) : section === "campuses" ? (
+                  <button className="btn-primary" onClick={() => navigate("advisor")}>
+                    Go to Advisor <ArrowRightIcon width={16} height={16} />
                   </button>
                 ) : (
-                  <button className="btn-primary" onClick={() => navigate("insights")}>
-                    See my insights <ArrowRightIcon width={16} height={16} />
+                  <button className="btn-primary" onClick={() => navigate("advisor")}>
+                    Go to Advisor <ArrowRightIcon width={16} height={16} />
                   </button>
                 )}
               </footer>
@@ -184,7 +205,7 @@ function BasicsForm({ profile: { basics: b }, set }: FormProps) {
     <div className="form-grid">
       <TextField label="First name" value={b.firstName} onChange={set("basics", "firstName")} autoComplete="given-name" />
       <TextField label="Last name" value={b.lastName} onChange={set("basics", "lastName")} autoComplete="family-name" />
-      <SelectField label="Current grade" value={b.gradeLevel} options={GRADES} onChange={set("basics", "gradeLevel")} />
+      <SelectField label="Current grade" value={b.gradeLevel === "transfer" ? "" : b.gradeLevel} options={GRADES} onChange={set("basics", "gradeLevel")} />
       <TextField
         label="High school graduation year"
         value={b.graduationYear}
@@ -195,7 +216,7 @@ function BasicsForm({ profile: { basics: b }, set }: FormProps) {
       />
       <TextField label="High school" value={b.highSchool} onChange={set("basics", "highSchool")} wide placeholder="Lincoln High School" />
       <TextField label="City" value={b.city} onChange={set("basics", "city")} autoComplete="address-level2" />
-      <TextField label="State" value={b.state} onChange={set("basics", "state")} autoComplete="address-level1" placeholder="CA" />
+      <TextField label="State" value={b.state} onChange={set("basics", "state")} autoComplete="address-level1" placeholder="CA" hint="Where you go to school — not a California residency determination." />
       <Segmented
         label="Will you be the first in your family to attend college?"
         value={b.firstGen}
@@ -203,66 +224,185 @@ function BasicsForm({ profile: { basics: b }, set }: FormProps) {
         onChange={set("basics", "firstGen")}
         wide
       />
+      <p className="field-wide muted small">
+        First-generation status is optional. Sharing it helps advising and support context; it does not decide aid or admissions on its own.
+      </p>
     </div>
   );
 }
 
-function AcademicsForm({ profile: { academics: a }, set }: FormProps) {
+function AcademicsSection({
+  profile,
+  set,
+  academic,
+  onAsk,
+  onManual,
+}: FormProps & { academic: ReturnType<typeof academicHistoryStatus>; onAsk: (text: string) => void; onManual: () => void }) {
+  const { academics: a } = profile;
   return (
-    <div className="form-grid">
-      <a className="apply-bar field-wide transcript-shortcut" href={href("profile", "transcript")}>
-        <span>
-          <strong>Have your transcript?</strong> Upload it to calculate your GPA and fill this in automatically.
-        </span>
-        <ArrowRightIcon width={16} height={16} />
-      </a>
-      <TextField label="Unweighted GPA" value={a.gpaUnweighted} onChange={set("academics", "gpaUnweighted")} inputMode="decimal" placeholder="3.70" />
-      <TextField label="Weighted GPA" value={a.gpaWeighted} onChange={set("academics", "gpaWeighted")} inputMode="decimal" placeholder="4.10" />
-      <TextField label="Class rank" value={a.classRank} onChange={set("academics", "classRank")} placeholder="Top 10% or 25 / 410" hint="Optional" />
-      <TextField
-        label="AP / IB / honors courses"
-        value={a.apIbCourses}
-        onChange={set("academics", "apIbCourses")}
-        inputMode="numeric"
-        placeholder="6"
-        hint="Total taken or planned"
-      />
-      <SelectField label="Testing plan" value={a.testPlan} options={TEST_PLANS} onChange={set("academics", "testPlan")} hint="UCs and CSUs are test-blind" />
-      <div className="field-pair">
-        <TextField label="SAT" value={a.sat} onChange={set("academics", "sat")} inputMode="numeric" placeholder="1350" />
-        <TextField label="ACT" value={a.act} onChange={set("academics", "act")} inputMode="numeric" placeholder="29" />
+    <>
+      <section className="card form-card">
+        <header className="card-head">
+          <h2>Academic history</h2>
+          <p>Enter courses manually or optionally import a transcript. An upload is never required to complete your profile.</p>
+        </header>
+        <p className="jm-note" role="status">
+          Preparation status: <strong>{academic.label}</strong>
+          {academic.hasUpload ? " · transcript on file" : ""}
+        </p>
+        <div className="form-grid">
+          <TextField
+            label="Reported unweighted GPA"
+            value={a.gpaUnweighted}
+            onChange={set("academics", "gpaUnweighted")}
+            inputMode="decimal"
+            placeholder="3.70"
+            hint="Optional · from your school — not a calculated UC GPA"
+          />
+          <TextField
+            label="Reported weighted GPA"
+            value={a.gpaWeighted}
+            onChange={set("academics", "gpaWeighted")}
+            inputMode="decimal"
+            placeholder="4.10"
+            hint="Optional · school-reported weighted GPA"
+          />
+          <TextArea
+            label="AP, IB, or English-proficiency exams"
+            value={a.exams}
+            onChange={set("academics", "exams")}
+            rows={3}
+            placeholder="e.g. AP Calculus BC 4; IB History HL; TOEFL if applicable…"
+            hint="Optional · exams are separate from courses. Include only what applies to you."
+          />
+        </div>
+        <div className="form-grid" style={{ marginTop: 12 }}>
+          <button type="button" className="btn-dashed field-wide" onClick={onManual}>
+            <PlusIcon width={16} height={16} /> Add or edit courses manually
+          </button>
+        </div>
+      </section>
+      <TranscriptTab onAsk={onAsk} />
+    </>
+  );
+}
+
+function CampusesForm({ profile, set, update }: FormProps & { update: Update }) {
+  const ucs = profile.colleges.filter((c) => COLLEGES.some((u) => u.name.toLowerCase() === c.name.toLowerCase()));
+  return (
+    <>
+      <p className="jm-note">Same campus list as the Journey Map. One UC application covers all nine campuses; each needs an intended major.</p>
+      <ul className="jm-campuses" style={{ listStyle: "none", padding: 0, margin: "0 0 1.25rem" }}>
+        {COLLEGES.map((college) => {
+          const saved = profile.colleges.find((c) => c.name.toLowerCase() === college.name.toLowerCase());
+          return (
+            <li key={college.name} className={saved ? "on" : ""} style={{ display: "grid", gap: 8, marginBottom: 10 }}>
+              <label className="jm-campus-toggle">
+                <input type="checkbox" checked={!!saved} onChange={() => update((p) => toggleCampus(p, college.name, newId))} />
+                <span>
+                  {college.name} <small>{college.city}</small>
+                </span>
+              </label>
+              {saved && (
+                <>
+                  <TextField
+                    label={`Intended major at ${college.name}`}
+                    value={saved.major ?? ""}
+                    onChange={(major) => update((p) => setCampusMajor(p, college.name, major))}
+                    placeholder="e.g. Biology, Undeclared"
+                  />
+                  <TextField
+                    label="Campus notes / supplemental deadlines"
+                    value={saved.deadline}
+                    onChange={(deadline) =>
+                      update((p) => ({
+                        ...p,
+                        colleges: p.colleges.map((c) => (c.name.toLowerCase() === college.name.toLowerCase() ? { ...c, deadline } : c)),
+                      }))
+                    }
+                    placeholder="Optional portfolio, audition, or campus deadline note"
+                    hint="UC uses one application process — not ED/EA/RD."
+                  />
+                  <TextArea
+                    label="Notes"
+                    value={saved.notes}
+                    onChange={(notes) =>
+                      update((p) => ({
+                        ...p,
+                        colleges: p.colleges.map((c) => (c.name.toLowerCase() === college.name.toLowerCase() ? { ...c, notes } : c)),
+                      }))
+                    }
+                    rows={2}
+                    placeholder="Impacted major research, visit notes…"
+                  />
+                </>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      <h3 className="form-subhead">General major interests</h3>
+      <div className="form-grid">
+        <ChipsInput
+          label="Majors you're considering (optional advising)"
+          values={profile.goals.majors}
+          onChange={set("goals", "majors")}
+          suggestions={MAJOR_SUGGESTIONS}
+          placeholder="Add a major"
+        />
+        <Segmented
+          label="Still exploring majors?"
+          value={profile.onboarding.exploringMajors ? "yes" : profile.goals.majors.length ? "no" : ""}
+          options={YES_NO}
+          onChange={(v) =>
+            update((p) => ({
+              ...p,
+              onboarding: { ...p.onboarding, exploringMajors: v === "yes" },
+              goals: v === "yes" ? { ...p.goals, majors: p.goals.majors.length ? p.goals.majors : ["Undeclared"] } : p.goals,
+            }))
+          }
+          wide
+        />
       </div>
-      <TextArea
-        label="Coursework highlights"
-        value={a.coursework}
-        onChange={set("academics", "coursework")}
-        placeholder="AP Calculus BC, AP Biology, dual enrollment Intro to Programming…"
-        hint="Include A–G progress if you know it."
-      />
-    </div>
-  );
-}
 
-function GoalsForm({ profile: { goals: g }, set }: FormProps) {
-  return (
-    <div className="form-grid">
-      <ChipsInput label="Majors you're considering" values={g.majors} onChange={set("goals", "majors")} suggestions={MAJOR_SUGGESTIONS} placeholder="Add a major" />
-      <TextField label="Career interests" value={g.careers} onChange={set("goals", "careers")} wide placeholder="Software engineering, healthcare, teaching…" />
-      <TextArea
-        label="What do you want out of college?"
-        value={g.whyCollege}
-        onChange={set("goals", "whyCollege")}
-        rows={4}
-        placeholder="Close to home, strong research opportunities, a big campus with lots of clubs…"
-      />
-    </div>
+      <h3 className="form-subhead">Activities &amp; awards</h3>
+      <div className="apply-bar field-wide">
+        <span>
+          {ucs.length === 0 && profile.activities.length === 0 && profile.awards.length === 0
+            ? "Activities live on the Journey Map checkpoint — no quota required."
+            : `${profile.activities.length} activit${profile.activities.length === 1 ? "y" : "ies"}${profile.awards.length ? ` · ${profile.awards.length} award${profile.awards.length === 1 ? "" : "s"}` : ""}`}
+        </span>
+        <a className="btn-ghost" href={href("profile", "activities")}>
+          Edit activities <ArrowRightIcon width={16} height={16} />
+        </a>
+      </div>
+      {(profile.activities.length > 0 || profile.awards.length > 0) && (
+        <ul className="jm-mini-list">
+          {profile.activities.slice(0, 5).map((a) => (
+            <li key={a.id}>
+              <span>{a.name || "Untitled"}</span>
+              <span className="jm-ok">{a.category ? ACTIVITY_CATEGORY_LABELS[a.category as Exclude<ActivityCategory, "">] : "Uncategorized"}</span>
+            </li>
+          ))}
+          {profile.awards.slice(0, 3).map((a) => (
+            <li key={a.id}>
+              <span>{a.title}</span>
+              <span className="jm-ok">Award</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }
 
 function FinancesForm({ profile: { preferences: f }, set }: FormProps) {
   return (
     <>
-      <h3 className="form-subhead">Paying for college</h3>
+      <p className="jm-note">
+        Optional. Your budget is what your family can plan to pay — not a university’s actual net cost. Income answers never declare exact aid or fee-waiver eligibility.
+      </p>
       <div className="form-grid">
         <Segmented
           label="Will you need financial aid?"
@@ -278,7 +418,7 @@ function FinancesForm({ profile: { preferences: f }, set }: FormProps) {
           label="Household income"
           value={f.incomeRange}
           onChange={set("preferences", "incomeRange")}
-          hint="Used only to estimate aid eligibility"
+          hint="Optional · prefer not to say is fine"
           options={opts<Profile["preferences"]["incomeRange"]>([
             ["under-30k", "Under $30k"],
             ["30-60k", "$30k – $60k"],
@@ -289,55 +429,30 @@ function FinancesForm({ profile: { preferences: f }, set }: FormProps) {
           ])}
         />
         <TextField
-          label="Max yearly cost your family can pay"
+          label="Annual budget you can plan for"
           value={f.maxAnnualCost}
           onChange={set("preferences", "maxAnnualCost")}
           inputMode="numeric"
           placeholder="15000"
-          hint="In USD, after aid"
-        />
-        <SelectField label="FAFSA / CADAA" value={f.fafsa} options={PROGRESS} onChange={set("preferences", "fafsa")} />
-      </div>
-
-      <h3 className="form-subhead">Application progress</h3>
-      <div className="form-grid">
-        <Segmented label="Personal essays" value={f.essays} options={PROGRESS} onChange={set("preferences", "essays")} />
-        <Segmented label="Recommendation letters" value={f.recommendations} options={PROGRESS} onChange={set("preferences", "recommendations")} />
-      </div>
-
-      <h3 className="form-subhead">Campus preferences</h3>
-      <div className="form-grid">
-        <SelectField
-          label="Campus size"
-          value={f.campusSize}
-          onChange={set("preferences", "campusSize")}
-          options={opts<Profile["preferences"]["campusSize"]>([
-            ["small", "Small (< 5k)"],
-            ["medium", "Medium (5k – 15k)"],
-            ["large", "Large (15k+)"],
-            ["any", "No preference"],
-          ])}
+          hint="USD · your planning number, not a campus net-cost quote"
         />
         <SelectField
-          label="Setting"
-          value={f.setting}
-          onChange={set("preferences", "setting")}
-          options={opts<Profile["preferences"]["setting"]>([
-            ["urban", "Urban"],
-            ["suburban", "Suburban"],
-            ["rural", "Rural"],
-            ["any", "No preference"],
+          label="FAFSA or California Dream Act"
+          value={f.fafsa}
+          onChange={set("preferences", "fafsa")}
+          hint="Not every student files FAFSA — use CADAA when that fits your situation. Progress belongs on the journey checklist too."
+          options={opts<Profile["preferences"]["fafsa"]>([
+            ["not-started", "Not started"],
+            ["in-progress", "In progress"],
+            ["done", "Done"],
           ])}
         />
-        <TextField label="Preferred regions" value={f.regions} onChange={set("preferences", "regions")} wide placeholder="Bay Area, Southern California, anywhere in CA…" />
       </div>
     </>
   );
 }
 
-type Update = (change: (p: Profile) => Profile) => void;
-
-function useListEditor<K extends "activities" | "awards" | "colleges">(update: Update, key: K) {
+function useListEditor<K extends "activities" | "awards">(update: Update, key: K) {
   type Item = Profile[K][number];
   return {
     add: (item: Item) => update((p) => ({ ...p, [key]: [...p[key], item] })),
@@ -347,13 +462,14 @@ function useListEditor<K extends "activities" | "awards" | "colleges">(update: U
   };
 }
 
-function ActivitiesForm({ profile, update }: { profile: Profile; update: Update }) {
+function ActivitiesWorkspace({ profile, update }: { profile: Profile; update: Update }) {
   const activities = useListEditor(update, "activities");
   const awards = useListEditor(update, "awards");
   const [awardDraft, setAwardDraft] = useState("");
 
-  const addActivity = () =>
-    activities.add({ id: newId(), name: "", role: "", hoursPerWeek: "", years: "", description: "" } satisfies Activity);
+  const addActivity = (category: ActivityCategory = "extracurricular") =>
+    activities.add(emptyActivity({ id: newId(), category }));
+
   const addAward = () => {
     if (!awardDraft.trim()) return;
     awards.add({ id: newId(), title: awardDraft.trim(), level: "" } satisfies Award);
@@ -362,11 +478,14 @@ function ActivitiesForm({ profile, update }: { profile: Profile; update: Update 
 
   return (
     <>
+      <p className="jm-note">
+        Categories: award or honor, educational preparation, extracurricular, other coursework, volunteering, and paid work. You do not need an entry in every category.
+      </p>
       <h3 className="form-subhead">
         Activities <span className="count">{profile.activities.length}</span>
       </h3>
       {profile.activities.length === 0 && (
-        <p className="list-empty">Clubs, sports, jobs, family responsibilities, volunteering, and personal projects all count.</p>
+        <p className="list-empty">Jobs, family responsibilities, clubs, volunteering, and prep programs all count. No minimum number required.</p>
       )}
       <div className="list">
         {profile.activities.map((a, i) => (
@@ -378,28 +497,39 @@ function ActivitiesForm({ profile, update }: { profile: Profile; update: Update 
               </button>
             </div>
             <div className="form-grid">
-              <TextField label="Activity" value={a.name} onChange={(name) => activities.patch(a.id, { name })} placeholder="Robotics club" autoFocus={!a.name} />
+              <SelectField
+                label="UC category"
+                value={a.category}
+                options={ACTIVITY_CATEGORIES}
+                onChange={(category) => activities.patch(a.id, { category })}
+              />
+              <TextField label="Activity / program" value={a.name} onChange={(name) => activities.patch(a.id, { name })} placeholder="Robotics club" autoFocus={!a.name} />
               <TextField label="Your role" value={a.role} onChange={(role) => activities.patch(a.id, { role })} placeholder="Team captain" />
               <TextField label="Hours / week" value={a.hoursPerWeek} onChange={(hoursPerWeek) => activities.patch(a.id, { hoursPerWeek })} inputMode="numeric" />
+              <TextField label="Weeks / year" value={a.weeksPerYear} onChange={(weeksPerYear) => activities.patch(a.id, { weeksPerYear })} inputMode="numeric" placeholder="36" />
               <TextField label="Years involved" value={a.years} onChange={(years) => activities.patch(a.id, { years })} placeholder="9, 10, 11" />
               <TextArea
                 label="What you did"
                 value={a.description}
-                onChange={(description) => activities.patch(a.id, { description })}
+                onChange={(description) => activities.patch(a.id, { description: description.slice(0, 350) })}
                 rows={2}
-                placeholder="Led a team of 12 to build…"
+                placeholder="Role, responsibilities, impact…"
+                hint={`${a.description.length}/350 characters (UC limit)`}
               />
             </div>
           </div>
         ))}
       </div>
-      <button className="btn-dashed" onClick={addActivity}>
+      <button className="btn-dashed" onClick={() => addActivity()}>
         <PlusIcon width={16} height={16} /> Add activity
       </button>
 
       <h3 className="form-subhead">
-        Honors & awards <span className="count">{profile.awards.length}</span>
+        Honors &amp; awards <span className="count">{profile.awards.length}</span>
       </h3>
+      <p className="list-empty" style={{ marginTop: 0 }}>
+        Optional. Awards can also be listed as activities in the “Award or honor” category above.
+      </p>
       <div className="award-list">
         {profile.awards.map((a) => (
           <div className="award-row" key={a.id}>
@@ -435,85 +565,6 @@ function ActivitiesForm({ profile, update }: { profile: Profile; update: Update 
           <PlusIcon width={15} height={15} /> Add
         </button>
       </form>
-    </>
-  );
-}
-
-function CollegesForm({ profile, update }: { profile: Profile; update: Update }) {
-  const colleges = useListEditor(update, "colleges");
-  const [draft, setDraft] = useState("");
-  const listId = "known-colleges";
-
-  const add = (name: string) => {
-    const clean = name.trim();
-    if (!clean || profile.colleges.some((c) => c.name.toLowerCase() === clean.toLowerCase())) return;
-    colleges.add({ id: newId(), name: clean, status: "researching", plan: "", deadline: "", notes: "" } satisfies TargetCollege);
-    setDraft("");
-  };
-
-  // Picking a datalist suggestion fires onChange with the full name; add it right away.
-  const onDraftChange = (value: string) => (KNOWN_COLLEGES.includes(value) ? add(value) : setDraft(value));
-
-  return (
-    <>
-      <form
-        className="inline-add"
-        onSubmit={(e) => {
-          e.preventDefault();
-          add(draft);
-        }}
-      >
-        <input value={draft} onChange={(e) => onDraftChange(e.target.value)} list={listId} placeholder="Search or type a college name" aria-label="Add a college" />
-        <datalist id={listId}>
-          {KNOWN_COLLEGES.filter((c) => !profile.colleges.some((x) => x.name === c)).map((c) => (
-            <option key={c} value={c} />
-          ))}
-        </datalist>
-        <button className="btn-primary" disabled={!draft.trim()}>
-          <PlusIcon width={15} height={15} /> Add
-        </button>
-      </form>
-      <p className="field-hint">Aim for a balanced list of 6–10 schools. Advisor knowledge is deepest for California public universities.</p>
-
-      {profile.colleges.length === 0 ? (
-        <p className="list-empty">No colleges yet. Add a few you're curious about; you can refine the list later.</p>
-      ) : (
-        <div className="college-table" role="table" aria-label="College list">
-          <div className="college-row college-head" role="row">
-            <span role="columnheader">College</span>
-            <span role="columnheader">Application</span>
-            <span role="columnheader">Deadline</span>
-            <span role="columnheader">Status</span>
-            <span />
-          </div>
-          {profile.colleges.map((c) => (
-            <div className="college-row" role="row" key={c.id}>
-              <span className="college-name" role="cell">
-                {c.name}
-              </span>
-              <select role="cell" value={c.plan} onChange={(e) => colleges.patch(c.id, { plan: e.target.value as TargetCollege["plan"] })} aria-label={`Application type for ${c.name}`} className={c.plan ? "" : "placeholder"}>
-                <option value="">Type…</option>
-                {PLANS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              <input role="cell" type="date" value={c.deadline} onChange={(e) => colleges.patch(c.id, { deadline: e.target.value })} aria-label={`Deadline for ${c.name}`} />
-              <select role="cell" value={c.status} onChange={(e) => colleges.patch(c.id, { status: e.target.value as TargetCollege["status"] })} aria-label={`Status for ${c.name}`} className={`status-select s-${c.status}`}>
-                {STATUSES.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              <button className="icon-btn" onClick={() => colleges.remove(c.id)} aria-label={`Remove ${c.name}`} title="Remove">
-                <TrashIcon width={16} height={16} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
     </>
   );
 }

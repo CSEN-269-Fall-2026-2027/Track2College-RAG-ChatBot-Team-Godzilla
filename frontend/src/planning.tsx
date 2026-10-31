@@ -5,7 +5,7 @@ import { profileSummary, useProfile } from "./profile";
 import { newId } from "./storage";
 import type { CoursePlan, Transcript } from "./types";
 
-export const TRANSCRIPT_TYPES = ".pdf,.txt,.csv,application/pdf,text/plain,text/csv";
+export const TRANSCRIPT_TYPES = ".pdf,.txt,.csv,.md,application/pdf,text/plain,text/csv,text/markdown";
 export const MAX_TRANSCRIPT_BYTES = 5 * 1024 * 1024;
 
 interface PlanningContextValue {
@@ -13,6 +13,8 @@ interface PlanningContextValue {
   uploading: string | null;
   uploadError: string | null;
   upload: (file: File) => Promise<Transcript | null>;
+  /** Create or focus a blank manual course list (upload never required). */
+  ensureManualTranscript: () => Promise<Transcript>;
   updateTranscript: (transcript: Transcript) => void;
   removeTranscript: (transcript: Transcript) => void;
   plans: CoursePlan[];
@@ -27,7 +29,7 @@ const PlanningContext = createContext<PlanningContextValue | null>(null);
 const errorMessage = (error: unknown, fallback: string) => (error instanceof ApiError ? error.message : fallback);
 
 export function validateTranscriptFile(file: File): string | null {
-  if (!/\.(pdf|txt|csv)$/i.test(file.name)) return "Upload a PDF, TXT, or CSV file. Photos of transcripts aren't supported yet.";
+  if (!/\.(pdf|txt|csv|md)$/i.test(file.name)) return "Upload a PDF, TXT, CSV, or Markdown (.md) file. Photos of transcripts aren't supported yet.";
   if (file.size > MAX_TRANSCRIPT_BYTES) return "That file is larger than 5 MB.";
   if (file.size === 0) return "That file is empty.";
   return null;
@@ -94,6 +96,31 @@ export function PlanningProvider({ userId, children }: { userId: string; childre
     [userId],
   );
 
+  const ensureManualTranscript = useCallback(async () => {
+    const existing = transcriptsRef.current.find((t) => t.fileName === "Manual entry") ?? transcriptsRef.current[0];
+    if (existing) return existing;
+    const draft: Transcript = {
+      id: newId(),
+      fileName: "Manual entry",
+      uploadedAt: Date.now(),
+      storagePath: null,
+      studentName: "",
+      school: profileRef.current.basics.highSchool || "",
+      reportedGpa: { unweighted: "", weighted: "" },
+      courses: [],
+      summary: "",
+      strengths: [],
+      concerns: [],
+    };
+    setTranscripts((current) => [draft, ...current]);
+    try {
+      await (await getStore()).transcripts.save(userId, draft);
+    } catch {
+      // Local list still usable; autosave retries on edit.
+    }
+    return draft;
+  }, [userId]);
+
   const updateTranscript = useCallback(
     (transcript: Transcript) => {
       setTranscripts((current) => current.map((t) => (t.id === transcript.id ? transcript : t)));
@@ -154,6 +181,7 @@ export function PlanningProvider({ userId, children }: { userId: string; childre
       uploading,
       uploadError,
       upload,
+      ensureManualTranscript,
       updateTranscript,
       removeTranscript,
       plans,
@@ -162,7 +190,20 @@ export function PlanningProvider({ userId, children }: { userId: string; childre
       buildPlan,
       removePlan,
     }),
-    [transcripts, uploading, uploadError, upload, updateTranscript, removeTranscript, plans, planning, planError, buildPlan, removePlan],
+    [
+      transcripts,
+      uploading,
+      uploadError,
+      upload,
+      ensureManualTranscript,
+      updateTranscript,
+      removeTranscript,
+      plans,
+      planning,
+      planError,
+      buildPlan,
+      removePlan,
+    ],
   );
   return <PlanningContext.Provider value={value}>{children}</PlanningContext.Provider>;
 }
