@@ -2,8 +2,7 @@
 Mentor personas for the frontend's Story mode.
 
 A persona only changes the *voice* of an answer and asks the model for a
-one-word mood used to pick the character's expression. Grounding rules in
-query.py are untouched, so facts and sources still come only from context.
+one-word mood used to pick the character's expression.
 """
 
 import re

@@ -1,12 +1,11 @@
 """
-Course planning: builds a grade 9–12 course plan for a target college,
-grounded in that college's requirement pages from the knowledge base and the
-student's completed courses.
+Course planning: grade 9–12 plan aimed at a UC campus.
+Uses Groq + A–G knowledge — no vector knowledge base.
 """
 
 import json
 
-from llm_utils import allowed_sources, collect_context, parse_json, strings, text
+from llm_utils import allowed_sources, parse_json, strings, text
 from query import complete
 
 LEVELS = {"regular", "honors", "ap", "ib", "dual-enrollment"}
@@ -17,16 +16,16 @@ SYSTEM_PROMPT = """\
 You are a high school course-planning counselor for the Track2College platform.
 
 RULES:
-1. College requirements and recommendations must come ONLY from the CONTEXT PASSAGES. If the
-   passages don't state something, don't claim it; say the student should confirm it.
-   UC/CSU A–G minimums (a 2 yrs, b 4, c 3, d 2, e 2, f 1, g 1) may be used as a baseline.
+1. Target University of California freshman admission. Use UC/CSU A–G minimums as a baseline
+   (a 2 yrs History, b 4 English, c 3 Math, d 2 Lab Science, e 2 Language, f 1 Visual/Performing Arts, g 1 College Elective).
+   Prefer universityofcalifornia.edu guidance; if unsure, say the student should confirm with a counselor.
 2. Include every COMPLETED COURSE in its grade with "status": "completed". Never change them.
-3. For the current grade and later, add "planned" courses that meet the requirements and
-   strengthen the application for the intended major. Use generic names a school would offer
+3. For the current grade and later, add "planned" courses that meet A–G and strengthen the
+   application for the intended major. Use generic names a school would offer
    ("AP Biology", "Spanish 3", "Precalculus Honors"), 5–7 academic courses per year.
 4. Don't plan courses for grades the student has already finished unless they're listed.
-5. "note" is optional and short: why the course matters for this college or major.
-6. "sources" may contain only URLs that appear in the CONTEXT PASSAGES.
+5. "note" is optional and short: why the course matters for this UC campus or major.
+6. "sources" may include well-known official URLs only (e.g. https://admission.universityofcalifornia.edu/).
 
 Respond with ONLY a JSON object, no markdown fences:
 {
@@ -70,28 +69,17 @@ def _completed_block(courses: list[dict]) -> str:
 
 
 def build_course_plan(college: str, major: str, grade_level: str, completed: list[dict], profile_summary: str) -> dict:
-    major_hint = f" {major}" if major else ""
-    queries = [
-        (f"{college} freshman admission requirements high school courses", college),
-        (f"{college} recommended high school preparation{major_hint}", college),
-        ("A-G subject requirements UC CSU high school courses", "A–G requirements"),
-    ]
-    if major:
-        queries.append((f"{major} major prerequisites high school math science preparation", major))
-    context, allowed_urls = collect_context(queries, 4)
-
     user_message = (
-        f"=== Target College ===\n{college}\n\n"
+        f"=== Target UC Campus ===\n{college}\n\n"
         f"=== Intended Major ===\n{major or '(undecided)'}\n\n"
         f"=== Current Grade ===\n{grade_level or '(unknown; assume the student is entering 9th grade)'}\n\n"
         f"=== Completed Courses ===\n{_completed_block(completed)}\n\n"
-        f"=== Student Profile ===\n{profile_summary.strip() or '(empty)'}\n\n"
-        f"=== Context Passages ===\n{context or '(no relevant passages found)'}"
+        f"=== Student Profile ===\n{profile_summary.strip() or '(empty)'}"
     )
 
     raw = complete(SYSTEM_PROMPT, user_message, max_tokens=4000)
     if not raw:
-        raise RuntimeError("The language model didn't respond. Make sure Ollama (or your RunPod endpoint) is running.")
+        raise RuntimeError("The language model didn't respond. Check GROQ_API_KEY in backend/.env.")
     try:
         data = parse_json(raw)
     except (ValueError, json.JSONDecodeError) as exc:
@@ -101,7 +89,9 @@ def build_course_plan(college: str, major: str, grade_level: str, completed: lis
     by_grade = {}
     for year in data.get("years") or []:
         if isinstance(year, dict) and text(year.get("grade")) in GRADES:
-            by_grade[text(year["grade"])] = [c for c in (_course(r) for r in year.get("courses") or [] if isinstance(r, dict)) if c]
+            by_grade[text(year["grade"])] = [
+                c for c in (_course(r) for r in year.get("courses") or [] if isinstance(r, dict)) if c
+            ]
 
     requirements = [
         {"area": text(r.get("area")), "detail": text(r.get("detail"))}
@@ -114,5 +104,5 @@ def build_course_plan(college: str, major: str, grade_level: str, completed: lis
         "requirements": requirements[:10],
         "years": [{"grade": g, "courses": by_grade.get(g, [])} for g in GRADES],
         "tips": strings(data.get("tips"), 6),
-        "sources": allowed_sources(data.get("sources"), allowed_urls, 4),
+        "sources": allowed_sources(data.get("sources"), None, 4),
     }

@@ -6,12 +6,12 @@
 
 | # | What | Command |
 | - | ---- | ------- |
-| 1 | Backend API (Groq chat) | `python api.py` in `backend` |
+| 1 | Backend API (Groq) | `python api.py` in `backend` |
 | 2 | Frontend | `npm run dev` in `frontend` |
 
 Auth and profile data use **Supabase in the cloud** — no local Supabase terminal.
 
-Ollama and Qdrant are **optional** right now. Advisor chat uses Groq directly (`INFERENCE_PROVIDER=groq`), so you do **not** need them for asking Sage questions.
+Advisor chat, transcripts, PIQs, and course plans all use Groq. You do **not** need Qdrant, Ollama, RunPod, or the old URL scrape pipeline.
 
 ---
 
@@ -63,7 +63,7 @@ npm install
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt   # or your usual install path
+pip install -r requirements.txt
 ```
 
 ---
@@ -90,19 +90,6 @@ npm run dev
 Open **http://localhost:5500** (Vite is configured for port 5500 to match API CORS).
 
 Sign up / log in, finish onboarding, then use **Advisor** to chat with Sage.
-
----
-
-## Optional terminals (full RAG later)
-
-Only if you switch away from Groq to local Ollama + Qdrant retrieval:
-
-| # | What | Command |
-| - | ---- | ------- |
-| 3 | Ollama | `ollama serve` |
-| 4 | Qdrant | `cd ~/qdrant && QDRANT__STORAGE__STORAGE_PATH=$HOME/qdrant/storage ./qdrant` |
-
-Then set `INFERENCE_PROVIDER=ollama` (or `runpod`) in `backend/.env` and restart the backend.
 
 ---
 
