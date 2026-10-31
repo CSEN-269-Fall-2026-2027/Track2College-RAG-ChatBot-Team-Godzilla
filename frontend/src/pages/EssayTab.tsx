@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { useGame } from "../game/GameProvider";
-import { journeyOf, PIQ_PROMPTS, PIQ_REQUIRED, PIQ_WORD_LIMIT, setPiqStatus } from "../journey/logic";
-import { canGeneratePiq, chosenPiqs, countWords, editDraft, nextDetailQuestion, PIQ_DETAIL_QUESTIONS, piqWorkOf } from "../journey/piqs";
+import { activitiesStatus, journeyOf, PIQ_PROMPTS, PIQ_REQUIRED, PIQ_WORD_LIMIT, setPiqStatus } from "../journey/logic";
+import { canGeneratePiq, chosenPiqs, countWords, editDraft, piqWorkOf } from "../journey/piqs";
 import { usePiqDrafts } from "../journey/usePiqDrafts";
 import { useProfile } from "../profile";
 import { navigate } from "../router";
 import { CheckIcon, CopyIcon, FileIcon, RetryIcon, SparkIcon } from "../components/icons";
 import type { Profile } from "../types";
 
-/** Materials → Essays: one card per chosen UC PIQ — answer Quill's questions, generate that essay, then revise it. */
+/** Profile → Essays: one card per chosen UC PIQ — drafted automatically from activities, then revised by the student. */
 export function EssayTab({ onAsk }: { onAsk: (text: string) => void }) {
   const { profile } = useProfile();
   const { updateSettings } = useGame();
@@ -29,8 +29,8 @@ export function EssayTab({ onAsk }: { onAsk: (text: string) => void }) {
         </div>
         <h2>Choose your Personal Insight Questions</h2>
         <p className="essays-empty-sub">
-          UC asks you to answer 4 of 8 questions, {PIQ_WORD_LIMIT} words each. Pick them with Quill in Story mode and answer a few follow-up
-          questions — each essay can be generated as soon as its questions are done.
+          UC asks you to answer 4 of 8 questions, {PIQ_WORD_LIMIT} words each. Pick them with Quill in Story mode — once your activities are
+          done, Quill drafts each essay from them automatically.
         </p>
         <div className="essays-empty-actions">
           <button className="btn-primary" onClick={openStory}>
@@ -78,7 +78,7 @@ export function EssayTab({ onAsk }: { onAsk: (text: string) => void }) {
       </ol>
 
       <p className="privacy-note">
-        Drafts are written only from your answers and profile. Read each one closely and change anything that doesn't sound like you before
+        Drafts are written only from your activities, profile, and anything you told Quill. Read each one closely and change anything that doesn't sound like you before
         submitting on the UC application.
       </p>
     </>
@@ -112,10 +112,7 @@ function EssayCard({
   const writing = piq.isGenerating(id);
   const error = piq.errorFor(id);
 
-  const questions = PIQ_DETAIL_QUESTIONS[id] ?? [];
-  const answers = piqWorkOf(profile, id).answers;
-  const remaining = questions.filter((q) => (q.optional ? !(q.id in answers) : !answers[q.id]?.trim())).length;
-  const next = nextDetailQuestion(profile, id);
+  const activitiesDone = activitiesStatus(profile).done;
 
   const copy = async () => {
     if (!draft) return;
@@ -131,7 +128,7 @@ function EssayCard({
   };
 
   const status = ready ? "ready" : draft ? "draft" : generatable ? "can-generate" : "needs-answers";
-  const statusLabel = { ready: "Ready", draft: "Draft", "can-generate": "Ready to generate", "needs-answers": "Needs answers" }[status];
+  const statusLabel = { ready: "Ready", draft: "Draft", "can-generate": writing ? "Writing…" : "Ready to generate", "needs-answers": "Needs one answer" }[status];
 
   return (
     <li className={`card essay-card is-${status}`}>
@@ -215,7 +212,13 @@ function EssayCard({
         </>
       ) : generatable ? (
         <div className="essay-card-pending">
-          <p>Quill has everything needed for this essay.</p>
+          <p>
+            {writing
+              ? "Quill is writing this essay from your activities and profile…"
+              : activitiesDone
+                ? "Quill has what it needs for this essay."
+                : "Quill will draft this automatically once your activities are done — or write it now."}
+          </p>
           <button className="btn-primary" onClick={() => piq.generate([id])} disabled={piq.busy}>
             <SparkIcon width={15} height={15} />
             {writing ? "Writing your essay…" : "Generate this essay"}
@@ -223,15 +226,7 @@ function EssayCard({
         </div>
       ) : (
         <div className="essay-card-pending">
-          <p>
-            Answer {remaining} more question{remaining === 1 ? "" : "s"} before this essay can be generated
-            {next ? (
-              <>
-                {" "}
-                — next: <em>{next.question}</em>
-              </>
-            ) : null}
-          </p>
+          <p>This question is about your personal life, so Quill needs one answer from you before drafting it — even a blank one works.</p>
           <button className="btn-ghost" onClick={onOpenStory}>
             Answer with Quill
           </button>

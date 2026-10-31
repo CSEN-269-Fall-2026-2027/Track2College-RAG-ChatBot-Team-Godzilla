@@ -180,19 +180,150 @@ export interface PiqDraftResult {
   wordCount: number;
 }
 
-/** Drafts the chosen UC PIQs (≤350 words each) from the profile and the student's follow-up answers. */
+/** Drafts the chosen UC PIQs (≤350 words each) from the profile, activities, and any personal answers. */
 export async function generatePiqDrafts(
   piqs: { id: string; answers: { question: string; answer: string }[] }[],
   profileSummary: string,
+  activities: string,
   signal?: AbortSignal,
   opts?: { regenerate?: boolean },
 ): Promise<PiqDraftResult[]> {
   const result = await post<{ essays: { id: string; question: string; essay: string; word_count: number }[] }>(
     "/essay/piqs",
-    { piqs, profile_summary: profileSummary, regenerate: !!opts?.regenerate },
+    { piqs, profile_summary: profileSummary, activities, regenerate: !!opts?.regenerate },
     signal,
   );
   return result.essays.map((e) => ({ id: e.id, question: e.question, essay: e.essay, wordCount: e.word_count }));
+}
+
+export interface FoundCounselor {
+  name: string;
+  title: string;
+  email: string;
+  /** Who they're assigned to, as the school's page says it (e.g. a last-name range). */
+  serves: string;
+  /** The model judged this counselor covers the student. */
+  match: boolean;
+  sourceUrl: string;
+}
+
+/** Searches the web for the counselors at the student's high school. */
+export async function findCounselors(
+  school: { highSchool: string; city: string; state: string; lastName: string },
+  signal?: AbortSignal,
+): Promise<FoundCounselor[]> {
+  const result = await post<{ counselors: (Omit<FoundCounselor, "sourceUrl"> & { source_url: string })[] }>(
+    "/agent/counselor/find",
+    { high_school: school.highSchool, city: school.city, state: school.state, last_name: school.lastName },
+    signal,
+  );
+  return result.counselors.map(({ source_url, ...c }) => ({ ...c, sourceUrl: source_url }));
+}
+
+/** Drafts the student's email to their counselor. Nothing is sent. */
+export function draftCounselorEmail(
+  counselorName: string,
+  studentName: string,
+  profileSummary: string,
+  callTranscript = "",
+  signal?: AbortSignal,
+): Promise<{ subject: string; body: string }> {
+  return post(
+    "/agent/counselor/email",
+    { counselor_name: counselorName, student_name: studentName, profile_summary: profileSummary, call_transcript: callTranscript },
+    signal,
+  );
+}
+
+/** A one-time token for a voice call with the practice counselor (ElevenLabs); the key stays on the server. */
+export async function startCounselorCall(signal?: AbortSignal): Promise<string> {
+  return (await post<{ conversation_token: string }>("/agent/counselor/voice", {}, signal)).conversation_token;
+}
+
+export type UcRunStatus =
+  | "opening"
+  | "waiting"
+  | "submitted"
+  | "signing_in"
+  | "login_failed"
+  | "needs_code"
+  | "checking_code"
+  | "verified"
+  | "setting_up"
+  | "ready"
+  | "signed_in"
+  | "filling"
+  | "needs_you"
+  | "about_done"
+  | "piq_done"
+  | "closed"
+  | "error";
+
+export interface UcRun {
+  status: UcRunStatus;
+  detail: string;
+  mode: "login" | "create";
+  /** The UC window is still open on the student's screen. */
+  open: boolean;
+  /** Milestones reached in this window, for saving to the profile. */
+  created: boolean;
+  verified: boolean;
+  setup: boolean;
+  /** UC's "About you" category is finished. */
+  about: boolean;
+  /** What filling "About you" did, in UC's own field labels. */
+  about_report: { filled: { label: string; value: string }[]; missing: string[]; check: string[] };
+  /** The student's personal insight answers were entered on UC. */
+  piq: boolean;
+  /** Personal insight questions entered this run, and ones left alone (with why). */
+  piq_report: { entered: string[]; skipped: string[] };
+}
+
+/** A chosen personal insight question (UC's numbering, 1–8) and the student's saved answer. */
+export interface UcPiq {
+  number: number;
+  title: string;
+  text: string;
+}
+
+/** Types the student's UC verification code into the open UC window. */
+export async function submitUcCode(runId: string, code: string): Promise<void> {
+  await post(`/agent/uc-account/code/${encodeURIComponent(runId)}`, { code });
+}
+
+/** Opens the UC application in a browser window on this computer and signs in or fills in sign-up. */
+export async function startUcAccount(
+  email: string,
+  password: string,
+  mode: "login" | "create",
+  facts: Record<string, string> = {},
+  aboutDone = false,
+  /** UC already verified this account, so its emailed-code screen won't appear again. */
+  verified = false,
+  piqs: UcPiq[] = [],
+): Promise<string> {
+  const result = await post<{ run_id: string }>("/agent/uc-account/start", {
+    email,
+    password,
+    mode,
+    facts,
+    about_done: aboutDone,
+    verified,
+    piqs,
+  });
+  return result.run_id;
+}
+
+export async function ucAccountStatus(runId: string, signal?: AbortSignal): Promise<UcRun> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/agent/uc-account/status/${encodeURIComponent(runId)}`, { signal });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new ApiError(`Couldn't reach the Track2College server at ${API_BASE}.`, true);
+  }
+  if (!response.ok) throw new ApiError("Lost track of the UC window. Start again.");
+  return response.json();
 }
 
 export async function clearSession(sessionId: string): Promise<void> {

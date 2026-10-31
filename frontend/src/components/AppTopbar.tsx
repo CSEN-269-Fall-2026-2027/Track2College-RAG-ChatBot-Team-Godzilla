@@ -1,14 +1,17 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { useAuth } from "../auth";
-import { useProfile } from "../profile";
+import { useGame } from "../game/GameProvider";
+import { storyComplete } from "../journey/guided";
+import { completeness, useProfile } from "../profile";
 import { href, type Route } from "../router";
 import type { Health, Theme } from "../App";
-import { ChatIcon, FileIcon, Logo, LogoutIcon, MoonIcon, RetryIcon, SunIcon, UserIcon } from "./icons";
+import { BookIcon, ChatIcon, FileIcon, LockIcon, SparkIcon, Logo, LogoutIcon, MoonIcon, RetryIcon, SunIcon, UserIcon } from "./icons";
 import { ResetDataDialog } from "./ResetDataDialog";
 
-const LINKS: { route: Route; label: string; Icon: typeof FileIcon }[] = [
-  { route: "advisor", label: "Advisor", Icon: ChatIcon },
-  { route: "materials", label: "Materials", Icon: FileIcon },
+/** Story and Manual both live on the Advisor route; `story` picks the mode. */
+const LINKS: { route: Route; label: string; Icon: typeof FileIcon; story?: boolean }[] = [
+  { route: "advisor", label: "Story", Icon: BookIcon, story: true },
+  { route: "advisor", label: "Manual", Icon: ChatIcon, story: false },
   { route: "profile", label: "Profile", Icon: UserIcon },
 ];
 
@@ -19,10 +22,11 @@ interface AppTopbarProps {
   onToggleTheme: () => void;
 }
 
-/** Shared top nav for Advisor, Materials, and Profile. */
+/** Shared top nav for Advisor (Story / Manual), Profile, and Apply. */
 export const AppTopbar = memo(function AppTopbar({ route, health, theme, onToggleTheme }: AppTopbarProps) {
   const { account, signOut } = useAuth();
   const { profile } = useProfile();
+  const { state, updateSettings } = useGame();
   const [menuOpen, setMenuOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -42,6 +46,9 @@ export const AppTopbar = memo(function AppTopbar({ route, health, theme, onToggl
     };
   }, [menuOpen]);
 
+  // Apply is always reachable; until the story is finished it opens on a locked page.
+  const applyLocked = !storyComplete(profile, completeness(profile).sections);
+  const links: typeof LINKS = [{ route: "agent", label: "Apply", Icon: applyLocked ? LockIcon : SparkIcon }, ...LINKS];
   const name = profile.basics.firstName || account?.name || "";
   const initials = (name.trim()[0] ?? "?").toUpperCase() + (profile.basics.lastName.trim()[0] ?? "").toUpperCase();
 
@@ -53,14 +60,16 @@ export const AppTopbar = memo(function AppTopbar({ route, health, theme, onToggl
           <span>Track2College</span>
         </a>
         <nav className="app-nav" aria-label="App sections">
-          {LINKS.map(({ route: target, label, Icon }) => {
-            const active = route === target;
+          {links.map(({ route: target, label, Icon, story }) => {
+            const active = route === target && (story === undefined || story === state.storyMode);
             return (
               <a
-                key={target}
+                key={label}
                 href={href(target)}
+                onClick={story === undefined ? undefined : () => updateSettings({ storyMode: story })}
                 className={active ? "on" : undefined}
                 aria-current={active ? "page" : undefined}
+                title={target === "agent" && applyLocked ? "Unlocks when you finish the story" : undefined}
               >
                 <Icon width={16} height={16} />
                 <span>{label}</span>

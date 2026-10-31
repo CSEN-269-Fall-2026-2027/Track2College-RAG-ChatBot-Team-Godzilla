@@ -7,7 +7,6 @@ import { FileIcon, HomeIcon, Logo, LogoutIcon, MoonIcon, SunIcon, UserIcon } fro
 
 const ITEMS: { route: Route; label: string; Icon: typeof FileIcon }[] = [
   { route: "advisor", label: "Home", Icon: HomeIcon },
-  { route: "materials", label: "Materials", Icon: FileIcon },
   { route: "profile", label: "Profile", Icon: UserIcon },
 ];
 

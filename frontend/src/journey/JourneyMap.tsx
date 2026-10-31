@@ -1,12 +1,11 @@
 import { createPortal } from "react-dom";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { COLLEGES } from "../colleges";
 import { usePlanning } from "../planning";
 import { academicHistoryStatus, completeness, useProfile } from "../profile";
 import { navigate } from "../router";
 import { readJSON, userKey, writeJSON } from "../storage";
 import type { PiqStatus, Profile, UcJourneyState } from "../types";
-type Pose = "idle" | "run-a" | "run-b" | "jump";
 import { ArrowRightIcon, CheckIcon, ExternalIcon, PixelMapIcon, XIcon } from "../components/icons";
 import {
   ACTIVITY_DESC_LIMIT,
@@ -23,38 +22,49 @@ import {
   togglePiq,
   UC_APPLY_URL,
   type Checkpoint,
+  type CheckpointId,
 } from "./logic";
-import { LAYOUTS, MapScene, type Layout } from "./MapScene";
+import { mentorById } from "../game/characters";
+import { STAGE_GUIDE } from "./guides";
+import { CONSTELLATIONS, fitConstellation, trailLegs } from "./constellation";
 
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-const WALK_MS = 900;
+/** How long the "stage completed" trail draw and platform glow last. */
+const ARRIVE_MS = 1400;
 
-function useLayout(): Layout {
-  const query = "(max-width: 720px)";
-  const [tall, setTall] = useState(() => window.matchMedia(query).matches);
-  useEffect(() => {
-    const mq = window.matchMedia(query);
-    const on = () => setTall(mq.matches);
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
+
+/** Size of an element's content box, kept current with a ResizeObserver. */
+function useBoxSize<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => setSize({ width: entry.contentRect.width, height: entry.contentRect.height }));
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
-  return tall ? "tall" : "wide";
+  return [ref, size] as const;
 }
 
 export function JourneyMap({
   userId,
   onBack,
   embedded = false,
+  selected = null,
+  onSelect,
 }: {
   userId: string;
   onBack?: () => void;
-  /** Story-mode side panel: same map (player, labels, progress), no full-page chrome. */
+  /** Story-mode side panel: same map and progress, no full-page chrome. */
   embedded?: boolean;
+  /** The stop whose person the student chose to talk to (Story mode), shown as selected. */
+  selected?: CheckpointId | null;
+  /** Story mode: clicking a stop switches the chat on the right to that stop's person. */
+  onSelect?: (id: CheckpointId) => void;
 }) {
   const { profile, update } = useProfile();
   const { transcripts } = usePlanning();
-  const responsive = useLayout();
-  const layout: Layout = embedded ? "wide" : responsive;
   const sections = completeness(profile).sections;
   const academicStarted = academicHistoryStatus(profile, transcripts).started;
   const journey = useMemo(() => computeJourney(profile, sections, academicStarted), [profile, sections, academicStarted]);
@@ -62,38 +72,40 @@ export function JourneyMap({
   const [open, setOpen] = useState<number | null>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
 
-  // Walk the player from the last checkpoint they saw to the current one.
+  // When a stage is completed since the student last looked, draw the new stretch of trail and
+  // let the next platform glow briefly. Progress itself always comes from computeJourney.
   const seenKey = userKey(userId, "ucMapSeen");
-  const [shown, setShown] = useState(() => Math.min(readJSON(seenKey, current), current));
-  const [pose, setPose] = useState<Pose>("idle");
+  const reached = finished ? checkpoints.length : current;
+  const [arrived, setArrived] = useState<{ from: number; to: number } | null>(null);
+  const lastSeen = useRef(Math.min(readJSON(seenKey, reached), reached));
   useEffect(() => {
-    writeJSON(seenKey, current);
-    if (shown === current) return;
-    if (reducedMotion()) {
-      setShown(current);
-      return;
-    }
-    let frame = 0;
-    const id = window.setInterval(() => setPose(++frame % 2 ? "run-a" : "run-b"), 140);
-    const raf = requestAnimationFrame(() => setShown(current));
-    const done = window.setTimeout(() => {
-      window.clearInterval(id);
-      setPose("jump");
-      window.setTimeout(() => setPose("idle"), 260);
-    }, WALK_MS);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.clearInterval(id);
-      window.clearTimeout(done);
-    };
-  }, [current, seenKey]);
+    writeJSON(seenKey, reached);
+    const from = lastSeen.current;
+    lastSeen.current = reached;
+    if (reached <= from || reducedMotion()) return;
+    setArrived({ from, to: reached });
+    const done = window.setTimeout(() => setArrived(null), ARRIVE_MS);
+    return () => window.clearTimeout(done);
+  }, [reached, seenKey]);
 
-  const { w, h, nodes } = LAYOUTS[layout];
-  const pct = (x: number, y: number) => ({
-    left: `${(x / w) * 100}%`,
-    top: `${(y / h) * 100}%`,
-  });
-  const [px, py] = nodes[Math.min(shown, nodes.length - 1)] ?? nodes[0];
+  // The constellation is drawn in a fixed design space and scaled to fit this box.
+  const [fitRef, box] = useBoxSize<HTMLDivElement>();
+  const { layout, scale } = fitConstellation(box.width, embedded ? box.height : 0);
+  const geo = CONSTELLATIONS[layout];
+  const legs = useMemo(() => trailLegs(geo), [geo]);
+
+  // The rocket parks beside the current stop, nose toward the next one (pointing up once done).
+  const rocket = useMemo(() => {
+    const at = Math.min(finished ? checkpoints.length - 1 : current, geo.stops.length - 1);
+    const here = geo.stops[at];
+    const next = geo.stops[at + 1];
+    if (finished || !next) return { x: here.x * scale, y: here.y * scale - 34, angle: -90 };
+    const dx = (next.x - here.x) * scale;
+    const dy = (next.y - here.y) * scale;
+    const len = Math.hypot(dx, dy) || 1;
+    const gap = 38; // clear of the planet and its halo
+    return { x: here.x * scale + (dx / len) * gap, y: here.y * scale + (dy / len) * gap, angle: (Math.atan2(dy, dx) * 180) / Math.PI };
+  }, [geo, scale, current, finished, checkpoints.length]);
 
   const setJourney = useCallback((change: (j: UcJourneyState) => UcJourneyState) => update((p) => ({ ...p, ucJourney: change(journeyOf(p)) })), [update]);
 
@@ -101,6 +113,11 @@ export function JourneyMap({
     setOpen(null);
     opener.current?.focus();
   }, []);
+
+  const openChapter = (i: number, from: HTMLButtonElement) => {
+    opener.current = from;
+    setOpen(i);
+  };
 
   const progress = (
     <div className="jm-overall" aria-live="polite">
@@ -112,41 +129,80 @@ export function JourneyMap({
   );
 
   const mapBoard = (
-    <div className={`jm-map jm-map-${layout}`} style={{ aspectRatio: `${w} / ${h}` }}>
-      <MapScene layout={layout} ids={checkpoints.map((c) => c.id)} lit={checkpoints.map((c) => c.complete)} />
-      <div className={`jm-player jm-pose-${pose}`} style={pct(px - 9, py)} aria-hidden="true">
-        <img src="/journey/player.png" alt="" width={28} height={44} draggable={false} />
-      </div>
-      <ol className="jm-nodes" aria-label="Checkpoints">
-        {checkpoints.map((c, i) => {
-          const state = c.complete ? "complete" : i === current ? "current" : "upcoming";
-          const [x, y] = nodes[i];
-          return (
-            <li key={c.id} className={`jm-node jm-node-${state} jm-label-${layout === "tall" ? (x < w / 2 ? "right" : "left") : "below"}`} style={pct(x, y)}>
-              <button
-                onClick={(e) => {
-                  opener.current = e.currentTarget;
-                  setOpen(i);
-                }}
-                aria-label={`Checkpoint ${i + 1}: ${c.title}. ${state === "complete" ? "Complete" : state === "current" ? "Current" : "Upcoming"}. ${c.summary}.`}
-              >
-                <span className="jm-node-dot" aria-hidden="true">
-                  {state === "complete" ? <CheckIcon width={14} height={14} /> : state === "current" ? "★" : i + 1}
-                </span>
-                <span className="jm-node-text">
-                  <span className="jm-node-title">{c.title}</span>
-                  <span className="jm-node-meta">
-                    <span className={`jm-state jm-state-${state}`}>
-                      {state === "complete" ? "Complete" : state === "current" ? "You are here" : "Upcoming"}
+    <div className={`jm-sky-fit jm-sky-${layout}`} ref={fitRef}>
+      {box.width > 0 && (
+        <div className="jm-sky" style={{ width: geo.w * scale, height: geo.h * scale }}>
+          <svg className="jm-trail" viewBox={`0 0 ${geo.w} ${geo.h}`} aria-hidden="true">
+            {legs.map((d, i) => (
+              <path key={`base-${i}`} d={d} className="jm-trail-base" />
+            ))}
+            {legs.map((d, i) =>
+              i < reached ? (
+                <path
+                  key={`lit-${i}`}
+                  d={d}
+                  pathLength={1}
+                  className={`jm-trail-lit${arrived && i >= arrived.from && i < arrived.to ? " is-drawing" : ""}`}
+                />
+              ) : null,
+            )}
+          </svg>
+
+          <div
+            className="jm-rocket"
+            style={{ transform: `translate(${rocket.x}px, ${rocket.y}px) rotate(${rocket.angle}deg)` }}
+            aria-hidden="true"
+          >
+            <Rocket />
+          </div>
+
+          <ol className="jm-stops" aria-label="Checkpoints">
+            {checkpoints.map((c, i) => {
+              const state = c.complete ? "complete" : i === current && !finished ? "current" : "upcoming";
+              const stop = geo.stops[i];
+              const person = mentorById(STAGE_GUIDE[c.id]);
+              const isSelected = selected === c.id;
+              const arriving = !!arrived && i === arrived.to && !finished;
+              const status = state === "complete" ? "Complete" : state === "current" ? "You are here" : "Coming up";
+              // Cards open away from the nearer edge so they stay inside the map.
+              const cardBelow = stop.y < geo.h / 2;
+              return (
+                <li
+                  key={c.id}
+                  className={`jm-stop jm-stop-${state}${isSelected ? " is-selected" : ""}${arriving ? " is-arriving" : ""}`}
+                  style={{ left: stop.x * scale, top: stop.y * scale, animationDelay: `${i * -1.3}s` }}
+                >
+                  <button
+                    type="button"
+                    className="jm-planet-btn"
+                    onClick={(e) => (onSelect ? onSelect(c.id) : openChapter(i, e.currentTarget))}
+                    aria-pressed={onSelect ? isSelected : undefined}
+                    aria-label={`${c.title}, chapter ${i + 1}: ${status}. ${onSelect ? `Talk to ${person.name}.` : "Open chapter."}`}
+                  >
+                    <Planet id={c.id} />
+                    {state === "complete" && (
+                      <span className="jm-stop-check" aria-hidden="true">
+                        <CheckIcon width={10} height={10} />
+                      </span>
+                    )}
+                  </button>
+                  <div className={`jm-stop-card${cardBelow ? " is-below" : ""}`}>
+                    <span className="jm-stop-title">{c.title}</span>
+                    <span className={`jm-stop-status jm-stop-status-${state}`}>
+                      {status} · {person.name}
                     </span>
-                    {c.summary}
-                  </span>
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ol>
+                    {onSelect && (
+                      <button type="button" className="jm-stop-open" onClick={(e) => openChapter(i, e.currentTarget)}>
+                        Open chapter
+                      </button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      )}
     </div>
   );
 
@@ -167,7 +223,6 @@ export function JourneyMap({
       )}
 
       <div className="jm-scroll">
-        {embedded && <div className="jm-embedded-head">{progress}</div>}
         {mapBoard}
         {finished && <p className="jm-finished">🎓 You've recorded your UC application as submitted. Keep an eye on your follow-ups in Review &amp; Apply.</p>}
       </div>
@@ -188,6 +243,70 @@ export function JourneyMap({
         )}
     </div>
   );
+}
+
+/** The "you are here" rocket, drawn pointing right (rotated to face the next stop). */
+function Rocket() {
+  return (
+    <svg viewBox="0 0 36 20" className="jm-rocket-art">
+      <path d="M4 10 0.5 7.6 1.8 10 0.5 12.4z" className="jm-rocket-flame" />
+      <path d="M9 6.2 5 2.5h4.6l3.4 3.7zM9 13.8 5 17.5h4.6l3.4-3.7z" className="jm-rocket-fin" />
+      <path d="M6 10c0-2.9 2.2-4.6 6-4.6h11c4.4 0 8.6 1.9 11.5 4.6-2.9 2.7-7.1 4.6-11.5 4.6H12c-3.8 0-6-1.7-6-4.6z" className="jm-rocket-body" />
+      <circle cx="22" cy="10" r="2.4" className="jm-rocket-window" />
+      <path d="M29.5 7.2c1.8.7 3.5 1.7 5 2.8-1.5 1.1-3.2 2.1-5 2.8z" className="jm-rocket-nose" />
+    </svg>
+  );
+}
+
+/** A small planet per chapter, each with its own surface detail or symbol. Solid colours only. */
+function Planet({ id }: { id: CheckpointId }) {
+  switch (id) {
+    case "profile": // sage world with a tilted ring
+      return (
+        <svg viewBox="0 0 44 44" className="jm-planet" aria-hidden="true">
+          <ellipse cx="22" cy="22" rx="20" ry="6" transform="rotate(-18 22 22)" className="jm-ring-back" />
+          <circle cx="22" cy="22" r="13" className="jm-p-profile" />
+          <circle cx="22" cy="19.5" r="3" className="jm-p-glyph" />
+          <path d="M16.6 28.2c1-3 3-4.4 5.4-4.4s4.4 1.4 5.4 4.4" className="jm-p-glyph-line" />
+          <path d="M2.4 27.6A20 6 -18 0 0 41.6 16.4" transform="rotate(0)" className="jm-ring-front" />
+        </svg>
+      );
+    case "ucs": // sand world with campus columns
+      return (
+        <svg viewBox="0 0 44 44" className="jm-planet" aria-hidden="true">
+          <circle cx="22" cy="22" r="14" className="jm-p-ucs" />
+          <path d="M15.5 19.5 22 15.5l6.5 4z" className="jm-p-glyph" />
+          <path d="M17 20.5v6M20.3 20.5v6M23.7 20.5v6M27 20.5v6M15.5 27.5h13" className="jm-p-glyph-line" />
+        </svg>
+      );
+    case "activities": // charcoal world with gold craters
+      return (
+        <svg viewBox="0 0 44 44" className="jm-planet" aria-hidden="true">
+          <circle cx="22" cy="22" r="14" className="jm-p-activities" />
+          <circle cx="17.5" cy="18.5" r="2.4" className="jm-p-crater" />
+          <circle cx="26" cy="24.5" r="3.1" className="jm-p-crater" />
+          <circle cx="19.5" cy="27.5" r="1.4" className="jm-p-crater" />
+          <circle cx="27.5" cy="16.5" r="1.1" className="jm-p-crater" />
+        </svg>
+      );
+    case "essays": // cream world with bands and a pen nib
+      return (
+        <svg viewBox="0 0 44 44" className="jm-planet" aria-hidden="true">
+          <circle cx="22" cy="22" r="14" className="jm-p-essays" />
+          <path d="M9.2 18h25.6M8.6 26h26.8" className="jm-p-band" />
+          <path d="M22 15.5l3.4 6.2L22 29l-3.4-7.3z" className="jm-p-glyph" />
+          <path d="M22 21.5v4" className="jm-p-nib" />
+        </svg>
+      );
+    case "review": // muted-gold world with a double ring and a star
+      return (
+        <svg viewBox="0 0 44 44" className="jm-planet" aria-hidden="true">
+          <circle cx="22" cy="22" r="19" className="jm-p-orbit" />
+          <circle cx="22" cy="22" r="13.5" className="jm-p-review" />
+          <path d="m22 15.6 1.9 4.1 4.4.5-3.3 3 .9 4.4-3.9-2.2-3.9 2.2.9-4.4-3.3-3 4.4-.5z" className="jm-p-glyph" />
+        </svg>
+      );
+  }
 }
 
 interface PanelProps {
@@ -328,7 +447,7 @@ function CheckpointPanel({ checkpoint: c, index, state, profile, update, setJour
             </>
           )}
 
-          {c.id === "essays" && <PiqPicker journey={j} setJourney={setJourney} onOpenTool={() => go("materials", "essays")} />}
+          {c.id === "essays" && <PiqPicker journey={j} setJourney={setJourney} onOpenTool={() => go("profile", "essays")} />}
 
           {c.id === "review" && <ReviewPanel journey={j} setJourney={setJourney} />}
         </div>

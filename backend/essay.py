@@ -39,7 +39,7 @@ def generate_essay(prompt: str, profile_summary: str, mode: str) -> dict:
     )
     raw = complete(SYSTEM_PROMPT, user_message, max_tokens=3500)
     if not raw:
-        raise RuntimeError("The language model didn't respond. Check GROQ_API_KEY in backend/.env.")
+        raise RuntimeError("The language model didn't respond. Check GROQ_API_KEY in .env at the project root.")
     try:
         data = parse_json(raw)
     except (ValueError, json.JSONDecodeError) as exc:

@@ -1,7 +1,8 @@
 /** UC Journey Map progress rules (pure logic; no React or Supabase). */
 import { describe, expect, it } from "vitest";
 import { computeJourney, emptyJourney, setCampusMajor, setPiqStatus, toggleCampus, togglePiq } from "../journey/logic";
-import { routePoints, LAYOUTS } from "../journey/MapScene";
+import { STAGE_GUIDE } from "../journey/guides";
+import { CONSTELLATIONS, fitConstellation, trailLegs } from "../journey/constellation";
 import type { Profile } from "../types";
 import { blankProfile } from "./fixtures";
 
@@ -98,13 +99,40 @@ describe("UC journey progress", () => {
   });
 });
 
-describe("map route", () => {
-  it("is an orthogonal path through all five stops plus start and finish", () => {
+describe("journey constellation", () => {
+  it("places five stops inside the map with room for each planet, none crowding another", () => {
     for (const layout of ["wide", "tall"] as const) {
-      const pts = routePoints(layout);
-      for (let i = 1; i < pts.length; i++) expect(pts[i][0] === pts[i - 1][0] || pts[i][1] === pts[i - 1][1]).toBe(true);
-      expect(pts.at(-1)).toEqual(LAYOUTS[layout].finish);
-      expect(LAYOUTS[layout].nodes).toHaveLength(5);
+      const { w, h, stops } = CONSTELLATIONS[layout];
+      expect(stops).toHaveLength(5);
+      for (const s of stops) {
+        expect(s.x).toBeGreaterThanOrEqual(24);
+        expect(s.y).toBeGreaterThanOrEqual(24);
+        expect(s.x).toBeLessThanOrEqual(w - 24);
+        expect(s.y).toBeLessThanOrEqual(h - 24);
+      }
+      for (let a = 0; a < stops.length; a++)
+        for (let b = a + 1; b < stops.length; b++) expect(Math.hypot(stops[a].x - stops[b].x, stops[a].y - stops[b].y)).toBeGreaterThan(48);
     }
+  });
+
+  it("joins the stops with one smooth curve per leg", () => {
+    for (const layout of ["wide", "tall"] as const) {
+      const legs = trailLegs(CONSTELLATIONS[layout]);
+      expect(legs).toHaveLength(4);
+      for (const d of legs) expect(d).toMatch(/^M[\d.]+ [\d.]+ C/);
+    }
+  });
+
+  it("uses the tall arrangement in narrow boxes and fits wide boxes by width and height", () => {
+    expect(fitConstellation(340, 0).layout).toBe("tall");
+    expect(fitConstellation(640, 336)).toEqual({ layout: "wide", scale: 1.6 });
+    expect(fitConstellation(640, 168).scale).toBeCloseTo(1);
+    expect(fitConstellation(3000, 3000).scale).toBe(1.6); // planets never balloon
+  });
+});
+
+describe("guides on the journey", () => {
+  it("gives every stop a person to talk to, with Sage on the first and final steps", () => {
+    expect(STAGE_GUIDE).toEqual({ profile: "sage", ucs: "penny", activities: "milo", essays: "quill", review: "sage" });
   });
 });

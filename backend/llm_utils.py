@@ -22,13 +22,6 @@ def text(value) -> str:
     return str(value).strip() if value is not None else ""
 
 
-def allowed_sources(value, allowlist: set[str] | None = None, limit: int = 4) -> list[str]:
-    """Keep URL-looking strings. Allowlist is optional now that retrieval is gone."""
-    urls = strings(value, limit * 2)
-    if allowlist:
-        urls = [u for u in urls if u.lower().rstrip("/") in allowlist]
-    return [
-        u
-        for u in urls
-        if u.startswith("http://") or u.startswith("https://")
-    ][:limit]
+def http_urls(value, limit: int) -> list[str]:
+    """Keep only http(s) URLs from a model-supplied list."""
+    return [u for u in strings(value, limit * 2) if u.startswith(("http://", "https://"))][:limit]

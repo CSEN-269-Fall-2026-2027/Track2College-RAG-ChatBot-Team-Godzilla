@@ -103,8 +103,12 @@ export const PROFILE_SECTIONS = [
   { id: "finances", title: "Cost & support", blurb: "Optional budget and aid context" },
 ] as const;
 
-/** Dedicated workspace route — not part of profile completeness. */
-export const PROFILE_WORKSPACES = [{ id: "activities", title: "Activities & awards", blurb: "UC activities list workspace" }] as const;
+/** Dedicated workspace routes — not part of profile completeness. Essays and the course plan used to be "Materials". */
+export const PROFILE_WORKSPACES = [
+  { id: "activities", title: "Activities & awards", blurb: "UC activities list workspace" },
+  { id: "essays", title: "Personal insight essays", blurb: "Your four UC PIQ drafts" },
+  { id: "plan", title: "Course plan", blurb: "A year-by-year plan aimed at a UC campus" },
+] as const;
 
 export type SectionId = (typeof PROFILE_SECTIONS)[number]["id"];
 export type ProfileRouteId = SectionId | (typeof PROFILE_WORKSPACES)[number]["id"];

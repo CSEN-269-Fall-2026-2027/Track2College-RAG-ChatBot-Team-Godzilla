@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-export const ROUTES = ["materials", "profile", "advisor", "map"] as const;
+export const ROUTES = ["profile", "advisor", "map", "agent"] as const;
 export type Route = (typeof ROUTES)[number];
 
 export interface Location {
@@ -9,29 +9,25 @@ export interface Location {
   param: string | null;
 }
 
+/**
+ * Materials (essays, transcript, course plan) now lives in Profile. Old bookmarks still land
+ * in the right place: essays → Profile essays, transcript → Academic history, plan → course plan.
+ */
+const LEGACY_PAGES = new Set(["materials", "insights", "overview", "home", "explore"]);
+const LEGACY_SECTION: Record<string, string> = { essays: "essays", transcript: "academics", plan: "plan" };
+
+export function parseLocation(hash: string): Location {
+  const [name = "", rawParam = null] = hash.replace(/^#\/?/, "").split("/");
+  if (LEGACY_PAGES.has(name)) {
+    return { route: "profile", param: (rawParam && LEGACY_SECTION[rawParam]) || "essays" };
+  }
+  // Empty / unknown hashes open Advisor.
+  if (!(ROUTES as readonly string[]).includes(name)) return { route: "advisor", param: null };
+  return { route: name as Route, param: rawParam || null };
+}
+
 function parseHash(): Location {
-  const [rawName = "", rawParam = null] = window.location.hash.replace(/^#\/?/, "").split("/");
-  // Legacy bookmarks → Materials.
-  const name =
-    rawName === "overview" || rawName === "home" || rawName === "insights" || rawName === "explore"
-      ? "materials"
-      : rawName;
-  const param =
-    rawName === "insights"
-      ? rawParam === "essays" || rawParam === "plan"
-        ? rawParam
-        : null
-      : rawName === "explore"
-        ? null
-        : rawParam;
-  // Empty / unknown hashes open Advisor (not Materials).
-  const route = (ROUTES as readonly string[]).includes(name) ? (name as Route) : "advisor";
-  const keepParam =
-    route === name ||
-    rawName === "overview" ||
-    rawName === "home" ||
-    rawName === "insights";
-  return { route, param: keepParam ? param || null : null };
+  return parseLocation(window.location.hash);
 }
 
 export function href(route: Route, param?: string) {

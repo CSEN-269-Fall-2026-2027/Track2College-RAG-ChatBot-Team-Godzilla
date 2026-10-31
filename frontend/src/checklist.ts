@@ -182,7 +182,7 @@ export const CHECKLIST_DEFS: ChecklistDef[] = [
       videos: COMMON_APP_VIDEOS,
       body: [
         "Start with stories only you can tell. Specific beats impressive.",
-        "Use Materials → Essays and the Journey Map Four Essays checkpoint.",
+        "Use Profile → Essays and the Journey Map Four Essays checkpoint.",
       ],
     },
   },

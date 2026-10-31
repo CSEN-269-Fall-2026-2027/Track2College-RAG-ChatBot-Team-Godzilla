@@ -3,14 +3,16 @@ UC Personal Insight Question (PIQ) drafts via Groq.
 
 The eight questions and their "Things to consider" guidance are copied verbatim
 from UC Admissions (admission.universityofcalifornia.edu → Personal insight
-questions). Drafts use only the student's profile and their own answers to the
-follow-up questions, and every response is held to UC's 350-word limit.
+questions). Drafts use only the student's profile, activities list and, for the
+personal-life questions, whatever the student typed in. Every response is held
+to UC's 350-word limit.
 """
 
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 
-from query import _call_groq
+from query import _call_groq, last_failure
 
 WORD_LIMIT = 350
 MIN_WORDS = 250
@@ -137,14 +139,18 @@ for a high school student on the Track2College platform.
 
 RULES:
 1. Answer the exact PIQ given. Use the official "Things to consider" only as guidance.
-2. Use ONLY facts from the STUDENT ANSWERS and STUDENT PROFILE. Never invent people, events, awards,
-   numbers, hardships, or outcomes. If a detail is missing, write around it instead of making it up.
-3. Write in the student's own first-person voice: plain, specific, reflective, and honest — like a
+2. Use ONLY facts from the STUDENT ANSWERS, STUDENT ACTIVITIES and STUDENT PROFILE. Never invent people,
+   events, awards, numbers, hardships, or outcomes. If a detail is missing, write around it instead of making it up.
+   Pick the activities, roles and details that best fit this PIQ; don't list everything.
+3. If the student's information is thin, empty, or unrelated to the PIQ, still write a complete response,
+   but keep it deliberately general: describe the student's values, habits and goals in broad terms with
+   no specific names, events or numbers, so the student can fill in their own details later.
+4. Write in the student's own first-person voice: plain, specific, reflective, and honest — like a
    thoughtful 17-year-old, not a brochure. No clichés, no quotes, no title, no headings.
-4. Show, then reflect: describe what happened and what the student did, then what they learned or how
+5. Show, then reflect: describe what happened and what the student did, then what they learned or how
    it shaped them. Keep the focus on the student.
-5. Length: between {MIN_WORDS} and {WORD_LIMIT} words. UC rejects anything over {WORD_LIMIT} words.
-6. Output ONLY the essay text as plain paragraphs. No preface, no notes, no word count.
+6. Length: between {MIN_WORDS} and {WORD_LIMIT} words. UC rejects anything over {WORD_LIMIT} words.
+7. Output ONLY the essay text as plain paragraphs. No preface, no notes, no word count.
 """
 
 
@@ -170,16 +176,33 @@ def _trim_to_limit(text: str, limit: int = WORD_LIMIT) -> str:
     return clipped[: end + 1].strip() if end > len(clipped) // 2 else clipped.rstrip(",;: ") + "."
 
 
+BATCH_SIZE = 2
+BATCH_PAUSE_S = 1.5
+
+
 def _ask(user_message: str) -> str:
     return _clean(
         _call_groq(
             [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user_message}],
-            max_tokens=4000,
+            # A 350-word essay is ~470 tokens; low reasoning keeps each draft small enough that all
+            # four fit in Groq's free-tier 8,000 tokens a minute.
+            max_tokens=1500,
+            reasoning_effort="low",
         )
     )
 
 
-def draft_piq(piq_id: str, answers: list[dict], profile_summary: str, regenerate: bool = False) -> dict:
+def _failure_message() -> str:
+    """Says why Groq gave nothing back; a rate limit isn't a key problem."""
+    kind = last_failure()
+    if kind == "rate_limit":
+        return "Groq's per-minute limit is used up (the free tier allows 8,000 tokens a minute). Wait a minute and try again."
+    if kind in ("auth", "missing_key"):
+        return "Groq rejected the API key. Check GROQ_API_KEY in .env at the project root and restart the backend."
+    return "Groq didn't return a draft. Please try again."
+
+
+def draft_piq(piq_id: str, answers: list[dict], profile_summary: str, activities: str = "", regenerate: bool = False) -> dict:
     piq = PIQS[piq_id]
     details = "\n".join(
         f"Q: {a.get('question', '').strip()}\nA: {a.get('answer', '').strip()}" for a in answers if a.get("answer", "").strip()
@@ -194,12 +217,13 @@ def draft_piq(piq_id: str, answers: list[dict], profile_summary: str, regenerate
         f"=== PIQ #{piq['number']} ===\n{piq['question']}\n\n"
         f"=== Things to consider (official UC guidance) ===\n{piq['consider']}\n\n"
         f"=== STUDENT ANSWERS for this PIQ ===\n{details or '(none)'}\n\n"
+        f"=== STUDENT ACTIVITIES ===\n{activities.strip() or '(none listed)'}\n\n"
         f"=== STUDENT PROFILE ===\n{profile_summary.strip() or '(empty)'}\n\n"
         f"Write the response now ({MIN_WORDS}–{WORD_LIMIT} words).{fresh}"
     )
     essay = _ask(message)
     if not essay:
-        raise RuntimeError("Groq didn't return a draft. Check GROQ_API_KEY in backend/.env and try again.")
+        raise RuntimeError(_failure_message())
 
     # Enforce UC's limit: one rewrite if it's off, then a hard sentence-boundary trim as a backstop.
     count = word_count(essay)
@@ -207,7 +231,8 @@ def draft_piq(piq_id: str, answers: list[dict], profile_summary: str, regenerate
         target = "Shorten" if count > WORD_LIMIT else "Expand (using only the facts given)"
         revised = _ask(
             f"{message}\n\n=== Previous draft ({count} words) ===\n{essay}\n\n"
-            f"{target} this draft so it is between {MIN_WORDS} and {WORD_LIMIT} words. Keep the same story and voice."
+            f"{target} this draft so it is between {MIN_WORDS} and {WORD_LIMIT} words. Keep the same story and voice, "
+            "and stay general rather than inventing details."
         )
         if revised:
             essay = revised
@@ -216,13 +241,21 @@ def draft_piq(piq_id: str, answers: list[dict], profile_summary: str, regenerate
     return {"id": piq_id, "question": piq["question"], "essay": essay, "word_count": word_count(essay)}
 
 
-def generate_piqs(items: list[dict], profile_summary: str, regenerate: bool = False) -> list[dict]:
-    """Draft each chosen PIQ in parallel. `items` are {"id", "answers": [{"question", "answer"}]}."""
+def generate_piqs(items: list[dict], profile_summary: str, activities: str = "", regenerate: bool = False) -> list[dict]:
+    """Draft the chosen PIQs two at a time. `items` are {"id", "answers": [{"question", "answer"}]}."""
     unknown = [i["id"] for i in items if i.get("id") not in PIQS]
     if unknown:
         raise ValueError(f"Unknown PIQ id(s): {', '.join(unknown)}")
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = [
-            pool.submit(draft_piq, i["id"], i.get("answers") or [], profile_summary, regenerate) for i in items
-        ]
-        return [f.result() for f in futures]
+    # Two at a time with a short pause between pairs, so the drafts don't all hit Groq's
+    # per-minute token cap at once. A rate limit that still happens is retried in _call_groq.
+    drafts: list[dict] = []
+    with ThreadPoolExecutor(max_workers=BATCH_SIZE) as pool:
+        for start in range(0, len(items), BATCH_SIZE):
+            if start:
+                time.sleep(BATCH_PAUSE_S)
+            batch = items[start : start + BATCH_SIZE]
+            futures = [
+                pool.submit(draft_piq, i["id"], i.get("answers") or [], profile_summary, activities, regenerate) for i in batch
+            ]
+            drafts += [f.result() for f in futures]
+    return drafts

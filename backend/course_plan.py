@@ -1,11 +1,10 @@
 """
 Course planning: grade 9–12 plan aimed at a UC campus.
-Uses Groq + A–G knowledge — no vector knowledge base.
 """
 
 import json
 
-from llm_utils import allowed_sources, parse_json, strings, text
+from llm_utils import http_urls, parse_json, strings, text
 from query import complete
 
 LEVELS = {"regular", "honors", "ap", "ib", "dual-enrollment"}
@@ -79,7 +78,7 @@ def build_course_plan(college: str, major: str, grade_level: str, completed: lis
 
     raw = complete(SYSTEM_PROMPT, user_message, max_tokens=4000)
     if not raw:
-        raise RuntimeError("The language model didn't respond. Check GROQ_API_KEY in backend/.env.")
+        raise RuntimeError("The language model didn't respond. Check GROQ_API_KEY in .env at the project root.")
     try:
         data = parse_json(raw)
     except (ValueError, json.JSONDecodeError) as exc:
@@ -104,5 +103,5 @@ def build_course_plan(college: str, major: str, grade_level: str, completed: lis
         "requirements": requirements[:10],
         "years": [{"grade": g, "courses": by_grade.get(g, [])} for g in GRADES],
         "tips": strings(data.get("tips"), 6),
-        "sources": allowed_sources(data.get("sources"), None, 4),
+        "sources": http_urls(data.get("sources"), 4),
     }

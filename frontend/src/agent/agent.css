@@ -1,0 +1,1052 @@
+/* ---------------------------------------------------------------- Apply */
+
+/* Two-column layout: work on the left, deadline sidebar on the right */
+
+.apply-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 32px;
+  align-items: start;
+}
+
+.apply-main {
+  min-width: 0;
+}
+
+.apply-aside {
+  position: sticky;
+  top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Deadline card: the date is the hero, set large on a flat surface with a hairline accent */
+
+.apply-countdown {
+  position: relative;
+  overflow: hidden;
+  padding: 16px 18px 14px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 4px);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-card);
+}
+
+.apply-countdown::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: var(--accent);
+}
+
+.apply-countdown-eyebrow {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* The number is the hero; "days" over "left" sits beside it, small and light. */
+.apply-countdown-date {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 0;
+}
+
+.apply-countdown-date strong {
+  font-size: 80px;
+  font-weight: 750;
+  line-height: 0.85;
+  letter-spacing: -0.05em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.apply-countdown-date strong.is-word {
+  font-size: 44px;
+  letter-spacing: -0.035em;
+}
+
+.apply-countdown-unit {
+  display: flex;
+  flex-direction: column;
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.15;
+  color: var(--text-muted);
+}
+
+.apply-countdown.is-urgent::before {
+  background: var(--gold);
+}
+
+.apply-countdown.is-urgent .apply-countdown-left {
+  color: var(--warning);
+}
+
+.apply-countdown.is-passed::before {
+  background: var(--border-strong);
+}
+
+.apply-countdown.is-passed .apply-countdown-date strong,
+.apply-countdown.is-passed .apply-countdown-left {
+  color: var(--text-muted);
+}
+
+.apply-countdown-due {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.apply-countdown-period {
+  margin-top: 12px;
+}
+
+.apply-countdown-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+
+.apply-countdown-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.apply-countdown.is-urgent .apply-countdown-bar span {
+  background: var(--gold);
+}
+
+.apply-countdown-scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 7px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--text-faint);
+}
+
+.apply-countdown-left {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* Upcoming dates */
+
+.apply-dates {
+  padding: 16px 18px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-card);
+}
+
+.apply-dates h2 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.apply-dates ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.apply-dates li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  font-size: 13.5px;
+  font-weight: 560;
+  line-height: 1.35;
+}
+
+.apply-dates li + li {
+  border-top: 1px solid var(--border);
+}
+
+.apply-dates time {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  padding: 4px 0 5px;
+  border-radius: 9px;
+  background: var(--bg-subtle);
+  font-size: 16px;
+  font-weight: 750;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+
+.apply-dates time small {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.apply-dates li.is-key time {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.apply-dates li.is-key time small {
+  color: var(--accent);
+}
+
+/* Section heading above the to-do list */
+
+.apply-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 24px 0 12px;
+}
+
+.apply-section-head h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.apply-section-head span {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Locked until the story is finished */
+
+.apply-locked {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  max-width: 520px;
+  margin: 8px auto 0;
+}
+
+.apply-locked .agent-mode-tag {
+  margin-top: 8px;
+}
+
+.apply-locked img {
+  width: min(280px, 70vw);
+  height: auto;
+  image-rendering: pixelated;
+}
+
+.apply-locked h1 {
+  margin: 10px 0 0;
+  font-size: clamp(22px, 3vw, 28px);
+  font-weight: 680;
+  letter-spacing: -0.025em;
+}
+
+.apply-locked p {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.apply-locked-steps {
+  width: 100%;
+  margin: 20px 0;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-card);
+}
+
+.apply-locked-steps li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+}
+
+.apply-locked-steps li + li {
+  border-top: 1px solid var(--border);
+}
+
+.apply-locked-steps .is-done {
+  color: var(--text-muted);
+}
+
+.apply-locked-steps span:last-child {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.agent-page {
+  max-width: var(--page-w);
+}
+
+.agent-mode-tag {
+  display: inline-flex;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 12.5px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Task list */
+
+.agent-tasks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agent-task {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.15s;
+}
+
+.agent-task.open {
+  border-color: var(--accent);
+}
+
+.agent-task-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 16px;
+  text-align: left;
+  border-radius: var(--radius);
+}
+
+.agent-task-head:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.agent-task.soon .agent-task-head {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.agent-task-num {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.agent-task.open .agent-task-num {
+  background: var(--accent);
+  color: #fff;
+}
+
+.agent-task.done .agent-task-num {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.agent-task-icon {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.agent-task-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-task-text strong {
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.agent-task-text small {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.agent-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.agent-badge-done {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.agent-task-body {
+  padding: 0 16px 18px 56px;
+}
+
+.agent-step {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.agent-lead {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Find → review → send progress */
+
+.agent-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  counter-reset: step;
+}
+
+.agent-steps li {
+  counter-increment: step;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  color: var(--text-faint);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.agent-steps li::before {
+  content: counter(step) ". ";
+}
+
+.agent-steps li.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.agent-steps li.done {
+  color: var(--success);
+}
+
+.agent-find {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.agent-find .field {
+  width: 100%;
+}
+
+.agent-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agent-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.agent-option.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.agent-option.disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.agent-option > input {
+  flex: none;
+  width: auto;
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+
+.agent-option-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-option-text strong {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 14.5px;
+}
+
+.agent-option-text small {
+  color: var(--text-muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.agent-match {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.agent-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  color: var(--accent);
+  font-size: 12.5px;
+}
+
+.agent-manual {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.agent-counselor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-subtle);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.agent-link {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.agent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--warning-soft);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+@media (max-width: 960px) {
+  .apply-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+
+  /* Deadline first on narrow screens */
+  .apply-aside {
+    position: static;
+    order: -1;
+  }
+
+  .apply-countdown-date strong {
+    font-size: 64px;
+  }
+
+  .apply-countdown-date strong.is-word {
+    font-size: 40px;
+  }
+}
+
+@media (max-width: 640px) {
+  .agent-task-body {
+    padding-left: 16px;
+  }
+
+  .agent-manual {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* UC account: saved login + live status of the UC window */
+
+.uc-creds {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 14px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-subtle);
+}
+
+.uc-cred {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+}
+
+.uc-cred + .uc-cred {
+  border-top: 1px solid var(--border);
+}
+
+.uc-cred-label {
+  flex: none;
+  width: 72px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.uc-cred-value {
+  flex: 1;
+  min-width: 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.uc-cred-secret {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.uc-cred-secret code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+}
+
+.uc-icon-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  transition: background 0.15s, color 0.15s;
+}
+
+.uc-icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.uc-creds-note {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.uc-run {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 560;
+}
+
+.uc-run.is-good {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.uc-run.is-bad {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.uc-run-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: uc-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes uc-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* Talk to a counselor: voice call with Jordan. The orb grows with whoever is talking (--level, 0–1). */
+.voice {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.voice-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 28px 16px 22px;
+  border-radius: 16px;
+  background: radial-gradient(circle at 50% 40%, var(--accent-soft), transparent 70%), var(--bg-subtle);
+}
+
+.voice-orb {
+  --level: 0;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 148px;
+  height: 148px;
+}
+
+.voice-core {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 3px solid var(--bg-elevated);
+  background: var(--accent-soft);
+  box-shadow: var(--shadow-card);
+  transform: scale(calc(1 + var(--level) * 0.18));
+  transition: transform 80ms linear;
+}
+
+/* Jordan's pixel portrait, cropped to head and shoulders. */
+.voice-core img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 8%;
+  image-rendering: pixelated;
+  transform: scale(1.5) translateY(14%);
+}
+
+.voice-ring {
+  position: absolute;
+  inset: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  opacity: 0;
+}
+
+.voice-orb.is-live .voice-ring {
+  opacity: calc(0.25 + var(--level) * 0.6);
+  transform: scale(calc(1.1 + var(--level) * 0.45));
+  transition: transform 90ms linear, opacity 90ms linear;
+}
+
+.voice-orb.is-live .voice-ring + .voice-ring {
+  inset: 14px;
+  opacity: calc(0.12 + var(--level) * 0.4);
+  transform: scale(calc(1.05 + var(--level) * 0.3));
+}
+
+/* Idle and connecting: a slow breath so the orb doesn't look dead. */
+.voice-orb:not(.is-live) .voice-core,
+.voice-orb.is-live:not(.is-speaking) .voice-ring {
+  animation: voice-breathe 3.2s var(--ease) infinite;
+}
+
+.voice-orb.is-speaking .voice-core {
+  border-color: var(--accent);
+}
+
+@keyframes voice-breathe {
+  0%, 100% { scale: 1; }
+  50% { scale: 1.05; }
+}
+
+.voice-state {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.voice-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 140px;
+}
+
+.voice-log-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.voice-log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  font-size: 14px;
+}
+
+.voice-log li {
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--bg-subtle);
+  overflow-wrap: anywhere;
+}
+
+.voice-log li.is-student {
+  align-self: flex-end;
+  background: var(--bg-user);
+}
+
+.voice-log li span {
+  display: block;
+  color: var(--text-faint);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-orb .voice-core,
+  .voice-orb .voice-ring {
+    animation: none !important;
+    transition: none;
+  }
+}
+
+.uc-code {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+
+.uc-code .field {
+  flex: 1;
+}
+
+.uc-code input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 18px;
+  letter-spacing: 0.2em;
+}
+
+@media (max-width: 640px) {
+  .uc-code {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* What filling UC's "About you" did */
+
+.uc-report {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.uc-report h4 {
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.uc-report ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.uc-report li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13.5px;
+  color: var(--text-muted);
+}
+
+.uc-report li b {
+  color: var(--text);
+  font-weight: 600;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.uc-report-needs {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--warning-soft);
+}
+
+.uc-report-needs h4 {
+  color: var(--warning);
+}
+
+.uc-report-needs li {
+  color: var(--text);
+  font-weight: 560;
+}
+
+.uc-report-needs li::before {
+  content: "•";
+  margin-right: 8px;
+  color: var(--warning);
+}
+
+.uc-report-needs li {
+  justify-content: flex-start;
+  gap: 0;
+}
+
+.uc-report-check {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+/* Talk to a counselor: virtual (AI voice) vs the student's own school counselor */
+
+.counselor-switch {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+}
+
+.counselor-switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 13.5px;
+  font-weight: 600;
+  transition: background 0.15s, color 0.15s;
+}
+
+.counselor-switch button:hover {
+  color: var(--text);
+}
+
+.counselor-switch button.on {
+  background: var(--bg-elevated);
+  color: var(--text);
+  box-shadow: var(--shadow-card);
+}
+
+@media (max-width: 640px) {
+  .counselor-switch {
+    align-self: stretch;
+  }
+
+  .counselor-switch button {
+    flex: 1;
+    justify-content: center;
+  }
+}

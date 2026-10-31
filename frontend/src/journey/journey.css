@@ -1,4 +1,4 @@
-/* UC Journey Map — pixel-art route with five checkpoints. */
+/* UC Journey Map: a small constellation of five chapter stops. */
 
 .map-btn {
   display: inline-flex;
@@ -45,20 +45,11 @@
 }
 
 .jm-embedded .jm-scroll {
-  padding: 72px 0 0;
+  padding: 0;
   place-items: stretch;
   align-content: start;
   gap: 10px;
   height: 100%;
-}
-
-.jm-embedded .jm-embedded-head {
-  flex: none;
-}
-
-.jm-embedded .jm-overall {
-  min-width: 0;
-  width: 100%;
 }
 
 .jm-embedded .jm-overall strong {
@@ -69,11 +60,6 @@
 
 .jm-embedded .jm-bar {
   display: none;
-}
-
-.jm-embedded .jm-map {
-  width: 100%;
-  max-width: none;
 }
 
 .jm-top {
@@ -95,109 +81,6 @@
 .jm-bar span { display: block; height: 100%; background: var(--jm-gold); transition: width 0.5s; }
 
 .jm-scroll { flex: 1; min-height: 0; overflow: auto; padding: 20px; display: grid; place-items: center; align-content: start; gap: 12px; }
-
-.jm-map {
-  position: relative;
-  width: min(100%, calc((100dvh - 180px) * 200 / 112));
-  border: 4px solid var(--jm-ink);
-  box-shadow: 6px 6px 0 rgba(47, 58, 51, 0.18);
-  background: #aabf8f;
-}
-
-.jm-map-tall { width: min(100%, 440px); }
-
-.jm-scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; image-rendering: pixelated; }
-
-.jm-pixel-text {
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 2.6px;
-  font-weight: 800;
-  letter-spacing: 0.2px;
-}
-
-.jm-nodes { list-style: none; margin: 0; padding: 0; }
-
-.jm-node { position: absolute; transform: translate(-50%, -50%); z-index: 2; }
-
-.jm-node button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--jm-ink);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.jm-label-below button { flex-direction: column; text-align: center; }
-.jm-label-left button { flex-direction: row-reverse; text-align: right; }
-
-.jm-node-dot {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border: 3px solid var(--jm-ink);
-  background: var(--jm-cream);
-  font-size: 13px;
-  font-weight: 800;
-  box-shadow: 3px 3px 0 rgba(47, 58, 51, 0.3);
-}
-
-.jm-node-complete .jm-node-dot { background: var(--jm-green); color: #fff; }
-.jm-node-current .jm-node-dot { background: var(--jm-gold); color: var(--jm-ink); animation: jm-pulse 1.6s steps(2) infinite; }
-.jm-node-upcoming .jm-node-dot { color: var(--jm-slate); }
-
-.jm-node-text {
-  display: grid;
-  gap: 2px;
-  padding: 5px 9px;
-  border: 2px solid var(--jm-ink);
-  background: var(--jm-cream);
-  box-shadow: 3px 3px 0 rgba(47, 58, 51, 0.25);
-  white-space: nowrap;
-}
-
-.jm-label-below .jm-node-text { margin-top: 2px; }
-.jm-node-title { font-size: 13px; font-weight: 700; }
-.jm-node-meta { display: flex; gap: 6px; align-items: center; font-size: 11.5px; color: #55605a; }
-.jm-label-below .jm-node-meta { justify-content: center; }
-
-.jm-state { padding: 0 5px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; border: 1px solid currentColor; }
-.jm-state-complete { color: #4c6b3e; }
-.jm-state-current { color: #8a6a17; background: rgba(201, 162, 63, 0.18); }
-.jm-state-upcoming { color: var(--jm-slate); }
-
-.jm-node button:hover .jm-node-text,
-.jm-node button:focus-visible .jm-node-text { background: #fffaf0; transform: translate(-1px, -1px); box-shadow: 4px 4px 0 rgba(47, 58, 51, 0.3); }
-.jm-node button:focus-visible { outline: 3px solid var(--jm-slate); outline-offset: 3px; }
-
-.jm-player {
-  position: absolute;
-  /* Below the checkpoint labels so it never hides their text. */
-  z-index: 1;
-  transform: translate(-50%, -100%);
-  transition: left 0.9s linear, top 0.9s linear;
-  pointer-events: none;
-}
-
-.jm-player img {
-  display: block;
-  /* Whole-number multiples of the 28×44 sprite keep its pixels square. */
-  width: 56px;
-  height: 88px;
-  image-rendering: pixelated;
-  filter: drop-shadow(2px 2px 0 rgba(47, 58, 51, 0.25));
-}
-@media (max-width: 720px) { .jm-player img { width: 28px; height: 44px; } }
-/* Single-frame sprite: a stepped waddle stands in for a walk cycle. */
-.jm-pose-run-a img { transform: translateY(-2px) rotate(-4deg); }
-.jm-pose-run-b img { transform: translateY(-2px) rotate(4deg); }
-.jm-pose-jump { animation: jm-hop 0.26s steps(3); }
 
 .jm-finished { max-width: 640px; text-align: center; color: var(--text-muted); font-size: 14px; }
 
@@ -281,21 +164,13 @@
 .jm-confirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px; border: 2px dashed var(--border-strong); }
 .jm-confirm p { flex-basis: 100%; margin: 0; font-size: 13px; }
 
-:root[data-theme="dark"] .jm-map { border-color: #11161a; }
-
-@keyframes jm-pulse { 50% { transform: translateY(-2px); } }
-@keyframes jm-hop { 50% { transform: translate(-50%, calc(-100% - 6px)); } }
+@keyframes jm-pulse { 50% { box-shadow: 0 0 0 7px rgba(242, 194, 48, 0.15); } }
 @keyframes jm-slide { from { transform: translateX(40px); opacity: 0; } }
 
 @media (max-width: 720px) {
   .jm-top { flex-wrap: wrap; padding: 10px 16px; gap: 8px 12px; }
   .jm-overall { flex-basis: 100%; }
   .jm-scroll { padding: 12px 16px 24px; }
-  .jm-node-text { white-space: normal; width: 128px; }
-  .jm-node-title { font-size: 12.5px; }
-  .jm-node-meta { flex-wrap: wrap; }
-  .jm-label-right { transform: translate(-14px, -50%); }
-  .jm-label-left { transform: translate(calc(-100% + 14px), -50%); }
   .jm-panel-wrap { align-items: flex-end; }
   .jm-panel { height: 88%; border-left: 0; border-top: 4px solid #2f3a33; animation-name: jm-sheet; }
 }
@@ -303,10 +178,362 @@
 @keyframes jm-sheet { from { transform: translateY(40px); opacity: 0; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .jm-player { transition: none; }
-  .jm-node-current .jm-node-dot, .jm-pose-jump, .jm-panel { animation: none; }
+  .jm-panel { animation: none; }
   .map-btn, .jm-bar span { transition: none; }
 }
 
 /* Global form styles stretch inputs; keep panel checkboxes checkbox-sized. */
 .jm-panel input[type="checkbox"] { flex: none; width: 16px; height: 16px; margin: 3px 0 0; accent-color: #6f8f5a; }
+
+
+/* ------------------------------------------------------------ Constellation
+   Five small planet-like stops on a gently flowing trail, on one solid warm neutral.
+   Geometry lives in constellation.ts; the stops are laid out at design size × scale. */
+
+.jm {
+  --cn-bg: #efe9dc;
+  --cn-ink: #3a3f3a;
+  --cn-muted: #7d8079;
+  --cn-trail: #c9bfa9;
+  --cn-gold: #c9a23f;
+  --cn-gold-soft: rgba(201, 162, 63, 0.22);
+  --cn-sage: #8fa88a;
+  --cn-sage-deep: #5f7a5b;
+  --cn-sand: #e2d2ac;
+  --cn-charcoal: #4b504b;
+  --cn-cream: #f8f3e7;
+  --cn-card: #fbf8f1;
+}
+
+:root[data-theme="dark"] .jm {
+  --cn-bg: #1f2420;
+  --cn-ink: #ece8de;
+  --cn-muted: #a3a59d;
+  --cn-trail: #4a4f47;
+  --cn-gold-soft: rgba(201, 162, 63, 0.18);
+  --cn-sand: #cdbb92;
+  --cn-charcoal: #6a706a;
+  --cn-cream: #e9e2d2;
+  --cn-card: #2a302b;
+}
+
+.jm-sky-fit {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: 16px;
+  background: var(--cn-bg);
+}
+
+.jm-embedded .jm-sky-fit {
+  height: 100%;
+  min-height: 0;
+}
+
+.jm-sky {
+  position: relative;
+  flex: none;
+}
+
+.jm-trail {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* The whole route as a soft dotted line; the part already walked in gold. */
+.jm-trail-base {
+  fill: none;
+  stroke: var(--cn-trail);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-dasharray: 0.1 5;
+}
+
+.jm-trail-lit {
+  fill: none;
+  stroke: var(--cn-gold);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+/* A chapter was just completed: the new stretch draws itself in. */
+.jm-trail-lit.is-drawing {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: jm-draw 1.2s ease-out forwards;
+}
+
+@keyframes jm-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+.jm-stops {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Each stop is centred on its point; the planet floats very slightly. */
+.jm-stop {
+  position: absolute;
+  width: 0;
+  height: 0;
+  z-index: 1;
+  animation: jm-float 7s ease-in-out infinite;
+}
+
+.jm-stop:hover,
+.jm-stop:focus-within,
+.jm-stop.is-selected {
+  z-index: 3;
+}
+
+@keyframes jm-float {
+  50% { transform: translateY(-2px); }
+}
+
+.jm-planet-btn {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 46px;
+  height: 46px;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  transition: transform 0.2s var(--ease), opacity 0.2s, filter 0.2s;
+}
+
+.jm-planet-btn:hover {
+  transform: translate(-50%, -50%) scale(1.08);
+}
+
+.jm-planet-btn:focus-visible {
+  outline: 2px solid var(--cn-ink);
+  outline-offset: 3px;
+}
+
+.jm-planet {
+  width: 44px;
+  height: 44px;
+  overflow: visible;
+}
+
+/* Planet surfaces: solid colours, quiet details. */
+.jm-p-profile { fill: var(--cn-sage); }
+.jm-p-ucs { fill: var(--cn-sand); }
+.jm-p-activities { fill: var(--cn-charcoal); }
+.jm-p-essays { fill: var(--cn-cream); stroke: var(--cn-trail); stroke-width: 1; }
+.jm-p-review { fill: var(--cn-gold); }
+/* Symbols sit on light planet surfaces in both themes, so they stay dark ink. */
+.jm-p-glyph { fill: #2f342f; }
+.jm-p-glyph-line { fill: none; stroke: #2f342f; stroke-width: 1.6; stroke-linecap: round; }
+.jm-p-crater { fill: var(--cn-gold); opacity: 0.85; }
+.jm-p-band { fill: none; stroke: var(--cn-sand); stroke-width: 2; }
+.jm-p-nib { stroke: var(--cn-cream); stroke-width: 1.1; }
+.jm-p-orbit { fill: none; stroke: var(--cn-gold); stroke-width: 1; stroke-dasharray: 2 3; opacity: 0.8; }
+.jm-ring-back { fill: none; stroke: var(--cn-sage-deep); stroke-width: 1.4; opacity: 0.55; }
+.jm-ring-front { fill: none; stroke: var(--cn-sage-deep); stroke-width: 1.6; }
+.jm-p-review + .jm-p-glyph { fill: #2c2416; }
+
+/* Done: a small sage check. */
+.jm-stop-check {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--cn-sage-deep);
+  color: #fff;
+  box-shadow: 0 0 0 2px var(--cn-bg);
+}
+
+/* Current: a restrained gold halo. */
+.jm-stop-current .jm-planet-btn::before {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  background: var(--cn-gold-soft);
+  box-shadow: 0 0 0 1px rgba(201, 162, 63, 0.45);
+  z-index: -1;
+  animation: jm-halo 3.2s ease-in-out infinite;
+}
+
+@keyframes jm-halo {
+  50% { transform: scale(1.07); opacity: 0.65; }
+}
+
+/* Coming up: subdued but still clearly there. */
+.jm-stop-upcoming .jm-planet-btn {
+  opacity: 0.55;
+  filter: saturate(0.55);
+}
+
+.jm-stop-upcoming .jm-planet-btn:hover,
+.jm-stop-upcoming .jm-planet-btn:focus-visible,
+.jm-stop-upcoming.is-selected .jm-planet-btn {
+  opacity: 0.9;
+  filter: none;
+}
+
+/* Selected (whose chat is open): a thin ink ring, never confused with progress. */
+.jm-stop.is-selected .jm-planet-btn::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 1.5px solid var(--cn-ink);
+}
+
+/* "You are here": a small rocket beside the current stop, gliding on to the next when a
+   chapter is done. It sits above the trail but below the stops and their cards. */
+.jm-rocket {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: 2;
+  pointer-events: none;
+  transition: transform 1.2s cubic-bezier(0.45, 0, 0.2, 1);
+}
+
+.jm-rocket-art {
+  position: absolute;
+  width: 40px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  overflow: visible;
+  filter: drop-shadow(0 2px 2px rgba(30, 32, 28, 0.18));
+  animation: jm-rocket-bob 3.6s ease-in-out infinite;
+}
+
+.jm-rocket-body { fill: var(--cn-cream); stroke: var(--cn-ink); stroke-width: 1; }
+.jm-rocket-nose { fill: var(--cn-gold); }
+.jm-rocket-fin { fill: var(--cn-gold); stroke: var(--cn-ink); stroke-width: 0.8; stroke-linejoin: round; }
+.jm-rocket-window { fill: var(--cn-sage); stroke: var(--cn-ink); stroke-width: 0.8; }
+.jm-rocket-flame { fill: #e08a4f; transform-origin: 4px 10px; animation: jm-flame 0.5s ease-in-out infinite alternate; }
+
+@keyframes jm-rocket-bob {
+  50% { translate: 0 -1.5px; }
+}
+
+@keyframes jm-flame {
+  to { transform: scaleX(1.5); opacity: 0.75; }
+}
+
+/* Name and status: revealed on hover, keyboard focus, or selection. */
+.jm-stop-card {
+  position: absolute;
+  left: 0;
+  bottom: 30px;
+  transform: translate(-50%, 4px);
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  width: max-content;
+  max-width: 180px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--cn-card);
+  color: var(--cn-ink);
+  box-shadow: 0 6px 18px rgba(30, 32, 28, 0.14), 0 0 0 1px rgba(30, 32, 28, 0.06);
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s, transform 0.16s var(--ease);
+}
+
+.jm-stop-card.is-below {
+  top: 30px;
+  bottom: auto;
+  transform: translate(-50%, -4px);
+}
+
+.jm-stop:hover .jm-stop-card,
+.jm-stop:focus-within .jm-stop-card,
+.jm-stop.is-selected .jm-stop-card {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
+}
+
+.jm-stop-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.jm-stop-status {
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--cn-muted);
+}
+
+.jm-stop-status-complete { color: var(--cn-sage-deep); }
+.jm-stop-status-current { color: #8a6a00; }
+:root[data-theme="dark"] .jm-stop-status-current { color: var(--cn-gold); }
+
+.jm-stop-open {
+  margin-top: 4px;
+  padding: 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--cn-ink) 25%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--cn-ink);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.jm-stop-open:hover {
+  background: color-mix(in srgb, var(--cn-ink) 8%, transparent);
+}
+
+.jm-stop-open:focus-visible {
+  outline: 2px solid var(--cn-ink);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jm-stop,
+  .jm-stop-current .jm-planet-btn::before,
+  .jm-rocket-art,
+  .jm-rocket-flame {
+    animation: none;
+  }
+
+  .jm-rocket {
+    transition: none;
+  }
+
+  .jm-planet-btn,
+  .jm-stop-card {
+    transition: none;
+  }
+
+  .jm-planet-btn:hover {
+    transform: translate(-50%, -50%);
+  }
+
+  .jm-trail-lit.is-drawing {
+    animation: none;
+    stroke-dasharray: none;
+    stroke-dashoffset: 0;
+  }
+}

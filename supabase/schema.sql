@@ -26,6 +26,14 @@ create table if not exists public.game_progress (
   updated_at timestamptz not null default now()
 );
 
+-- Birthday and birthplace from the voice counselor call. Kept out of `profiles` on purpose.
+-- data: { "birthDate": "YYYY-MM-DD", "birthCountry": "", "birthCity": "" }
+create table if not exists public.personal_info (
+  user_id    uuid primary key references auth.users (id) on delete cascade,
+  data       jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
 -- ---------------------------------------------------------------------------
 -- Per-user collections
 -- ---------------------------------------------------------------------------
@@ -63,7 +71,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['profiles', 'profile_analyses', 'game_progress', 'conversations', 'transcripts', 'course_plans'] loop
+  foreach t in array array['profiles', 'profile_analyses', 'game_progress', 'personal_info', 'conversations', 'transcripts', 'course_plans'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('drop policy if exists "Users manage own rows" on public.%I', t);
     execute format(

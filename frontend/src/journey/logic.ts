@@ -1,11 +1,11 @@
 import { COLLEGE_NAMES } from "../colleges";
-import type { PiqStatus, Profile, TargetCollege, UcJourneyState } from "../types";
+import type { ActivityCategory, PiqStatus, Profile, TargetCollege, UcJourneyState } from "../types";
 import { hasAllDrafts, readyToGenerate } from "./piqs";
 
 /**
  * UC Journey Map: five checkpoints whose progress is derived from the student's
- * saved profile. Only PIQ statuses, manual review ticks and the explicit
- * submission record live in `profile.ucJourney`.
+ * saved profile. Only PIQ statuses, manual review ticks, activity-question
+ * answers and the explicit submission record live in `profile.ucJourney`.
  */
 
 export const PIQ_WORD_LIMIT = 350;
@@ -26,6 +26,46 @@ export const PIQ_PROMPTS = [
   { id: "standout", title: "What makes you stand out", prompt: "Beyond what has already been shared in your application, what do you believe makes you a strong candidate for admissions to the University of California?" },
 ] as const;
 
+/**
+ * Direct yes/no (or how-many) activity questions the story asks, in order.
+ * A "yes" adds one entry to the activities list, then one optional details question.
+ */
+export const ACTIVITY_QUESTIONS: {
+  id: string;
+  name: string;
+  category: ActivityCategory;
+  question: string;
+  /** Ask how many instead of a plain yes/no. */
+  counted: boolean;
+  details: string;
+}[] = [
+  { id: "sports", name: "Sports", category: "extracurricular", question: "do you play any sports — school teams, club teams, or anything competitive?", counted: true, details: "Which ones, what position or role, and about how many hours a week?" },
+  { id: "music", name: "Band / music", category: "extracurricular", question: "are you in the band, orchestra, choir, or any other music group?", counted: false, details: "Which group, what instrument or part, and any section leader or solo roles?" },
+  { id: "clubs", name: "Clubs", category: "extracurricular", question: "are you in any clubs, at school or outside it?", counted: true, details: "Which clubs, and do you hold any officer or leadership roles?" },
+  { id: "volunteering", name: "Volunteering", category: "volunteering", question: "do you do any volunteering or community service?", counted: false, details: "Where do you volunteer, what do you do, and about how many hours a week?" },
+  { id: "work", name: "Job / family responsibilities", category: "work", question: "do you have a job, or regular family responsibilities like caring for siblings or helping at a family business? UC counts these too.", counted: false, details: "What do you do, and about how many hours a week?" },
+];
+
+export function activitySurveyDone(j: UcJourneyState) {
+  return ACTIVITY_QUESTIONS.every((q) => {
+    const a = j.activitySurvey?.[q.id];
+    return !!a && (a.count === 0 || a.details !== undefined);
+  });
+}
+
+/** Activities step: questions answered (story or Profile page), and every description fits UC's limit. */
+export function activitiesStatus(profile: Profile) {
+  const j = journeyOf(profile);
+  const acts = profile.activities;
+  const answered =
+    activitySurveyDone(j) ||
+    !!j.activitiesReviewed ||
+    // Lists finished on the Profile page (or before the question flow existed) count too.
+    (acts.length > 0 && acts.every((a) => a.role.trim() && a.hoursPerWeek.trim() && a.description.trim()));
+  const fits = acts.every((a) => a.description.length <= ACTIVITY_DESC_LIMIT);
+  return { answered, fits, done: answered && fits };
+}
+
 export const REVIEW_MANUAL = [
   { id: "supplements", label: "Checked campus or major supplements", detail: "Some majors ask for extra steps (portfolios, auditions, supplemental questions). Check each campus's major page." },
   { id: "fees", label: "Planned application fees or a fee waiver", detail: "UC charges a fee per campus; eligible students can get a fee waiver for up to four campuses inside the application." },
@@ -44,7 +84,7 @@ export function emptyJourney(): UcJourneyState {
 
 export function journeyOf(profile: Profile): UcJourneyState {
   const j = profile.ucJourney;
-  return { ...emptyJourney(), ...j, piqs: { ...j?.piqs }, checks: { ...j?.checks }, followUps: { ...j?.followUps } };
+  return { ...emptyJourney(), ...j, piqs: { ...j?.piqs }, checks: { ...j?.checks }, followUps: { ...j?.followUps }, activitySurvey: { ...j?.activitySurvey } };
 }
 
 export function wordCount(text: string) {
@@ -83,6 +123,7 @@ export function computeJourney(profile: Profile, sections: Record<string, number
   const j = journeyOf(profile);
   const ucs = profile.colleges.filter(isUc);
   const acts = profile.activities;
+  const activities = activitiesStatus(profile);
   const chosen = Object.entries(j.piqs).slice(0, PIQ_REQUIRED);
   const ready = chosen.filter(([, s]) => s === "ready").length;
   const academicsReady = academicStarted || sections.academics >= 1;
@@ -123,21 +164,29 @@ export function computeJourney(profile: Profile, sections: Record<string, number
       tasks: [
         {
           id: "add",
-          label: "Add activities you want to report",
-          done: acts.length > 0,
+          label: "Answer the activity questions",
+          done: activities.answered,
           detail: `${acts.length} of up to 20 entries · no quota required`,
+        },
+        {
+          id: "limit",
+          label: "Descriptions fit UC's limit",
+          done: activities.fits,
+          detail: `UC allows ${ACTIVITY_DESC_LIMIT} characters per activity.`,
         },
         {
           id: "basics",
           label: "Role and time for every listed activity",
           done: acts.length > 0 && acts.every((a) => a.role.trim() && a.hoursPerWeek.trim()),
           detail: "Hours/week and weeks/year where the category asks for them.",
+          optional: true,
         },
         {
           id: "impact",
           label: "Describe responsibilities and impact",
-          done: acts.length > 0 && acts.every((a) => a.description.trim() && a.description.length <= ACTIVITY_DESC_LIMIT),
-          detail: `What you did, what you contributed, and what changed. UC allows ${ACTIVITY_DESC_LIMIT} characters.`,
+          done: acts.length > 0 && acts.every((a) => a.description.trim()),
+          detail: "What you did, what you contributed, and what changed.",
+          optional: true,
         },
         {
           id: "awards",
@@ -153,8 +202,8 @@ export function computeJourney(profile: Profile, sections: Record<string, number
       short: "PIQs",
       tasks: [
         { id: "choose", label: "Choose four Personal Insight Questions", done: chosen.length >= PIQ_REQUIRED, detail: `${chosen.length} of 4 chosen` },
-        { id: "details", label: "Answer Quill's follow-up questions", done: readyToGenerate(profile), detail: "Specific details so each essay sounds like you.", optional: true },
-        { id: "drafts", label: "Generate your four drafts", done: hasAllDrafts(profile), detail: "Appears in Materials → Essays.", optional: true },
+        { id: "details", label: "Share personal details Quill can't find in your activities", done: readyToGenerate(profile), detail: "Only for questions about your personal life.", optional: true },
+        { id: "drafts", label: "Generate your four drafts", done: hasAllDrafts(profile), detail: "Written automatically once your activities are done · Profile → Essays.", optional: true },
         { id: "ready", label: "Get all four responses ready", done: chosen.length >= PIQ_REQUIRED && ready >= PIQ_REQUIRED, detail: `${ready} of 4 ready · ${PIQ_WORD_LIMIT} words max each` },
       ],
     },

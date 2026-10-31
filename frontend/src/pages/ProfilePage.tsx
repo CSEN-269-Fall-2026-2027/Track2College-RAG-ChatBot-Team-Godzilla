@@ -1,17 +1,17 @@
 import { useMemo, useState } from "react";
 import { COLLEGES } from "../colleges";
 import { MAJOR_SUGGESTIONS } from "../constants";
-import { setCampusMajor, toggleCampus } from "../journey/logic";
+import { activitiesStatus, journeyOf, PIQ_REQUIRED, setCampusMajor, toggleCampus } from "../journey/logic";
 import { usePlanning } from "../planning";
 import {
   ACTIVITY_CATEGORY_LABELS,
   PROFILE_SECTIONS,
+  PROFILE_WORKSPACES,
   academicHistoryStatus,
   completeness,
   emptyActivity,
   useProfile,
   type ProfileRouteId,
-  type SaveState,
   type SectionId,
 } from "../profile";
 import { href, navigate } from "../router";
@@ -19,7 +19,11 @@ import { newId } from "../storage";
 import type { ActivityCategory, Award, Profile } from "../types";
 import { ChipsInput, ProgressRing, Segmented, SelectField, TextArea, TextField, type Option } from "../components/Form";
 import { ArrowRightIcon, CheckIcon, PlusIcon, TrashIcon } from "../components/icons";
+import { CoursePlanTab } from "./CoursePlanTab";
+import { EssayTab } from "./EssayTab";
 import { TranscriptTab } from "./TranscriptTab";
+
+const ESSAYS = PROFILE_WORKSPACES.find((w) => w.id === "essays")!;
 
 type Group = "basics" | "academics" | "goals" | "preferences";
 type Setter = <G extends Group, K extends keyof Profile[G]>(group: G, key: K) => (value: Profile[G][K]) => void;
@@ -50,25 +54,15 @@ const ACTIVITY_CATEGORIES = opts<Exclude<ActivityCategory, "">>(
 );
 
 function isRoute(value: string | null): value is ProfileRouteId {
-  return PROFILE_SECTIONS.some((s) => s.id === value) || value === "activities";
-}
-
-function SavedIndicator({ state }: { state: SaveState }) {
-  if (state === "idle") return <span className="saved muted">Changes save automatically</span>;
-  if (state === "saving") return <span className="saved">Saving…</span>;
-  if (state === "error") return <span className="saved error">Couldn't save. Check your connection.</span>;
-  return (
-    <span className="saved ok">
-      <CheckIcon width={14} height={14} /> Saved
-    </span>
-  );
+  return PROFILE_SECTIONS.some((s) => s.id === value) || PROFILE_WORKSPACES.some((w) => w.id === value);
 }
 
 export function ProfilePage({ section: param, onAsk }: { section: string | null; onAsk: (text: string) => void }) {
-  const { profile, update, saveState } = useProfile();
+  const { profile, update } = useProfile();
   const { transcripts, ensureManualTranscript } = usePlanning();
   const section: ProfileRouteId = isRoute(param) ? param : "basics";
-  const { overall, sections } = completeness(profile);
+  const { sections } = completeness(profile);
+  const essaysReady = Object.values(journeyOf(profile).piqs).filter((s) => s === "ready").length;
   const academic = useMemo(() => academicHistoryStatus(profile, transcripts), [profile, transcripts]);
   const navIndex = PROFILE_SECTIONS.findIndex((s) => s.id === section);
   const current = PROFILE_SECTIONS[navIndex] ?? PROFILE_SECTIONS[0];
@@ -93,102 +87,113 @@ export function ProfilePage({ section: param, onAsk }: { section: string | null;
     return 0;
   };
 
+  // Sidebar order: the profile sections, the essays, then optional Cost & support last.
+  const navItems = [
+    ...PROFILE_SECTIONS.filter((s) => s.id !== "finances").map((s) => ({ id: s.id, title: s.title, blurb: s.blurb, done: sectionDone(s.id), value: sectionValue(s.id) })),
+    { id: ESSAYS.id, title: ESSAYS.title, blurb: ESSAYS.blurb, done: essaysReady >= PIQ_REQUIRED, value: essaysReady / PIQ_REQUIRED },
+    ...PROFILE_SECTIONS.filter((s) => s.id === "finances").map((s) => ({ id: s.id, title: s.title, blurb: s.blurb, done: sectionDone(s.id), value: sectionValue(s.id) })),
+  ];
+
   return (
     <div className="page-scroll">
-      <div className="page-inner">
-        <header className="page-head">
-          <div>
-            <h1>My profile</h1>
-            <p>UC first-year application prep — this does not replace the official UC application.</p>
-          </div>
-          <div className="page-head-side">
-            <SavedIndicator state={saveState} />
-            <div className="overall">
-              <ProgressRing value={overall} size={40} />
-              <span>
-                <strong>{Math.round(overall * 100)}%</strong> basics complete
-              </span>
-            </div>
-          </div>
-        </header>
-
-        {transferUnsupported && (
-          <div className="error-card" role="status">
-            <p>
-              This profile flow supports <strong>first-year</strong> UC applicants (including gap-year students). Transfer applicants use a different UC process. Your saved data is kept, but we can’t guide a transfer application here.
-            </p>
-          </div>
-        )}
-
+      <div className="page-inner profile-page">
+        {/* The content column is centered on the page; the sidebar sits in the left margin. */}
         <div className="profile-layout">
+          <header className="page-head profile-head">
+            <div>
+              <h1>My profile</h1>
+              <p>UC first-year application prep — this does not replace the official UC application.</p>
+            </div>
+          </header>
+
           <nav className="section-nav" aria-label="Profile sections">
-            {PROFILE_SECTIONS.map((s) => {
-              const done = sectionDone(s.id);
-              const value = sectionValue(s.id);
-              return (
-                <a key={s.id} href={href("profile", s.id)} className={`section-link ${s.id === section ? "active" : ""}`}>
-                  <span className={`section-dot ${done ? "done" : ""}`}>
-                    {done ? <CheckIcon width={12} height={12} /> : <ProgressRing value={value} size={18} stroke={2.5} />}
-                  </span>
-                  <span className="section-text">
-                    <span>{s.title}</span>
-                    <span className="section-blurb">{s.blurb}</span>
-                  </span>
-                </a>
-              );
-            })}
+            {navItems.map((s) => (
+              <a key={s.id} href={href("profile", s.id)} className={`section-link ${s.id === section ? "active" : ""}`}>
+                <span className={`section-dot ${s.done ? "done" : ""}`}>
+                  {s.done ? <CheckIcon width={12} height={12} /> : <ProgressRing value={s.value} size={18} stroke={2.5} />}
+                </span>
+                <span className="section-text">
+                  <span>{s.title}</span>
+                  <span className="section-blurb">{s.blurb}</span>
+                </span>
+              </a>
+            ))}
           </nav>
 
-          {section === "academics" ? (
-            <div className="profile-transcript" key={section}>
-              <AcademicsSection profile={profile} set={set} academic={academic} onAsk={onAsk} onManual={() => ensureManualTranscript()} />
-              <footer className="form-foot card">
-                <button className="btn-primary" onClick={() => navigate("profile", "campuses")}>
-                  Next: UC campuses &amp; majors <ArrowRightIcon width={16} height={16} />
-                </button>
-              </footer>
-            </div>
-          ) : section === "activities" ? (
-            <section className="card form-card" key={section}>
-              <header className="card-head">
-                <h2>Activities &amp; awards</h2>
-                <p>UC lets you list up to 20 entries across six categories. Quality matters more than filling every slot — awards and activities are optional.</p>
-              </header>
-              <ActivitiesWorkspace profile={profile} update={update} />
-              <footer className="form-foot">
-                <button className="btn-primary" onClick={() => navigate("map")}>
-                  Back to Journey Map <ArrowRightIcon width={16} height={16} />
-                </button>
-              </footer>
-            </section>
-          ) : (
-            <section className="card form-card" key={section}>
-              <header className="card-head">
-                <h2>{current.title}</h2>
-                <p>{current.blurb}</p>
-              </header>
+          <div className="profile-main">
+            {transferUnsupported && (
+              <div className="error-card" role="status">
+                <p>
+                  This profile flow supports <strong>first-year</strong> UC applicants (including gap-year students). Transfer applicants use a different UC process. Your saved data is kept, but we can’t guide a transfer application here.
+                </p>
+              </div>
+            )}
 
-              {section === "basics" && <BasicsForm profile={profile} set={set} />}
-              {section === "campuses" && <CampusesForm profile={profile} set={set} update={update} />}
-              {section === "finances" && <FinancesForm profile={profile} set={set} />}
 
-              <footer className="form-foot">
-                {section === "basics" ? (
-                  <button className="btn-primary" onClick={() => navigate("profile", "academics")}>
-                    Next: Academic history <ArrowRightIcon width={16} height={16} />
+            {section === "essays" ? (
+              <div className="profile-transcript" key={section}>
+                <EssayTab onAsk={onAsk} />
+              </div>
+            ) : section === "plan" ? (
+              <div className="profile-transcript" key={section}>
+                <CoursePlanTab onAsk={onAsk} />
+                <footer className="form-foot card">
+                  <button className="btn-ghost" onClick={() => navigate("profile", "academics")}>
+                    Back to academic history
                   </button>
-                ) : section === "campuses" ? (
-                  <button className="btn-primary" onClick={() => navigate("advisor")}>
-                    Go to Advisor <ArrowRightIcon width={16} height={16} />
+                </footer>
+              </div>
+            ) : section === "academics" ? (
+              <div className="profile-transcript" key={section}>
+                <AcademicsSection profile={profile} set={set} academic={academic} onAsk={onAsk} onManual={() => ensureManualTranscript()} />
+                <footer className="form-foot card">
+                  <button className="btn-primary" onClick={() => navigate("profile", "campuses")}>
+                    Next: UC campuses &amp; majors <ArrowRightIcon width={16} height={16} />
                   </button>
-                ) : (
-                  <button className="btn-primary" onClick={() => navigate("advisor")}>
-                    Go to Advisor <ArrowRightIcon width={16} height={16} />
+                </footer>
+              </div>
+            ) : section === "activities" ? (
+              <section className="card form-card" key={section}>
+                <header className="card-head">
+                  <h2>Activities &amp; awards</h2>
+                  <p>UC lets you list up to 20 entries across six categories. Quality matters more than filling every slot — awards and activities are optional.</p>
+                </header>
+                <ActivitiesWorkspace profile={profile} update={update} />
+                <footer className="form-foot">
+                  <button className="btn-primary" onClick={() => navigate("map")}>
+                    Back to Journey Map <ArrowRightIcon width={16} height={16} />
                   </button>
-                )}
-              </footer>
-            </section>
-          )}
+                </footer>
+              </section>
+            ) : (
+              <section className="card form-card" key={section}>
+                <header className="card-head">
+                  <h2>{current.title}</h2>
+                  <p>{current.blurb}</p>
+                </header>
+
+                {section === "basics" && <BasicsForm profile={profile} set={set} />}
+                {section === "campuses" && <CampusesForm profile={profile} set={set} update={update} />}
+                {section === "finances" && <FinancesForm profile={profile} set={set} />}
+
+                <footer className="form-foot">
+                  {section === "basics" ? (
+                    <button className="btn-primary" onClick={() => navigate("profile", "academics")}>
+                      Next: Academic history <ArrowRightIcon width={16} height={16} />
+                    </button>
+                  ) : section === "campuses" ? (
+                    <button className="btn-primary" onClick={() => navigate("advisor")}>
+                      Go to Advisor <ArrowRightIcon width={16} height={16} />
+                    </button>
+                  ) : (
+                    <button className="btn-primary" onClick={() => navigate("advisor")}>
+                      Go to Advisor <ArrowRightIcon width={16} height={16} />
+                    </button>
+                  )}
+                </footer>
+              </section>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -565,6 +570,36 @@ function ActivitiesWorkspace({ profile, update }: { profile: Profile; update: Up
           <PlusIcon width={15} height={15} /> Add
         </button>
       </form>
+
+      <ActivitiesDone profile={profile} update={update} />
     </>
+  );
+}
+
+/** Finishing (or skipping) activities here passes the journey step, which starts essay drafting. */
+function ActivitiesDone({ profile, update }: { profile: Profile; update: Update }) {
+  const status = activitiesStatus(profile);
+  if (status.done) {
+    return (
+      <p className="jm-note" style={{ marginTop: 24 }}>
+        <CheckIcon width={14} height={14} /> Activities step done — Quill drafts your chosen essays from this list automatically.
+      </p>
+    );
+  }
+  return (
+    <div style={{ marginTop: 24 }}>
+      <button
+        className="btn-primary"
+        disabled={status.answered && !status.fits}
+        onClick={() => update((p) => ({ ...p, ucJourney: { ...journeyOf(p), activitiesReviewed: true } }))}
+      >
+        {profile.activities.length ? "I'm done with activities" : "Skip activities for now"}
+      </button>
+      <p className="jm-note" style={{ marginTop: 8 }}>
+        {status.answered && !status.fits
+          ? "Shorten any description over 350 characters to finish this step."
+          : "This finishes the activities step, and Quill starts drafting your essays from whatever is here."}
+      </p>
+    </div>
   );
 }

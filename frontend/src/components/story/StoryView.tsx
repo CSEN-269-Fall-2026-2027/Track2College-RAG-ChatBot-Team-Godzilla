@@ -6,7 +6,6 @@ import { openerFor, type OpenerAction } from "../../game/openers";
 import { journeyOf, togglePiq } from "../../journey/logic";
 import { useProfile } from "../../profile";
 import { ChatView } from "../ChatView";
-import { ModeSwitch } from "../ModeSwitch";
 import { Character } from "./Character";
 
 export interface AskOptions {
@@ -118,7 +117,6 @@ export function StoryView({
         </div>
 
         <aside className="story-guide-rail" aria-label="Choose a guide">
-          <ModeSwitch className="mode-switch-lg mode-switch-above-guide" />
           <div className="story-guide-stage">
             <Character
               key={mentor.id}

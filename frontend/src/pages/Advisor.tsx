@@ -5,13 +5,17 @@ import { displayName, profileSummary, useProfile } from "../profile";
 import { makeTitle, newId } from "../storage";
 import type { Handoff, Health } from "../App";
 import type { Conversation, Message } from "../types";
+import { ChatView } from "../components/ChatView";
 import { Composer } from "../components/Composer";
+import { Character } from "../components/story/Character";
 import { GuidedView } from "../components/story/GuidedView";
 import { StoryView, type AskOptions } from "../components/story/StoryView";
 import { useAuth } from "../auth";
 import { useGame } from "../game/GameProvider";
 import { getStore } from "../data";
 import { mentorById } from "../game/characters";
+import { STAGE_GUIDE, useCurrentStage } from "../journey/guides";
+import type { CheckpointId } from "../journey/logic";
 import { openerFor } from "../game/openers";
 
 interface AdvisorProps {
@@ -32,6 +36,8 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
 
   const mentorRef = useRef(mentor);
   mentorRef.current = mentor;
+  const storyRef = useRef(storyMode);
+  storyRef.current = storyMode;
 
   const [chats, setChats] = useState<Chats>({});
   /** Advisor whose reply is in flight (only one request at a time). */
@@ -165,7 +171,8 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
       if (!query || abortRef.current) return;
 
       const persona = options.mentorId ?? mentorRef.current.id;
-      if (options.mentorId && options.mentorId !== mentorRef.current.id) {
+      // Story mode talks to the current level's guide; leave Manual's chosen guide alone.
+      if (options.mentorId && options.mentorId !== mentorRef.current.id && !storyRef.current) {
         updateSettings({ mentorId: options.mentorId });
       }
 
@@ -198,8 +205,7 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
     [request, updateSettings, setChat],
   );
 
-  const retry = useCallback(() => {
-    const persona = mentorRef.current.id;
+  const retry = useCallback((persona: string = mentorRef.current.id) => {
     const convo = chatsRef.current[persona];
     if (!convo || abortRef.current) return;
     const lastUser = [...convo.messages].reverse().find((m) => m.role === "user");
@@ -220,10 +226,8 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
 
   const sendRef = useRef(send);
   const retryRef = useRef(retry);
-  const storyRef = useRef(storyMode);
   sendRef.current = send;
   retryRef.current = retry;
-  storyRef.current = storyMode;
 
   const onAsk = useCallback((question: string, options?: AskOptions) => {
     const persona = options?.mentorId ?? mentorRef.current.id;
@@ -231,14 +235,19 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
     sendRef.current(question, hasHistory ? false : !!options?.fresh, options);
   }, []);
   const onRetry = useCallback(() => retryRef.current(), []);
-  /** Story mode hands a question to a guide: switch to Manual and ask it there. */
-  const onGuidedAsk = useCallback(
-    (prompt: string, mentorId: string) => {
-      updateSettings({ storyMode: false });
-      onAsk(prompt, { mentorId: mentorId as AskOptions["mentorId"] });
-    },
-    [onAsk, updateSettings],
-  );
+  /** Story mode's chat is with the guide of the student's current level (Sage on the final step). */
+  // Story mode chats with the current chapter's guide, or with the person whose map stop the
+  // student clicked. Moving on to a new chapter returns the chat to that chapter's guide.
+  const currentStage = useCurrentStage();
+  const [selectedStage, setSelectedStage] = useState<CheckpointId | null>(null);
+  useEffect(() => setSelectedStage(null), [currentStage]);
+  const stageGuide = mentorById(STAGE_GUIDE[selectedStage ?? currentStage]);
+  const stageGuideRef = useRef(stageGuide.id);
+  stageGuideRef.current = stageGuide.id;
+  const onGuideAsk = useCallback((prompt: string) => onAsk(prompt, { mentorId: stageGuideRef.current }), [onAsk]);
+  const onGuideFollowup = useCallback((question: string) => onAsk(question, { followup: true, mentorId: stageGuideRef.current }), [onAsk]);
+  const onGuideRetry = useCallback(() => retryRef.current(stageGuideRef.current), []);
+  const onGuideSend = useCallback((text: string) => sendRef.current(text, false, { mentorId: stageGuideRef.current }), []);
   const onSend = useCallback((text: string) => sendRef.current(text), []);
 
   const handled = useRef<string | null>(null);
@@ -262,12 +271,61 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
 
   const name = displayName(profile, account?.name ?? "");
   nameRef.current = name;
+  const guide = stageGuide;
+  const guideChat = chats[guide.id] ?? null;
 
   return (
     <div className="advisor" hidden={!visible}>
       <div className="main">
         {storyMode ? (
-          <GuidedView visible={visible} studentName={name} userId={userId} onAsk={onGuidedAsk} />
+          <GuidedView
+            visible={visible}
+            studentName={name}
+            userId={userId}
+            onAsk={onGuideAsk}
+            guideName={guide.name}
+            selectedStage={selectedStage}
+            onSelectStage={setSelectedStage}
+            chat={
+              <>
+                <ChatView
+                  intro={
+                    <>
+                      <div className="guided-chat-head">
+                        <Character
+                          key={guide.id}
+                          mentor={guide}
+                          mood={pendingFor === guide.id ? "thinking" : "happy"}
+                          size={120}
+                          className="guided-speaker-avatar"
+                        />
+                        <span>
+                          <strong>{guide.name}</strong>
+                          <small>{guide.title}</small>
+                        </span>
+                      </div>
+                      <div className="row row-assistant">
+                        <div className="bubble bubble-assistant">{guideChat?.intro ?? guide.greeting(name)}</div>
+                      </div>
+                    </>
+                  }
+                  messages={guideChat?.messages ?? []}
+                  pending={pendingFor === guide.id}
+                  busy={pending}
+                  freshId={freshId}
+                  onFollowup={onGuideFollowup}
+                  onRetry={onGuideRetry}
+                />
+                <Composer
+                  busy={pending}
+                  onSend={onGuideSend}
+                  onStop={stop}
+                  focusKey={visible ? (guideChat?.id ?? `story-${guide.id}`) : "hidden"}
+                  placeholder={`Message ${guide.name}…`}
+                />
+              </>
+            }
+          />
         ) : (
           <>
             <StoryView

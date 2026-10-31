@@ -115,7 +115,7 @@ def analyze_transcript(file_name: str, mime_type: str, content_base64: str) -> d
     transcript_text = extract_text(file_name, mime_type, content_base64)
     raw = complete(SYSTEM_PROMPT, f"=== Transcript ===\n{transcript_text}", max_tokens=6000)
     if not raw:
-        raise RuntimeError("The language model didn't respond. Check GROQ_API_KEY in backend/.env.")
+        raise RuntimeError("The language model didn't respond. Check GROQ_API_KEY in .env at the project root.")
     try:
         data = parse_json(raw)
     except (ValueError, json.JSONDecodeError) as exc:

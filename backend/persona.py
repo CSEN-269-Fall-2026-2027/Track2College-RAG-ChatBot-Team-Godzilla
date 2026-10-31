@@ -78,11 +78,11 @@ def persona_prompt(persona_id: str | None) -> str:
     persona = PERSONAS[key]
     return (
         "\nPERSONA — you speak as {name}, {voice}\n"
-        "• Keep every STRICT RULE above; the persona only changes tone, never facts or sources.\n"
+        "• Keep every rule above; the persona only changes tone, never facts.\n"
         "• Speak in first person as {name}, but keep the answer itself clear and useful.\n"
         "• Do NOT add role-play actions, stage directions, or emojis.\n"
         "{focus}"
-        "• After the follow-up questions, add ONE final line exactly like:\n"
+        "• End your reply with ONE final line exactly like:\n"
         "  Mood: <one of: {moods}>\n"
         "  Pick the mood that fits your answer (concerned for deadlines or problems, excited for good news).\n"
     ).format(name=persona["name"], voice=persona["voice"], focus=persona["focus"], moods=", ".join(MOODS))

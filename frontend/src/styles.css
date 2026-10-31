@@ -1412,37 +1412,6 @@ a.btn-ghost {
   color: var(--text-muted);
 }
 
-.page-head-side {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-}
-
-.overall {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13.5px;
-  color: var(--text-muted);
-}
-
-.overall strong {
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-
-.saved {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12.5px;
-  color: var(--text-faint);
-}
-
-.saved.ok {
-  color: var(--success);
-}
-
 .card {
   padding: 22px;
   border-radius: 16px;
@@ -1750,19 +1719,56 @@ input[type="date"] {
 
 /* ---------- Profile ---------- */
 
+/* The content column is centered on the page by itself: equal side columns hold the sidebar
+   (left) and nothing (right), so the sidebar never pulls the box off-center. The heading sits
+   over the content column only. */
+.page-inner.profile-page {
+  max-width: none;
+}
+
 .profile-layout {
   display: grid;
-  grid-template-columns: 250px minmax(0, 1fr);
-  gap: 24px;
+  grid-template-columns: minmax(200px, 1fr) minmax(0, 780px) minmax(200px, 1fr);
+  grid-template-areas:
+    ".   head ."
+    "nav main .";
+  column-gap: 28px;
   align-items: start;
 }
 
+.profile-head {
+  grid-area: head;
+}
+
+.profile-main {
+  grid-area: main;
+  min-width: 0;
+}
+
 .section-nav {
+  grid-area: nav;
+  justify-self: end;
+  width: 100%;
+  max-width: 250px;
   position: sticky;
   top: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* Too narrow for a margin on both sides: sidebar + content, heading still over the content. */
+@media (min-width: 900px) and (max-width: 1023px) {
+  .profile-layout {
+    grid-template-columns: 210px minmax(0, 1fr);
+    grid-template-areas:
+      ".   head"
+      "nav main";
+  }
+
+  .section-nav {
+    max-width: none;
+  }
 }
 
 .section-link {
@@ -2648,10 +2654,6 @@ a.stat:hover {
 
 .loading-screen .logo {
   animation: pulse 1.4s ease-in-out infinite;
-}
-
-.saved.error {
-  color: var(--danger);
 }
 
 .form-notice {
@@ -3831,7 +3833,7 @@ a.stat:hover {
   }
 
   .profile-layout {
-    grid-template-columns: 210px minmax(0, 1fr);
+    column-gap: 20px;
   }
 
   .stat-grid {
@@ -3927,11 +3929,17 @@ a.stat:hover {
 
   .profile-layout {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "head"
+      "nav"
+      "main";
     gap: 14px;
   }
 
   .section-nav {
     position: static;
+    justify-self: stretch;
+    max-width: none;
     flex-direction: row;
     overflow-x: auto;
     gap: 6px;
@@ -4096,7 +4104,6 @@ a.stat:hover {
     display: none;
   }
 
-
   .toggle-pill span {
     display: none;
   }
@@ -4107,11 +4114,6 @@ a.stat:hover {
 
   .rail-item {
     font-size: 10px;
-  }
-
-  .page-head-side {
-    width: 100%;
-    justify-content: space-between;
   }
 
   .suggestions {
@@ -4996,68 +4998,6 @@ a.stat:hover {
   }
 }
 
-.materials-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 16px;
-  margin-top: 8px;
-}
-
-.materials-card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  align-items: flex-start;
-  padding: 20px;
-  border-radius: 16px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-card);
-}
-
-.materials-card h2 {
-  margin: 0;
-  font-size: 1.1rem;
-}
-
-.materials-card > p {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 14px;
-}
-
-.materials-card-icon {
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.materials-meta {
-  margin: 0 !important;
-  font-size: 13px !important;
-  color: var(--text-faint) !important;
-}
-
-.materials-card-wide {
-  grid-column: 1 / -1;
-}
-
-.materials-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-
-.materials-card .btn-primary,
-.materials-card .btn-ghost {
-  margin-top: auto;
-}
-
 /* ---------------------------------------------------------------- Account menu (top bar) + reset dialog */
 
 /* The avatar button is only 36px wide, so the dropdown needs its own width. */
@@ -5152,7 +5092,7 @@ a.stat:hover {
   .reset-dialog { animation: none; }
 }
 
-/* ---------- Materials → Essays (UC PIQs) ---------- */
+/* ---------- Profile → Essays (UC PIQs) ---------- */
 
 .essays-empty {
   max-width: 640px;

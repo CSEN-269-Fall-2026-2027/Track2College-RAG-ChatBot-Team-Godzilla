@@ -1,28 +1,42 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { ucDeadlineDate } from "../../agent/logic";
 import { COLLEGES } from "../../colleges";
-import { mentorById, type Mentor } from "../../game/characters";
 import { useGame } from "../../game/GameProvider";
 import { applyGuidedEffect, inputEffect, nextGuidedTurn, savedLabel, type GuidedChoice, type GuidedEffect } from "../../journey/guided";
-import { isUc, PIQ_PROMPTS, PIQ_REQUIRED, PIQ_WORD_LIMIT } from "../../journey/logic";
+import { isUc, PIQ_PROMPTS, PIQ_REQUIRED, PIQ_WORD_LIMIT, type CheckpointId } from "../../journey/logic";
+import { ucFacts } from "../../journey/facts";
 import { usePiqDrafts } from "../../journey/usePiqDrafts";
 import { JourneyMap } from "../../journey/JourneyMap";
 import { completeness, useProfile } from "../../profile";
 import { navigate } from "../../router";
 import { newId } from "../../storage";
-import { ModeSwitch } from "../ModeSwitch";
-import { Character } from "./Character";
+import { FactQuiz } from "./FactQuiz";
 
 interface GuidedViewProps {
   visible: boolean;
   studentName: string;
   userId: string;
-  /** Hand off to a guide in Manual chat with a starter question. */
-  onAsk: (prompt: string, mentorId: Mentor["id"]) => void;
+  /** Ask the current level's guide a starter question in the chat on the right. */
+  onAsk: (prompt: string) => void;
+  /** Chat with the current level's guide (conversation + message box), shown on the right. */
+  chat: ReactNode;
+  /** Name of that guide (Sage on the final step), for screen readers. */
+  guideName: string;
+  /** The map stop whose person the chat is with, when the student picked one. */
+  selectedStage?: CheckpointId | null;
+  /** Clicking a map stop: talk to that stop's person in the chat on the right. */
+  onSelectStage?: (id: CheckpointId) => void;
 }
 
-/** Story turns on the left (each chapter told by its guide); the Journey Map on the right updates live. */
-export function GuidedView({ visible, studentName, userId, onAsk }: GuidedViewProps) {
+/**
+ * Story mode: the Journey Map (top) and the current question with its answer bubbles
+ * (bottom) on the left; a chat with the current level's guide, like Manual mode, on the right.
+ */
+export function GuidedView({ visible, studentName, userId, onAsk, chat, guideName, selectedStage, onSelectStage }: GuidedViewProps) {
   const { profile, update } = useProfile();
+  // Review & Apply: the reply area becomes a UC fun-facts quiz (deadline matches the Apply page).
+  const deadline = new Date(`${ucDeadlineDate(profile)}T12:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric" });
+  const facts = useMemo(() => ucFacts(deadline), [deadline]);
   const { updateSettings } = useGame();
   const sections = completeness(profile).sections;
   const [draft, setDraft] = useState("");
@@ -32,7 +46,6 @@ export function GuidedView({ visible, studentName, userId, onAsk }: GuidedViewPr
     [profile, sections, studentName, skipIds],
   );
 
-  const speaker = mentorById(turn.speaker);
   const [saved, setSaved] = useState<string | null>(null);
   const [pickedCampuses, setPickedCampuses] = useState<string[]>([]);
   const [pickedPiqs, setPickedPiqs] = useState<string[]>([]);
@@ -67,15 +80,15 @@ export function GuidedView({ visible, studentName, userId, onAsk }: GuidedViewPr
         updateSettings({ storyMode: false });
         return;
       case "ask":
-        onAsk(effect.prompt, effect.mentorId);
+        onAsk(effect.prompt);
         return;
       case "openEssays":
-        navigate("materials", "essays");
+        navigate("profile", "essays");
         return;
       case "generatePiqs": {
         const regenerating = effect.piqIds.some((id) => !!profile.piqWork?.[id]?.draft);
         piqDrafts.generate(effect.piqIds, { regenerate: regenerating }).then((ok) => {
-          if (ok) setSaved(regenerating ? "Fresh draft saved in Materials → Essays" : "Your essay is in Materials → Essays");
+          if (ok) setSaved(regenerating ? "Fresh draft saved in Profile → Essays" : "Your essay is in Profile → Essays");
         });
         return;
       }
@@ -97,33 +110,31 @@ export function GuidedView({ visible, studentName, userId, onAsk }: GuidedViewPr
     <div className={`story story-guided${visible ? "" : " is-hidden"}`}>
       <div className="scene scene-plain" aria-hidden="true" />
 
-      <div className="mode-switch-under-nav">
-        <ModeSwitch className="mode-switch-lg" />
-      </div>
-
       <div className="guided-layout">
-        <div className="guided-main">
-          <div className="guided-chapter">
-            <span className="guided-chapter-tag">{turn.chapter}</span>
-            {saved && (
-              <span className="guided-saved" role="status">
-                ✓ {saved}
-              </span>
+        <div className="guided-left">
+          <section className="guided-map-pane" aria-label="Journey map">
+            <JourneyMap userId={userId} embedded selected={selectedStage ?? null} onSelect={onSelectStage} />
+          </section>
+
+          <section className="guided-select" key={turn.id} aria-label="Your reply">
+            <div className="guided-chapter">
+              <span className="guided-chapter-tag">{turn.chapter}</span>
+              {saved && (
+                <span className="guided-saved" role="status">
+                  ✓ {saved}
+                </span>
+              )}
+            </div>
+
+            {turn.checkpointId !== "review" && (
+              <p className="guided-question" role="status">
+                {turn.prompt}
+              </p>
             )}
-          </div>
 
-          <div className="guided-dialog" key={turn.id}>
-            <div className="guided-speaker">
-              <Character mentor={speaker} mood="happy" size={56} className="guided-speaker-avatar" />
-              <strong>{speaker.name}</strong>
-              <span className="guided-speaker-title">{speaker.title}</span>
-            </div>
-
-            <div className="speech-bubble guided-prompt" role="status">
-              {turn.prompt}
-            </div>
-
-            {turn.campusPicker ? (
+            {turn.checkpointId === "review" ? (
+              <FactQuiz facts={facts} />
+            ) : turn.campusPicker ? (
               <form
                 className="guided-campus-picker"
                 onSubmit={(e) => {
@@ -154,9 +165,14 @@ export function GuidedView({ visible, studentName, userId, onAsk }: GuidedViewPr
                     );
                   })}
                 </div>
-                <button type="submit" className="guided-campus-submit" disabled={!pickedCampuses.length}>
-                  Submit {pickedCampuses.length ? `(${pickedCampuses.length})` : ""}
-                </button>
+                <div className="guided-picker-footer">
+                  <p className="guided-piq-count" aria-live="polite">
+                    {pickedCampuses.length} selected
+                  </p>
+                  <button type="submit" className="guided-campus-submit" disabled={!pickedCampuses.length}>
+                    Submit {pickedCampuses.length ? `(${pickedCampuses.length})` : ""}
+                  </button>
+                </div>
               </form>
             ) : turn.piqPicker ? (
               <form
@@ -167,15 +183,16 @@ export function GuidedView({ visible, studentName, userId, onAsk }: GuidedViewPr
                   run({ type: "setPiqs", piqIds: pickedPiqs });
                 }}
               >
-                <p className="guided-piq-count" aria-live="polite">
-                  {pickedPiqs.length}/{PIQ_REQUIRED} selected · up to {PIQ_WORD_LIMIT} words each
-                </p>
-                <div className="guided-campus-list" role="group" aria-label="Personal Insight Questions">
+                <div className="guided-campus-list guided-piq-list" role="group" aria-label="Personal Insight Questions">
                   {PIQ_PROMPTS.map((q, i) => {
                     const on = pickedPiqs.includes(q.id);
                     const lockedOut = !on && pickedPiqs.length >= PIQ_REQUIRED;
                     return (
-                      <label key={q.id} className={`guided-campus-row guided-piq-row${on ? " on" : ""}${lockedOut ? " locked" : ""}`}>
+                      <label
+                        key={q.id}
+                        className={`guided-campus-row guided-piq-row${on ? " on" : ""}${lockedOut ? " locked" : ""}`}
+                        title={q.prompt}
+                      >
                         <input
                           type="checkbox"
                           checked={on}
@@ -194,13 +211,18 @@ export function GuidedView({ visible, studentName, userId, onAsk }: GuidedViewPr
                     );
                   })}
                 </div>
-                <button type="submit" className="guided-campus-submit" disabled={pickedPiqs.length !== PIQ_REQUIRED}>
-                  Submit 4 questions
-                </button>
+                <div className="guided-picker-footer">
+                  <p className="guided-piq-count" aria-live="polite">
+                    {pickedPiqs.length}/{PIQ_REQUIRED} selected · up to {PIQ_WORD_LIMIT} words each
+                  </p>
+                  <button type="submit" className="guided-campus-submit" disabled={pickedPiqs.length !== PIQ_REQUIRED}>
+                    Submit 4 questions
+                  </button>
+                </div>
               </form>
             ) : (
               <div className="guided-choices" role="group" aria-label="Your reply">
-                {turn.choices.map((choice, i) => {
+                {turn.choices.map((choice) => {
                   const busy = choice.effect.type === "generatePiqs" && choice.effect.piqIds.some(piqDrafts.isGenerating);
                   return (
                     <button
@@ -210,8 +232,7 @@ export function GuidedView({ visible, studentName, userId, onAsk }: GuidedViewPr
                       onClick={() => pick(choice)}
                       disabled={piqDrafts.busy}
                     >
-                      <span className="guided-choice-key">{i + 1}</span>
-                      <span>{busy ? "Writing your essay… this can take a few seconds" : choice.label}</span>
+                      {busy ? "Writing your essay… this can take a few seconds" : choice.label}
                     </button>
                   );
                 })}
@@ -250,17 +271,17 @@ export function GuidedView({ visible, studentName, userId, onAsk }: GuidedViewPr
                     aria-label={turn.input.placeholder}
                   />
                 )}
-                <button type="submit" disabled={!draft.trim()}>
+                <button type="submit" disabled={!draft.trim() && !turn.input.allowEmpty}>
                   {turn.input.submitLabel}
                 </button>
               </form>
             )}
-          </div>
+          </section>
         </div>
 
-        <aside className="guided-map-rail" aria-label="Journey map">
-          <JourneyMap userId={userId} embedded />
-        </aside>
+        <section className="guided-chat story-chat-thread" aria-label={`Chat with ${guideName}`}>
+          {chat}
+        </section>
       </div>
     </div>
   );

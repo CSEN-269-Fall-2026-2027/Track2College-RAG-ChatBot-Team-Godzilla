@@ -1,6 +1,8 @@
 import type { Mentor } from "../game/characters";
-import type { Activity, GradeLevel, Profile } from "../types";
+import type { GradeLevel, Profile } from "../types";
 import {
+  ACTIVITY_DESC_LIMIT,
+  ACTIVITY_QUESTIONS,
   computeJourney,
   isUc,
   journeyOf,
@@ -15,7 +17,7 @@ import {
   type Checkpoint,
   type CheckpointId,
 } from "./logic";
-import { chosenPiqs, detailsComplete, nextDetailQuestion, piqWorkOf, setPiqAnswer, SKIPPED } from "./piqs";
+import { canGeneratePiq, chosenPiqs, needsPersonalInfo, PERSONAL_ANSWER, PERSONAL_PIQS, personalAnswered, piqWorkOf, setPiqAnswer } from "./piqs";
 
 /** Rough unweighted GPA choices (4.0 scale). */
 export const GPA_RANGES = [
@@ -33,8 +35,10 @@ export type GuidedEffect =
   | { type: "setBasics"; patch: Partial<Profile["basics"]> }
   | { type: "setAcademics"; patch: Partial<Profile["academics"]> }
   | { type: "setGoals"; patch: Partial<Profile["goals"]> }
-  | { type: "addActivity"; title: string }
-  | { type: "patchActivity"; activityId: string; patch: Partial<Activity> }
+  /** Answer to a direct activity question; count > 0 adds the entry. */
+  | { type: "answerActivity"; questionId: string; count: number }
+  /** Optional extra details for a "yes" answer ("" = submitted empty). */
+  | { type: "activityDetails"; questionId: string; value: string }
   | { type: "toggleCampus"; campus: string }
   /** Replace the UC campus list with these names (checkbox picker submit). */
   | { type: "setCampuses"; campuses: string[] }
@@ -47,7 +51,7 @@ export type GuidedEffect =
   | { type: "markSubmitted" }
   | { type: "applyText"; field: TextField; value: string }
   | { type: "setPiqAnswer"; piqId: string; questionId: string; value: string }
-  /** Draft these PIQs with Groq (one as soon as its follow-ups are done); results land in Materials → Essays. */
+  /** Draft these PIQs with Groq (one as soon as its follow-ups are done); results land in Profile → Essays. */
   | { type: "generatePiqs"; piqIds: string[] }
   | { type: "openEssays" }
   /** Hand off to a guide in Manual chat with a starter question. */
@@ -63,7 +67,7 @@ export type TextField =
   | "gpaUnweighted"
   | "exams"
   | "major"
-  | "activityTitle"
+  | "activityDetails"
   | "piqAnswer";
 
 export interface GuidedChoice {
@@ -89,10 +93,13 @@ export interface GuidedTurn {
     field: TextField;
     submitLabel: string;
     campus?: string;
-    /** For "piqAnswer": which PIQ follow-up this answers. */
+    /** For "piqAnswer": which PIQ the personal information is for. */
     piqId?: string;
+    /** PIQ answer key, or ACTIVITY_QUESTIONS id for "activityDetails". */
     questionId?: string;
     multiline?: boolean;
+    /** Submitting an empty box is a valid answer. */
+    allowEmpty?: boolean;
   };
   /** Show all UC campuses as checkboxes; submit fires setCampuses. */
   campusPicker?: boolean;
@@ -104,11 +111,15 @@ export interface GuidedTurn {
 /** Effect for a typed reply to this turn. */
 export function inputEffect(turn: GuidedTurn, value: string): GuidedEffect | null {
   const input = turn.input;
+  if (input?.field === "activityDetails" && input.questionId) {
+    return { type: "activityDetails", questionId: input.questionId, value: value.trim() };
+  }
+  // Personal PIQ info: anything goes to the draft, even an empty box.
+  if (input?.field === "piqAnswer" && input.piqId && input.questionId) {
+    return { type: "setPiqAnswer", piqId: input.piqId, questionId: input.questionId, value: value.trim() };
+  }
   if (!input || !value.trim()) return null;
   if (input.field === "major" && input.campus) return { type: "setMajor", campus: input.campus, major: value };
-  if (input.field === "piqAnswer" && input.piqId && input.questionId) {
-    return { type: "setPiqAnswer", piqId: input.piqId, questionId: input.questionId, value };
-  }
   return { type: "applyText", field: input.field, value };
 }
 
@@ -120,6 +131,15 @@ const GRADES: { id: GradeLevel; label: string }[] = [
 ];
 
 const filled = (v: string) => v.trim().length > 0;
+
+export const academicStarted = (profile: Profile) =>
+  filled(profile.academics.gpaUnweighted) || filled(profile.academics.gpaWeighted) || filled(profile.academics.exams);
+
+/** Story mode ends at Review & Apply: every earlier checkpoint is complete, so Apply takes over. */
+export function storyComplete(profile: Profile, sections: Record<string, number>) {
+  const { checkpoints } = computeJourney(profile, sections, academicStarted(profile));
+  return checkpoints.filter((c) => c.id !== "review").every((c) => c.complete);
+}
 const DEFER = { type: "noop" } as const;
 
 type Draft = Omit<GuidedTurn, "checkpointId" | "chapter" | "finished">;
@@ -138,9 +158,7 @@ export function nextGuidedTurn(
 ): GuidedTurn {
   const name = studentName.trim().split(/\s+/)[0] ?? "";
   const hi = (s: string) => (name ? `${name}, ${s}` : s[0].toUpperCase() + s.slice(1));
-  const academicStarted =
-    filled(profile.academics.gpaUnweighted) || filled(profile.academics.gpaWeighted) || filled(profile.academics.exams);
-  const journey = computeJourney(profile, sections, academicStarted);
+  const journey = computeJourney(profile, sections, academicStarted(profile));
 
   if (journey.finished) {
     return {
@@ -313,52 +331,37 @@ function turnsFor(
   }
 
   if (cp.id === "activities") {
-    const acts = profile.activities;
-    if (!acts.length) {
-      out.push({
-        id: "first-activity",
-        speaker: "sage",
-        prompt: hi("time for your activities list — up to 20 things you do outside class. Jobs and family responsibilities count too! Name one you're proud of."),
-        choices: [
-          { id: "club", label: "A club or organization", effect: { type: "addActivity", title: "Club / organization" } },
-          { id: "job", label: "A job or internship", effect: { type: "addActivity", title: "Job / internship" } },
-          { id: "sport", label: "A sport or performance", effect: { type: "addActivity", title: "Sport / performance" } },
-          { id: "family", label: "Family or community work", effect: { type: "addActivity", title: "Family / community" } },
-        ],
-        input: { placeholder: "Or type the activity name…", field: "activityTitle", submitLabel: "Add activity" },
-      });
-    }
-    for (const act of acts) {
-      const label = act.name || "your activity";
-      if (!act.role.trim() || !act.hoursPerWeek.trim()) {
-        const set = (role: string, hoursPerWeek: string) => ({ type: "patchActivity" as const, activityId: act.id, patch: { role, hoursPerWeek } });
+    const survey = journeyOf(profile).activitySurvey ?? {};
+    ACTIVITY_QUESTIONS.forEach((q, i) => {
+      const answer = survey[q.id];
+      if (!answer) {
+        const answerWith = (count: number) => ({ type: "answerActivity" as const, questionId: q.id, count });
         out.push({
-          id: `role-${act.id}`,
+          id: `activity-${q.id}`,
           speaker: "sage",
-          prompt: hi(`for “${label}”, what was your role, and about how many hours a week?`),
-          choices: [
-            { id: "leader", label: "Leader / captain (~8 hrs/wk)", effect: set("Leader", "8") },
-            { id: "member", label: "Active member (~4 hrs/wk)", effect: set("Member", "4") },
-            { id: "occasional", label: "Occasional (~2 hrs/wk)", effect: set("Participant", "2") },
-            { id: "intense", label: "Very involved (~12+ hrs/wk)", effect: set("Core member", "12") },
-          ],
+          prompt: hi(i === 0 ? `time for your activities — I'll ask a few quick questions. First: ${q.question}` : q.question),
+          choices: q.counted
+            ? [
+                { id: "no", label: "No", effect: answerWith(0) },
+                { id: "1", label: "Yes — 1", effect: answerWith(1) },
+                { id: "2", label: "Yes — 2", effect: answerWith(2) },
+                { id: "3", label: "Yes — 3 or more", effect: answerWith(3) },
+              ]
+            : [
+                { id: "yes", label: "Yes", effect: answerWith(1) },
+                { id: "no", label: "No", effect: answerWith(0) },
+              ],
+        });
+      } else if (answer.count > 0 && answer.details === undefined) {
+        out.push({
+          id: `activity-details-${q.id}`,
+          speaker: "sage",
+          prompt: hi(`nice! Any details to add about ${q.name.toLowerCase()}? ${q.details} Or leave it blank and hit Submit.`),
+          choices: [],
+          input: { placeholder: "Optional details…", field: "activityDetails", submitLabel: "Submit", questionId: q.id, multiline: true, allowEmpty: true },
         });
       }
-      if (!act.description.trim()) {
-        const set = (description: string) => ({ type: "patchActivity" as const, activityId: act.id, patch: { description } });
-        out.push({
-          id: `impact-${act.id}`,
-          speaker: "sage",
-          prompt: hi(`UC gives you 350 characters to describe “${label}”. Which is closest to what you did? You can polish the wording later.`),
-          choices: [
-            { id: "led", label: "I led people or projects", effect: set("Led people and projects; organized work and helped the team deliver.") },
-            { id: "built", label: "I built or created something", effect: set("Built and created work others could use; iterated based on feedback.") },
-            { id: "helped", label: "I helped others regularly", effect: set("Helped others regularly and made the group more welcoming and effective.") },
-            { id: "learned", label: "I practiced a skill deeply", effect: set("Practiced a skill deeply over time and improved through deliberate work.") },
-          ],
-        });
-      }
-    }
+    });
   }
 
   if (cp.id === "essays") {
@@ -369,54 +372,39 @@ function turnsFor(
         id: "pick-piq",
         speaker: "quill",
         prompt: hi(
-          `I'm Quill, your essay guide. UC asks for 4 of 8 Personal Insight Questions (${PIQ_WORD_LIMIT} words each). Check exactly four that fit stories you can tell, then hit Submit.`,
+          `Time for essays! UC asks for 4 of 8 Personal Insight Questions (${PIQ_WORD_LIMIT} words each). Check the four you like best and hit Submit — I'll write the drafts for you from your activities and profile.`,
         ),
         choices: [],
         piqPicker: true,
       });
     }
 
-    // Per essay: Quill's follow-ups, then generate that essay right away — no need to finish all four first.
+    // Personal-life PIQs need one answer the activities list can't give; everything else drafts on its own.
     for (const piqId of chosenPiqs(profile)) {
       const meta = PIQ_PROMPTS.find((p) => p.id === piqId);
-      if (!meta) continue;
-      if (!detailsComplete(profile, piqId)) {
-        const q = nextDetailQuestion(profile, piqId);
-        if (!q) continue;
-        const first = Object.keys(piqWorkOf(profile, piqId).answers).length === 0;
-        out.push({
-          id: `piq-q-${piqId}-${q.id}`,
-          speaker: "quill",
-          prompt: first
-            ? hi(`for “${meta.title}”, UC asks: “${meta.prompt}” I need real details so the essay sounds like you. ${q.question}`)
-            : hi(`still on “${meta.title}”: ${q.question}`),
-          choices: [
-            ...(q.optional ? [{ id: "skip", label: "Skip this one", effect: { type: "setPiqAnswer" as const, piqId, questionId: q.id, value: SKIPPED } }] : []),
-            {
-              id: "talk",
-              label: "Help me think of an example",
-              effect: { type: "ask", mentorId: "quill", prompt: `Help me brainstorm for my UC PIQ "${meta.prompt}" — specifically: ${q.question} Ask me questions about my experiences.` },
-            },
-            { id: "swap", label: "Swap for a different question", effect: { type: "togglePiq", piqId } },
-            { id: "later", label: "Come back later", effect: DEFER },
-          ],
-          input: { placeholder: q.placeholder, field: "piqAnswer", submitLabel: "Save answer", piqId, questionId: q.id, multiline: true },
-        });
-        continue;
-      }
-      if (!piqWorkOf(profile, piqId).draft) {
-        out.push({
-          id: `generate-${piqId}`,
-          speaker: "quill",
-          prompt: hi(
-            `that's everything I need for “${meta.title}”. Want me to draft it now? I'll answer UC's exact question in your voice, using only what you told me, in ${PIQ_WORD_LIMIT} words or fewer. It'll appear in Materials → Essays.`,
-          ),
-          choices: [
-            { id: "generate", label: `Generate my “${meta.title}” essay`, effect: { type: "generatePiqs", piqIds: [piqId] } },
-            { id: "later", label: "Not yet — keep going", effect: DEFER },
-          ],
-        });
-      }
+      if (!meta || !needsPersonalInfo(piqId) || personalAnswered(profile, piqId)) continue;
+      out.push({
+        id: `piq-personal-${piqId}`,
+        speaker: "quill",
+        prompt: hi(`“${meta.title}” is about your personal life, so I can't pull it from your activities. UC asks: “${meta.prompt}” ${PERSONAL_PIQS[piqId]} Whatever you write — even nothing — I'll turn into a draft.`),
+        choices: [],
+        input: { placeholder: "Anything you want Quill to know…", field: "piqAnswer", submitLabel: "Submit", piqId, questionId: PERSONAL_ANSWER, multiline: true, allowEmpty: true },
+      });
+    }
+
+    // Drafts start automatically once activities are done; this turn shows progress and allows a retry.
+    for (const piqId of chosenPiqs(profile)) {
+      const meta = PIQ_PROMPTS.find((p) => p.id === piqId);
+      if (!meta || piqWorkOf(profile, piqId).draft || !canGeneratePiq(profile, piqId)) continue;
+      out.push({
+        id: `generate-${piqId}`,
+        speaker: "quill",
+        prompt: hi(`I'm writing your “${meta.title}” essay from your activities and profile — no questions needed. It'll show up in Profile → Essays in a few seconds.`),
+        choices: [
+          { id: "generate", label: `Write my “${meta.title}” essay now`, effect: { type: "generatePiqs", piqIds: [piqId] } },
+          { id: "later", label: "Keep going", effect: DEFER },
+        ],
+      });
     }
 
     for (const [piqId, status] of Object.entries(j.piqs)) {
@@ -429,7 +417,7 @@ function turnsFor(
         id: `piq-ready-${piqId}`,
         speaker: "quill",
         prompt: hi(
-          `your “${title}” draft is in Materials → Essays (${draft.words}/${PIQ_WORD_LIMIT} words). Read it, change anything that doesn't sound like you, then mark it ready.`,
+          `your “${title}” draft is in Profile → Essays (${draft.words}/${PIQ_WORD_LIMIT} words). Read it, change anything that doesn't sound like you, then mark it ready.`,
         ),
         choices: [
           { id: "open", label: "Open my essays", effect: { type: "openEssays" } },
@@ -492,16 +480,33 @@ export function applyGuidedEffect(profile: Profile, effect: GuidedEffect, newId:
       return { ...profile, academics: { ...profile.academics, ...effect.patch } };
     case "setGoals":
       return { ...profile, goals: { ...profile.goals, ...effect.patch } };
-    case "addActivity":
+    case "answerActivity": {
+      const q = ACTIVITY_QUESTIONS.find((x) => x.id === effect.questionId);
+      if (!q) return profile;
+      const cur = journeyOf(profile);
+      const activity =
+        effect.count > 0
+          ? { id: newId(), name: effect.count > 1 ? `${q.name} (${effect.count}${effect.count >= 3 ? "+" : ""})` : q.name, role: "", hoursPerWeek: "", weeksPerYear: "", years: "", description: "", category: q.category }
+          : null;
       return {
         ...profile,
-        activities: [...profile.activities, { id: newId(), name: effect.title, role: "", hoursPerWeek: "", weeksPerYear: "", years: "", description: "", category: "" }],
+        activities: activity ? [...profile.activities, activity] : profile.activities,
+        ucJourney: { ...cur, activitySurvey: { ...cur.activitySurvey, [q.id]: { count: effect.count, activityId: activity?.id } } },
       };
-    case "patchActivity":
+    }
+    case "activityDetails": {
+      const cur = journeyOf(profile);
+      const answer = cur.activitySurvey?.[effect.questionId];
+      if (!answer) return profile;
+      const details = effect.value.trim();
       return {
         ...profile,
-        activities: profile.activities.map((a) => (a.id === effect.activityId ? { ...a, ...effect.patch } : a)),
+        activities: details
+          ? profile.activities.map((a) => (a.id === answer.activityId ? { ...a, description: details.slice(0, ACTIVITY_DESC_LIMIT) } : a))
+          : profile.activities,
+        ucJourney: { ...cur, activitySurvey: { ...cur.activitySurvey, [effect.questionId]: { ...answer, details } } },
       };
+    }
     case "toggleCampus":
       return toggleCampus(profile, effect.campus, newId);
     case "setCampuses": {
@@ -555,8 +560,7 @@ export function applyGuidedEffect(profile: Profile, effect: GuidedEffect, newId:
           return applyGuidedEffect(profile, { type: "setAcademics", patch: { exams: v } }, newId);
         case "major":
           return applyGuidedEffect(profile, { type: "setGoals", patch: { majors: [v] } }, newId);
-        case "activityTitle":
-          return applyGuidedEffect(profile, { type: "addActivity", title: v }, newId);
+        case "activityDetails":
         case "piqAnswer":
           return profile;
       }
@@ -578,7 +582,7 @@ export function savedLabel(effect: GuidedEffect): string | null {
     case "openEssays":
       return null;
     case "setPiqAnswer":
-      return effect.value ? "Saved your answer for Quill" : "Skipped that question";
+      return effect.value ? "Saved — Quill is writing your essay" : "Got it — Quill will keep that essay general";
     case "toggleCampus":
       return `Updated your campuses: ${effect.campus}`;
     case "setCampuses":
@@ -597,8 +601,10 @@ export function savedLabel(effect: GuidedEffect): string | null {
       return "Checked off on your review list";
     case "markSubmitted":
       return "Recorded your UC submission";
-    case "addActivity":
-      return `Added activity: ${effect.title}`;
+    case "answerActivity":
+      return effect.count > 0 ? "Added to your activities list" : null;
+    case "activityDetails":
+      return effect.value.trim() ? "Saved your activity details" : null;
     default:
       return "Saved to your profile";
   }

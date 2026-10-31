@@ -1,11 +1,10 @@
 """
 Profile analysis: LLM review of a student's profile and UC campus list.
-Uses Groq only — no vector knowledge base.
 """
 
 import json
 
-from llm_utils import allowed_sources, parse_json, strings
+from llm_utils import http_urls, parse_json, strings
 from query import complete
 
 MAX_COLLEGES = 8
@@ -49,7 +48,7 @@ def _normalize(data: dict, colleges: list[str]) -> dict:
             "name": str(row["name"]).strip(),
             "fit": fit if fit in FITS else "unknown",
             "reasoning": str(row.get("reasoning", "")).strip(),
-            "sources": allowed_sources(row.get("sources"), None, 3),
+            "sources": http_urls(row.get("sources"), 3),
         })
 
     covered = {row["name"].lower() for row in college_rows}
@@ -92,7 +91,7 @@ def analyze_profile(profile_summary: str, colleges: list[str], majors: list[str]
 
     raw = complete(SYSTEM_PROMPT, user_message, max_tokens=2200)
     if not raw:
-        raise RuntimeError("The language model didn't respond. Check GROQ_API_KEY in backend/.env.")
+        raise RuntimeError("The language model didn't respond. Check GROQ_API_KEY in .env at the project root.")
     try:
         data = parse_json(raw)
     except (ValueError, json.JSONDecodeError) as exc:

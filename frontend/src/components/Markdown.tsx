@@ -80,7 +80,7 @@ function parseBlocks(text: string): Block[] {
   return blocks;
 }
 
-/** Minimal, XSS-safe renderer for the plain-text formatting the RAG model produces. */
+/** Minimal, XSS-safe renderer for the plain-text formatting the advisor model produces. */
 export const Markdown = memo(function Markdown({ text }: { text: string }) {
   return (
     <div className="prose">

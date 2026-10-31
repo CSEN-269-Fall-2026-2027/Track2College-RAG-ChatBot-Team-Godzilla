@@ -1,64 +1,30 @@
 from collections import deque
 from datetime import datetime, timezone
 from threading import Lock
-from typing import Deque, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional
 import os
-import secrets
-import sys
 import time
 import uuid
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
 
-# Ensure existing modules can be imported.
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-
-def _load_dotenv(dotenv_path: str) -> None:
-    if not os.path.exists(dotenv_path):
-        return
-
-    with open(dotenv_path, "r", encoding="utf-8") as dotenv_file:
-        for raw_line in dotenv_file:
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-            if key and key not in os.environ:
-                os.environ[key] = value
-
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-_load_dotenv(os.path.join(BASE_DIR, ".env"))
-API_KEY = os.getenv("API_KEY", "").strip()
-INFERENCE_PROVIDER = (os.getenv("INFERENCE_PROVIDER", "groq").strip().lower() or "groq")
-
-if not API_KEY:
-    raise RuntimeError("Missing API_KEY in .env")
-
-if INFERENCE_PROVIDER != "groq":
-    raise RuntimeError("This API build only supports INFERENCE_PROVIDER=groq")
-
-try:
-    from query import (
-        generate_answer,
-        _answer_text_only,
-        _extract_followup_questions,
-        _resolve_followup_query,
-    )
-    from profile_analysis import analyze_profile
-    from transcript import TranscriptError, analyze_transcript
-    from course_plan import build_course_plan
-    from essay import generate_essay
-    from piq import generate_piqs
-except ImportError as error:
-    print(f"Error importing backend modules: {error}")
-    sys.exit(1)
+# query.py loads the root .env on import.
+from query import (
+    generate_answer,
+    _answer_text_only,
+    _extract_followup_questions,
+    _resolve_followup_query,
+)
+from profile_analysis import analyze_profile
+from transcript import TranscriptError, analyze_transcript
+from course_plan import build_course_plan
+from essay import generate_essay
+from piq import generate_piqs
+import uc_account
+from counselor import draft_counselor_email, find_counselors
 
 app = FastAPI(
     title="Track2College Chatbot API",
@@ -82,9 +48,10 @@ MAX_CONVERSATION_TURNS = 4
 _session_lock = Lock()
 _session_store: Dict[str, Deque[Dict[str, str]]] = {}
 
+
 class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1, description="User query")
-    session_id: Optional[str] = Field(  
+    session_id: Optional[str] = Field(
         None,
         description="Optional chat session id. Create one if omitted.",
     )
@@ -233,6 +200,7 @@ class PiqItem(BaseModel):
 class PiqRequest(BaseModel):
     piqs: List[PiqItem] = Field(..., min_length=1, max_length=4)
     profile_summary: str = Field("", max_length=8000)
+    activities: str = Field("", max_length=16000)
     regenerate: bool = False
 
 
@@ -247,21 +215,87 @@ class PiqResponse(BaseModel):
     essays: List[PiqDraft]
 
 
+class CounselorFindRequest(BaseModel):
+    high_school: str = Field(..., min_length=1, max_length=200)
+    city: str = Field("", max_length=100)
+    state: str = Field("", max_length=100)
+    last_name: str = Field("", max_length=100)
+
+
+class Counselor(BaseModel):
+    name: str
+    title: str
+    email: str
+    serves: str
+    match: bool
+    source_url: str
+
+
+class CounselorFindResponse(BaseModel):
+    counselors: List[Counselor]
+
+
+class CounselorEmailRequest(BaseModel):
+    counselor_name: str = Field(..., min_length=1, max_length=200)
+    student_name: str = Field("", max_length=200)
+    profile_summary: str = Field("", max_length=8000)
+    # What the student told the practice counselor on the voice call, if they had one.
+    call_transcript: str = Field("", max_length=30000)
+
+
+class CounselorEmailResponse(BaseModel):
+    subject: str
+    body: str
+
+
+class UcPiq(BaseModel):
+    number: int = Field(..., ge=1, le=8)
+    title: str = Field(..., min_length=1, max_length=80)
+    text: str = Field(..., min_length=1, max_length=6000)
+
+
+class UcAccountStartRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+    password: str = Field(..., min_length=8, max_length=30)
+    mode: str = Field(..., pattern="^(login|create)$")
+    # What Track2College knows about the student, for filling "About you".
+    facts: Dict[str, str] = Field(default_factory=dict)
+    about_done: bool = False
+    # The account already got past UC's emailed code, so never wait for one.
+    verified: bool = False
+    # The student's four chosen personal insight questions with their saved answers.
+    piqs: List[UcPiq] = Field(default_factory=list, max_length=4)
+
+
+class UcAccountStartResponse(BaseModel):
+    run_id: str
+
+
+class UcAccountStatusResponse(BaseModel):
+    status: str
+    detail: str
+    mode: str
+    open: bool
+    created: bool
+    verified: bool
+    setup: bool
+    about: bool
+    about_report: Dict[str, List[Any]]
+    piq: bool
+    piq_report: Dict[str, List[str]]
+
+
+class UcAccountCodeRequest(BaseModel):
+    code: str = Field(..., min_length=1, max_length=20)
+
+
 class ChatResponse(BaseModel):
     session_id: str
-    answer: str  
+    answer: str
     sources: List[str]
     raw_response: str
     response_time_ms: int
     timestamp_utc: str
-
-
-class AnalyzeRequest(BaseModel):
-    question: str = Field(..., min_length=1, description="User question")
-
-
-class AnalyzeResponse(BaseModel):
-    answer: str
 
 
 class HealthResponse(BaseModel):
@@ -270,37 +304,6 @@ class HealthResponse(BaseModel):
     inference_provider: str
     timestamp_utc: str
 
-
-
-def _generate_answer_backend(
-    query_text: str,
-    conversation_history: Optional[List[Dict[str, str]]] = None,
-    profile_context: Optional[str] = None,
-    persona: Optional[str] = None,
-):
-    return generate_answer(
-        query_text,
-        conversation_history=conversation_history,
-        profile_context=profile_context,
-        persona=persona,
-    )
-
-
-def _get_answer_backend(question: str) -> str:
-    answer, _ = _generate_answer_backend(question, conversation_history=[])
-    return answer
-
-
-def _verify_api_key(authorization: Optional[str]) -> None:
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not token:
-        raise HTTPException(status_code=401, detail="Invalid Authorization header format")
-
-    if not secrets.compare_digest(token.strip(), API_KEY):
-        raise HTTPException(status_code=401, detail="Invalid API key")
 
 
 def _get_or_create_session_id(session_id: Optional[str]) -> str:
@@ -321,9 +324,10 @@ async def health() -> HealthResponse:
     return HealthResponse(
         status="ok",
         service="track2college-api",
-        inference_provider=INFERENCE_PROVIDER,
+        inference_provider="groq",
         timestamp_utc=datetime.now(timezone.utc).isoformat(),
     )
+
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
@@ -337,12 +341,11 @@ async def chat(request: ChatRequest) -> ChatResponse:
     start_time = time.perf_counter()
 
     # Resolve shorthand follow-up references (e.g. "Q1", "answer Q2",
-    # "the second one") to the actual stored question text before the
-    # RAG pipeline runs.
+    # "the second one") to the actual stored question text before answering.
     resolved_query = _resolve_followup_query(query_text, memory_snapshot)
 
     try:
-        raw_response, sources = _generate_answer_backend(
+        raw_response = generate_answer(
             resolved_query,
             conversation_history=memory_snapshot,
             profile_context=request.profile_context,
@@ -366,15 +369,15 @@ async def chat(request: ChatRequest) -> ChatResponse:
     return ChatResponse(
         session_id=session_id,
         answer=raw_response,
-        sources=sources,
+        sources=[],
         raw_response=raw_response,
         response_time_ms=elapsed_ms,
         timestamp_utc=datetime.now(timezone.utc).isoformat(),
-    )  
+    )
 
 
 @app.delete("/chat/{session_id}")
-async def clear_session(session_id: str): 
+async def clear_session(session_id: str):
     with _session_lock:
         existed = session_id in _session_store
         _session_store.pop(session_id, None)
@@ -448,6 +451,7 @@ def essay_piqs(request: PiqRequest) -> PiqResponse:
         essays = generate_piqs(
             [item.model_dump() for item in request.piqs],
             request.profile_summary,
+            request.activities,
             regenerate=request.regenerate,
         )
     except ValueError as error:
@@ -459,24 +463,84 @@ def essay_piqs(request: PiqRequest) -> PiqResponse:
     return PiqResponse(essays=essays)
 
 
-@app.post("/analyze", response_model=AnalyzeResponse)
-async def analyze(
-    request: AnalyzeRequest,
-    authorization: Optional[str] = Header(default=None),
-) -> AnalyzeResponse:
-    _verify_api_key(authorization)
-
-    question = request.question.strip()
-    if not question:
-        raise HTTPException(status_code=400, detail="Question cannot be empty")
-
+@app.post("/agent/counselor/find", response_model=CounselorFindResponse)
+def agent_counselor_find(request: CounselorFindRequest) -> CounselorFindResponse:
+    """Searches the web for the counselors at the student's high school."""
     try:
-        answer = _get_answer_backend(question)
-        return AnalyzeResponse(answer=answer)
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=500, detail="Internal server error")
+        counselors = find_counselors(request.high_school, request.city, request.state, request.last_name)
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error))
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Counselor search failed: {error}")
+    return CounselorFindResponse(counselors=counselors)
+
+
+@app.post("/agent/counselor/email", response_model=CounselorEmailResponse)
+def agent_counselor_email(request: CounselorEmailRequest) -> CounselorEmailResponse:
+    """Drafts the student's email to their counselor; the student sends it themselves."""
+    try:
+        result = draft_counselor_email(request.counselor_name, request.student_name, request.profile_summary, request.call_transcript)
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error))
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Email draft failed: {error}")
+    return CounselorEmailResponse(**result)
+
+
+
+@app.post("/agent/uc-account/start", response_model=UcAccountStartResponse)
+def agent_uc_account_start(request: UcAccountStartRequest) -> UcAccountStartResponse:
+    """Opens the UC application in a visible browser window and signs in or fills in sign-up."""
+    try:
+        facts = {k: v[:200] for k, v in list(request.facts.items())[:40] if isinstance(v, str)}
+        run_id = uc_account.start(
+            request.email.strip(),
+            request.password,
+            request.mode,
+            facts,
+            request.about_done,
+            request.verified,
+            [q.model_dump() for q in request.piqs],
+        )
+    except uc_account.UcAccountError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    return UcAccountStartResponse(run_id=run_id)
+
+
+@app.get("/agent/uc-account/status/{run_id}", response_model=UcAccountStatusResponse)
+def agent_uc_account_status(run_id: str) -> UcAccountStatusResponse:
+    run = uc_account.status(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="That UC window session wasn't found. Start again.")
+    return UcAccountStatusResponse(**run)
+
+
+class CounselorVoiceResponse(BaseModel):
+    conversation_token: str
+
+
+@app.post("/agent/counselor/voice", response_model=CounselorVoiceResponse)
+def agent_counselor_voice() -> CounselorVoiceResponse:
+    """Starts a voice call with the ElevenLabs practice counselor; the key stays on the server."""
+    try:
+        from voice import counselor_session_token
+
+        return CounselorVoiceResponse(conversation_token=counselor_session_token())
+    except Exception as error:
+        print(f"[voice] Could not start the counselor call: {error}")
+        raise HTTPException(status_code=502, detail="Couldn't reach the voice counselor. Please try again.")
+
+
+
+@app.post("/agent/uc-account/code/{run_id}")
+def agent_uc_account_code(run_id: str, request: UcAccountCodeRequest) -> dict:
+    """Types the student's UC verification code into the open UC window."""
+    try:
+        uc_account.submit_code(run_id, request.code)
+    except uc_account.UcAccountError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    return {"ok": True}
+
 
 if __name__ == "__main__":
     port = int(os.getenv("API_PORT", "8000"))

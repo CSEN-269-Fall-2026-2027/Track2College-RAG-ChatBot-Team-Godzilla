@@ -136,6 +136,13 @@ export const MailIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const MicIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="9" y="3.5" width="6" height="11" rx="3" />
+    <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5" />
+  </Icon>
+);
+
 export const LockIcon = (p: IconProps) => (
   <Icon {...p}>
     <rect x="5.5" y="11" width="13" height="9.5" rx="2" />
