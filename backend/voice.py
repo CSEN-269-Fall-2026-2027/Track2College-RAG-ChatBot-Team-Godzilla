@@ -59,8 +59,8 @@ essays. Never ask about any of those; use them to show you know the student. Thi
 5. Wrap up: once step 4 is answered, your whole final turn is exactly this line and nothing else:
    "Thanks so much for talking with me today, {{student_name}}! When you're ready, you can go
    ahead with your UC application."
-   Don't react to their last answer or add anything before or after it in that turn. Right after
-   saying it, call `end_call` without waiting for a reply. This step is important.
+   Don't react to their last answer or add anything before or after it in that turn. After saying
+   it, stop talking: the app hangs up for you a few seconds later. This step is important.
 
 If the student asks for an interesting or fun fact, tell them the UC campuses don't use SAT or
 ACT scores for admission.
@@ -99,7 +99,9 @@ COUNSELOR_CONFIG = {
             "prompt": COUNSELOR_PROMPT,
             "llm": "gemini-2.5-flash",
             "temperature": 0.5,
-            "built_in_tools": {"end_call": {"name": "end_call", "params": {"system_tool_type": "end_call"}}},
+            # No end_call tool: the browser hangs up a few seconds after the goodbye has finished
+            # playing (VoiceCounselor.tsx), so the call never cuts off mid-sentence.
+            "built_in_tools": {},
             # Run in the browser (VoiceCounselor.tsx), which saves them to the student's account.
             "tools": [
                 {
@@ -164,3 +166,16 @@ def counselor_agent_id() -> str:
 def counselor_session_token() -> str:
     """A one-time WebRTC token for the browser to start a call with the practice counselor."""
     return elevenlabs.conversational_ai.conversations.get_webrtc_token(agent_id=counselor_agent_id()).token
+
+
+def counselor_call_problem(conversation_id: str) -> str | None:
+    """Why ElevenLabs refused or dropped a call, in words for the student; None if it didn't fail."""
+    conversation = elevenlabs.conversational_ai.conversations.get(conversation_id)
+    error = getattr(conversation.metadata, "error", None)
+    if conversation.status != "failed" or not error:
+        return None
+    reason = str(getattr(error, "reason", "") or "")
+    print(f"[voice] Call {conversation_id} failed: {reason}")
+    if "quota_exceeded" in reason or "quota" in reason.lower():
+        return "Jordan can't take calls right now because the voice service is out of credits. Try again later."
+    return "Jordan couldn't take the call. Try again in a moment."

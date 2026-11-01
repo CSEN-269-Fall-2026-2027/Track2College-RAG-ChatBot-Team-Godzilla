@@ -11,10 +11,10 @@ export interface Location {
 
 /**
  * Materials (essays, transcript, course plan) now lives in Profile. Old bookmarks still land
- * in the right place: essays → Profile essays, transcript → Academic history, plan → course plan.
+ * in the right place: essays → Profile essays, transcript and the retired course plan → Academic history.
  */
 const LEGACY_PAGES = new Set(["materials", "insights", "overview", "home", "explore"]);
-const LEGACY_SECTION: Record<string, string> = { essays: "essays", transcript: "academics", plan: "plan" };
+const LEGACY_SECTION: Record<string, string> = { essays: "essays", transcript: "academics", plan: "academics" };
 
 export function parseLocation(hash: string): Location {
   const [name = "", rawParam = null] = hash.replace(/^#\/?/, "").split("/");

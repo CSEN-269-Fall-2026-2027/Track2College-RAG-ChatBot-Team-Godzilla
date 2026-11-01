@@ -519,6 +519,10 @@ class CounselorVoiceResponse(BaseModel):
     conversation_token: str
 
 
+class CounselorCallProblemRequest(BaseModel):
+    conversation_id: str = Field(..., min_length=1, max_length=200)
+
+
 @app.post("/agent/counselor/voice", response_model=CounselorVoiceResponse)
 def agent_counselor_voice() -> CounselorVoiceResponse:
     """Starts a voice call with the ElevenLabs practice counselor; the key stays on the server."""
@@ -529,6 +533,18 @@ def agent_counselor_voice() -> CounselorVoiceResponse:
     except Exception as error:
         print(f"[voice] Could not start the counselor call: {error}")
         raise HTTPException(status_code=502, detail="Couldn't reach the voice counselor. Please try again.")
+
+
+@app.post("/agent/counselor/voice/problem")
+def agent_counselor_voice_problem(request: CounselorCallProblemRequest) -> dict:
+    """Why a counselor call ended before Jordan spoke (e.g. out of credits), or null."""
+    try:
+        from voice import counselor_call_problem
+
+        return {"problem": counselor_call_problem(request.conversation_id)}
+    except Exception as error:
+        print(f"[voice] Could not look up the call: {error}")
+        return {"problem": None}
 
 
 

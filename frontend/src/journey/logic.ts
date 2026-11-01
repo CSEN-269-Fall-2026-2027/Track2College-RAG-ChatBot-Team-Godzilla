@@ -3,7 +3,7 @@ import type { ActivityCategory, PiqStatus, Profile, TargetCollege, UcJourneyStat
 import { hasAllDrafts, readyToGenerate } from "./piqs";
 
 /**
- * UC Journey Map: five checkpoints whose progress is derived from the student's
+ * UC Journey Map: six checkpoints whose progress is derived from the student's
  * saved profile. Only PIQ statuses, manual review ticks, activity-question
  * answers and the explicit submission record live in `profile.ucJourney`.
  */
@@ -102,7 +102,10 @@ export interface Task {
   optional?: boolean;
 }
 
-export type CheckpointId = "profile" | "ucs" | "activities" | "essays" | "review";
+export type CheckpointId = "profile" | "ucs" | "activities" | "essays" | "review" | "aid";
+
+/** Checkpoints after Review & Apply: they don't gate the Apply page (see storyComplete). */
+export const AFTER_APPLY: CheckpointId[] = ["review", "aid"];
 
 export interface Checkpoint {
   id: CheckpointId;
@@ -131,8 +134,8 @@ export function computeJourney(profile: Profile, sections: Record<string, number
   const raw: Omit<Checkpoint, "done" | "total" | "complete" | "summary">[] = [
     {
       id: "profile",
-      title: "Build Your Profile",
-      short: "Profile",
+      title: "Basic Info",
+      short: "Basic info",
       tasks: [
         { id: "basics", label: "Student information", done: sections.basics >= 1, detail: "Name, grade, graduation year, school, and state." },
         {
@@ -221,6 +224,28 @@ export function computeJourney(profile: Profile, sections: Record<string, number
       { id: "piqs", label: "Four PIQs ready", done: prior[3] },
       ...REVIEW_MANUAL.map((m) => ({ id: m.id, label: m.label, detail: m.detail, done: !!j.checks[m.id] })),
       { id: "submitted", label: "Submitted on the official UC application", done: j.submittedAt !== null, detail: "Only you can record this." },
+    ],
+  });
+
+  // Financial aid comes from the same answers as Profile → Cost & support.
+  const f = profile.preferences;
+  const noAidNeeded = f.needsAid === "no";
+  raw.push({
+    id: "aid",
+    title: "Financial Aid",
+    short: "Aid",
+    tasks: [
+      { id: "needs", label: "Tell us whether you'll need financial aid", done: f.needsAid !== "", detail: "“Not sure” is a fine answer." },
+      {
+        id: "fafsa",
+        label: "Submit the FAFSA or California Dream Act Application",
+        done: f.fafsa === "done",
+        detail: "It's how UC and California decide grants and aid. File early — aid deadlines come in the spring.",
+        // Students who won't use aid can still file, but it doesn't hold up this step.
+        optional: noAidNeeded,
+      },
+      { id: "income", label: "Share your household income range", done: f.incomeRange !== "", detail: "“Prefer not to say” is fine.", optional: true },
+      { id: "budget", label: "Set a yearly budget you can plan for", done: f.maxAnnualCost.trim() !== "", optional: true },
     ],
   });
 

@@ -6,9 +6,9 @@ describe("router", () => {
   it("sends old Materials links to the matching Profile section", () => {
     expect(parseLocation("#/materials/essays")).toEqual({ route: "profile", param: "essays" });
     expect(parseLocation("#/materials/transcript")).toEqual({ route: "profile", param: "academics" });
-    expect(parseLocation("#/materials/plan")).toEqual({ route: "profile", param: "plan" });
+    expect(parseLocation("#/materials/plan")).toEqual({ route: "profile", param: "academics" });
     expect(parseLocation("#/materials")).toEqual({ route: "profile", param: "essays" });
-    expect(parseLocation("#/insights/plan")).toEqual({ route: "profile", param: "plan" });
+    expect(parseLocation("#/insights/plan")).toEqual({ route: "profile", param: "academics" });
   });
 
   it("keeps current routes and sends unknown ones to Advisor", () => {

@@ -23,7 +23,7 @@ export function Composer({ busy, onSend, onStop, focusKey, placeholder }: Compos
   }, [value]);
 
   useEffect(() => {
-    if (window.matchMedia("(pointer: fine)").matches) ref.current?.focus();
+    if (window.matchMedia("(pointer: fine)").matches) ref.current?.focus({ preventScroll: true });
   }, [focusKey]);
 
   const submit = () => {

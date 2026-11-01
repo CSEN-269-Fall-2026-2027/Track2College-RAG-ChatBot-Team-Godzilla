@@ -101,12 +101,14 @@ export function Segmented<T extends string>({
   options,
   onChange,
   wide,
+  hint,
 }: {
   label: string;
   value: T;
   options: Option<T>[];
   onChange: (value: T) => void;
   wide?: boolean;
+  hint?: string;
 }) {
   const id = useId();
   return (
@@ -128,6 +130,7 @@ export function Segmented<T extends string>({
           </button>
         ))}
       </div>
+      {hint && <span className="field-hint">{hint}</span>}
     </div>
   );
 }

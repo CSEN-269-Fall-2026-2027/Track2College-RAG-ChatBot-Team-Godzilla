@@ -121,7 +121,7 @@ function GatedApp({
         <AppTopbar route={route} health={health} theme={theme} onToggleTheme={toggleTheme} />
         {route === "map" && <JourneyMap userId={userId} onBack={() => navigate(lastRoute.current)} />}
         {route === "profile" && <ProfilePage section={param} onAsk={askAdvisor} />}
-        {route === "agent" && <AgentMode />}
+        {route === "agent" && <AgentMode section={param} />}
         <Advisor userId={userId} visible={route === "advisor"} onHealth={setHealth} handoff={handoff} />
       </main>
     </div>

@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { COLLEGES } from "../colleges";
 import { usePlanning } from "../planning";
 import { academicHistoryStatus, completeness, useProfile } from "../profile";
@@ -26,10 +26,10 @@ import {
 } from "./logic";
 import { mentorById } from "../game/characters";
 import { STAGE_GUIDE } from "./guides";
-import { CONSTELLATIONS, fitConstellation, trailLegs } from "./constellation";
+import { GRID, mapLayout, planetPixels, routeLegs } from "./planets";
 
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-/** How long the "stage completed" trail draw and platform glow last. */
+/** How long the "stage completed" route draw lasts. */
 const ARRIVE_MS = 1400;
 
 
@@ -46,6 +46,24 @@ function useBoxSize<T extends HTMLElement>() {
   }, []);
   return [ref, size] as const;
 }
+
+/** Short map labels, in journey order. */
+const MAP_LABEL: Record<CheckpointId, string> = {
+  profile: "Basic info",
+  ucs: "Choose UCs",
+  activities: "Activities list",
+  essays: "Four essays",
+  review: "Review & apply",
+  aid: "Financial aid",
+};
+
+/** Each chapter's campus building (pixel art), computed once. */
+const ART = Object.fromEntries((Object.keys(MAP_LABEL) as CheckpointId[]).map((id) => [id, planetPixels(id)])) as Record<
+  CheckpointId,
+  ReturnType<typeof planetPixels>
+>;
+
+type Pt = { x: number; y: number };
 
 export function JourneyMap({
   userId,
@@ -72,8 +90,8 @@ export function JourneyMap({
   const [open, setOpen] = useState<number | null>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
 
-  // When a stage is completed since the student last looked, draw the new stretch of trail and
-  // let the next platform glow briefly. Progress itself always comes from computeJourney.
+  // When a stage is completed since the student last looked, draw the new stretch of route.
+  // Progress itself always comes from computeJourney.
   const seenKey = userKey(userId, "ucMapSeen");
   const reached = finished ? checkpoints.length : current;
   const [arrived, setArrived] = useState<{ from: number; to: number } | null>(null);
@@ -88,24 +106,29 @@ export function JourneyMap({
     return () => window.clearTimeout(done);
   }, [reached, seenKey]);
 
-  // The constellation is drawn in a fixed design space and scaled to fit this box.
-  const [fitRef, box] = useBoxSize<HTMLDivElement>();
-  const { layout, scale } = fitConstellation(box.width, embedded ? box.height : 0);
-  const geo = CONSTELLATIONS[layout];
-  const legs = useMemo(() => trailLegs(geo), [geo]);
+  // Story mode always shows whose chat is open: the clicked stop, else the current chapter's.
+  const active = onSelect ? (selected ?? checkpoints[finished ? checkpoints.length - 1 : current].id) : null;
 
-  // The rocket parks beside the current stop, nose toward the next one (pointing up once done).
-  const rocket = useMemo(() => {
-    const at = Math.min(finished ? checkpoints.length - 1 : current, geo.stops.length - 1);
-    const here = geo.stops[at];
-    const next = geo.stops[at + 1];
-    if (finished || !next) return { x: here.x * scale, y: here.y * scale - 34, angle: -90 };
-    const dx = (next.x - here.x) * scale;
-    const dy = (next.y - here.y) * scale;
-    const len = Math.hypot(dx, dy) || 1;
-    const gap = 38; // clear of the planet and its halo
-    return { x: here.x * scale + (dx / len) * gap, y: here.y * scale + (dy / len) * gap, angle: (Math.atan2(dy, dx) * 180) / Math.PI };
-  }, [geo, scale, current, finished, checkpoints.length]);
+  // Wide: six campus buildings in a straight line from the start pad on the left to the flag
+  // on the right. Narrow: a vertical list with labels beside each building.
+  const [fitRef, box] = useBoxSize<HTMLDivElement>();
+  const layout = mapLayout(box.width);
+  const planet = layout === "tall" ? 72 : box.width >= 640 ? 96 : box.width >= 480 ? 72 : 48;
+
+  // The route runs through the buildings' measured centres, from the start pad to the flag.
+  const skyRef = useRef<HTMLDivElement>(null);
+  const [points, setPoints] = useState<Pt[]>([]);
+  useLayoutEffect(() => {
+    const sky = skyRef.current;
+    if (!sky) return;
+    const origin = sky.getBoundingClientRect();
+    const next = [...sky.querySelectorAll<HTMLElement>("[data-anchor]")].map((el) => {
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2 - origin.left), y: Math.round(r.top + r.height / 2 - origin.top) };
+    });
+    setPoints((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+  }, [layout, planet, box.width, box.height]);
+  const legs = useMemo(() => routeLegs(points), [points]);
 
   const setJourney = useCallback((change: (j: UcJourneyState) => UcJourneyState) => update((p) => ({ ...p, ucJourney: change(journeyOf(p)) })), [update]);
 
@@ -121,20 +144,36 @@ export function JourneyMap({
 
   const progress = (
     <div className="jm-overall" aria-live="polite">
-      <strong>{completeCount} of 5 checkpoints complete</strong>
+      <strong>
+        {completeCount} of {checkpoints.length} checkpoints complete
+      </strong>
       <span className="jm-bar" aria-hidden="true">
-        <span style={{ width: `${(completeCount / 5) * 100}%` }} />
+        <span style={{ width: `${(completeCount / checkpoints.length) * 100}%` }} />
       </span>
     </div>
   );
 
   const mapBoard = (
-    <div className={`jm-sky-fit jm-sky-${layout}`} ref={fitRef}>
+    <div className="jm-sky-fit" data-layout={layout} ref={fitRef}>
       {box.width > 0 && (
-        <div className="jm-sky" style={{ width: geo.w * scale, height: geo.h * scale }}>
-          <svg className="jm-trail" viewBox={`0 0 ${geo.w} ${geo.h}`} aria-hidden="true">
+        <span className="jm-stars" aria-hidden="true">
+          {DETAILS.map(([left, top, kind], i) => (
+            <span key={i} data-kind={kind} style={{ left: `${left}%`, top: `${top}%`, "--px": `${planet / GRID}px` } as CSSProperties}>
+              <PixelArt rows={DETAIL_ART[kind]} fill={DETAIL_FILL[kind]} />
+            </span>
+          ))}
+        </span>
+      )}
+      {box.width > 0 && (
+        <div
+          className="jm-sky"
+          ref={skyRef}
+          style={{ "--planet": `${planet}px`, "--px": `${planet / GRID}px` } as CSSProperties}
+        >
+          <svg className="jm-route" aria-hidden="true">
+            {/* Leg i runs from building i to building i + 1; Basic info is the start. */}
             {legs.map((d, i) => (
-              <path key={`base-${i}`} d={d} className="jm-trail-base" />
+              <path key={`base-${i}`} d={d} className="jm-route-base" />
             ))}
             {legs.map((d, i) =>
               i < reached ? (
@@ -142,61 +181,65 @@ export function JourneyMap({
                   key={`lit-${i}`}
                   d={d}
                   pathLength={1}
-                  className={`jm-trail-lit${arrived && i >= arrived.from && i < arrived.to ? " is-drawing" : ""}`}
+                  className={`jm-route-lit${arrived && i >= arrived.from && i < arrived.to ? " is-drawing" : ""}`}
                 />
               ) : null,
             )}
           </svg>
 
-          <div
-            className="jm-rocket"
-            style={{ transform: `translate(${rocket.x}px, ${rocket.y}px) rotate(${rocket.angle}deg)` }}
-            aria-hidden="true"
-          >
-            <Rocket />
-          </div>
-
           <ol className="jm-stops" aria-label="Checkpoints">
             {checkpoints.map((c, i) => {
               const state = c.complete ? "complete" : i === current && !finished ? "current" : "upcoming";
-              const stop = geo.stops[i];
               const person = mentorById(STAGE_GUIDE[c.id]);
-              const isSelected = selected === c.id;
-              const arriving = !!arrived && i === arrived.to && !finished;
-              const status = state === "complete" ? "Complete" : state === "current" ? "You are here" : "Coming up";
-              // Cards open away from the nearer edge so they stay inside the map.
-              const cardBelow = stop.y < geo.h / 2;
+              const isActive = active === c.id;
+              const status = state === "complete" ? "Done" : state === "current" ? "You're here" : i === current + 1 ? "Up next" : "Later";
               return (
                 <li
                   key={c.id}
-                  className={`jm-stop jm-stop-${state}${isSelected ? " is-selected" : ""}${arriving ? " is-arriving" : ""}`}
-                  style={{ left: stop.x * scale, top: stop.y * scale, animationDelay: `${i * -1.3}s` }}
+                  className={`jm-stop jm-stop-${state}${isActive ? " is-selected" : ""}`}
                 >
                   <button
                     type="button"
                     className="jm-planet-btn"
                     onClick={(e) => (onSelect ? onSelect(c.id) : openChapter(i, e.currentTarget))}
-                    aria-pressed={onSelect ? isSelected : undefined}
-                    aria-label={`${c.title}, chapter ${i + 1}: ${status}. ${onSelect ? `Talk to ${person.name}.` : "Open chapter."}`}
+                    aria-pressed={onSelect ? isActive : undefined}
+                    aria-label={`${MAP_LABEL[c.id]}, chapter ${i + 1}: ${status}. ${onSelect ? `Talk to ${person.name}.` : "Open chapter."}`}
                   >
-                    <Planet id={c.id} />
+                    <span className="jm-orbit" aria-hidden="true" />
+                    <span className="jm-planet-art" data-anchor>
+                      <svg viewBox={`0 0 ${GRID} ${GRID}`} shapeRendering="crispEdges" className="jm-planet" aria-hidden="true">
+                        {ART[c.id].map((r) => (
+                          <rect key={`${r.x}-${r.y}`} x={r.x} y={r.y} width={r.w} height={1} fill={r.fill} />
+                        ))}
+                      </svg>
+                    </span>
+                    {state === "current" && (
+                      <span className="jm-here" aria-hidden="true">
+                        <PixelArt rows={HERE_MARK} fill="var(--cn-gold)" />
+                      </span>
+                    )}
                     {state === "complete" && (
-                      <span className="jm-stop-check" aria-hidden="true">
-                        <CheckIcon width={10} height={10} />
+                      <span className="jm-done-badge" aria-hidden="true">
+                        <PixelArt rows={CHECK_BADGE} />
                       </span>
                     )}
                   </button>
-                  <div className={`jm-stop-card${cardBelow ? " is-below" : ""}`}>
-                    <span className="jm-stop-title">{c.title}</span>
-                    <span className={`jm-stop-status jm-stop-status-${state}`}>
-                      {status} · {person.name}
-                    </span>
-                    {onSelect && (
-                      <button type="button" className="jm-stop-open" onClick={(e) => openChapter(i, e.currentTarget)}>
-                        Open chapter
+                  <span className="jm-label">
+                    <strong aria-hidden="true">{MAP_LABEL[c.id]}</strong>
+                    <small aria-hidden="true">
+                      <span>{status}</span>
+                      <span className="jm-label-sep"> · </span>
+                      <span>{person.name}</span>
+                    </small>
+                    {/* Story mode: the selected chapter offers its full to-do list. */}
+                    {onSelect && isActive && (
+                      <button type="button" className="jm-explore" onClick={(e) => openChapter(i, e.currentTarget)}>
+                        See tasks
+                        <span className="jm-sr"> for {MAP_LABEL[c.id]}</span>
+                        <ArrowRightIcon width={12} height={12} aria-hidden="true" />
                       </button>
                     )}
-                  </div>
+                  </span>
                 </li>
               );
             })}
@@ -224,10 +267,14 @@ export function JourneyMap({
 
       <div className="jm-scroll">
         {mapBoard}
-        {finished && <p className="jm-finished">🎓 You've recorded your UC application as submitted. Keep an eye on your follow-ups in Review &amp; Apply.</p>}
+        {finished && (
+          <p className="jm-finished">
+            You've submitted your UC application and your financial aid application. Keep an eye on your follow-ups in Review &amp; Apply.
+          </p>
+        )}
       </div>
 
-      {/* Portaled to <body> so it sits above everything; inside Story mode the map lives in a stacking context below the mode switch, which covered the close button. */}
+      {/* Portaled to <body> so it sits above everything, including Story mode's stacking contexts. */}
       {open !== null &&
         createPortal(
           <CheckpointPanel
@@ -245,68 +292,45 @@ export function JourneyMap({
   );
 }
 
-/** The "you are here" rocket, drawn pointing right (rotated to face the next stop). */
-function Rocket() {
+/** Small pixel sprites: "#" is outline ink, "o" the fill colour, "g" green, "w" cream. */
+const HERE_MARK = ["#######", "#ooooo#", ".#ooo#.", "..#o#..", "...#..."];
+/** Background details: faint sparkles in the sky band, grass tufts along the bottom. */
+/** Background details: barely-there leaves, book outlines, and tiny sparkles near the edges. */
+const DETAIL_ART = {
+  sparkle: [".o.", "ooo", ".o."],
+  dot: ["o"],
+  leaf: ["..oo", ".ooo", "ooo.", "o..."],
+  book: [".oo.oo.", "o..o..o", "o..o..o", "ooooooo"],
+};
+const DETAIL_FILL: Record<keyof typeof DETAIL_ART, string> = {
+  sparkle: "var(--cn-gold)",
+  dot: "var(--cn-gold)",
+  leaf: "var(--cn-sage-deep)",
+  book: "var(--cn-route-deep)",
+};
+/** Positions (% of the map box), kept to the corners and edges, clear of the buildings and labels. */
+const DETAILS: [number, number, keyof typeof DETAIL_ART][] = [
+  [3, 7, "leaf"],
+  [17, 5, "dot"],
+  [41, 8, "sparkle"],
+  [66, 5, "book"],
+  [93, 9, "dot"],
+  [2, 94, "book"],
+  [31, 94, "sparkle"],
+  [73, 93, "leaf"],
+  [95, 86, "dot"],
+];
+const CHECK_BADGE = ["#######", "#ggggg#", "#ggggw#", "#gggwg#", "#wgwgg#", "#gwggg#", "#######"];
+
+function PixelArt({ rows, fill = "var(--cn-sage-deep)" }: { rows: string[]; fill?: string }) {
+  const colour: Record<string, string> = { "#": "#232a3a", o: fill, g: "#3f7a55", w: "#fbf6e8" };
   return (
-    <svg viewBox="0 0 36 20" className="jm-rocket-art">
-      <path d="M4 10 0.5 7.6 1.8 10 0.5 12.4z" className="jm-rocket-flame" />
-      <path d="M9 6.2 5 2.5h4.6l3.4 3.7zM9 13.8 5 17.5h4.6l3.4-3.7z" className="jm-rocket-fin" />
-      <path d="M6 10c0-2.9 2.2-4.6 6-4.6h11c4.4 0 8.6 1.9 11.5 4.6-2.9 2.7-7.1 4.6-11.5 4.6H12c-3.8 0-6-1.7-6-4.6z" className="jm-rocket-body" />
-      <circle cx="22" cy="10" r="2.4" className="jm-rocket-window" />
-      <path d="M29.5 7.2c1.8.7 3.5 1.7 5 2.8-1.5 1.1-3.2 2.1-5 2.8z" className="jm-rocket-nose" />
+    <svg viewBox={`0 0 ${rows[0].length} ${rows.length}`} shapeRendering="crispEdges" style={{ width: `calc(var(--px) * ${rows[0].length})` }}>
+      {rows.flatMap((row, y) =>
+        [...row].map((ch, x) => (colour[ch] ? <rect key={`${x}-${y}`} x={x} y={y} width={1} height={1} fill={colour[ch]} /> : null)),
+      )}
     </svg>
   );
-}
-
-/** A small planet per chapter, each with its own surface detail or symbol. Solid colours only. */
-function Planet({ id }: { id: CheckpointId }) {
-  switch (id) {
-    case "profile": // sage world with a tilted ring
-      return (
-        <svg viewBox="0 0 44 44" className="jm-planet" aria-hidden="true">
-          <ellipse cx="22" cy="22" rx="20" ry="6" transform="rotate(-18 22 22)" className="jm-ring-back" />
-          <circle cx="22" cy="22" r="13" className="jm-p-profile" />
-          <circle cx="22" cy="19.5" r="3" className="jm-p-glyph" />
-          <path d="M16.6 28.2c1-3 3-4.4 5.4-4.4s4.4 1.4 5.4 4.4" className="jm-p-glyph-line" />
-          <path d="M2.4 27.6A20 6 -18 0 0 41.6 16.4" transform="rotate(0)" className="jm-ring-front" />
-        </svg>
-      );
-    case "ucs": // sand world with campus columns
-      return (
-        <svg viewBox="0 0 44 44" className="jm-planet" aria-hidden="true">
-          <circle cx="22" cy="22" r="14" className="jm-p-ucs" />
-          <path d="M15.5 19.5 22 15.5l6.5 4z" className="jm-p-glyph" />
-          <path d="M17 20.5v6M20.3 20.5v6M23.7 20.5v6M27 20.5v6M15.5 27.5h13" className="jm-p-glyph-line" />
-        </svg>
-      );
-    case "activities": // charcoal world with gold craters
-      return (
-        <svg viewBox="0 0 44 44" className="jm-planet" aria-hidden="true">
-          <circle cx="22" cy="22" r="14" className="jm-p-activities" />
-          <circle cx="17.5" cy="18.5" r="2.4" className="jm-p-crater" />
-          <circle cx="26" cy="24.5" r="3.1" className="jm-p-crater" />
-          <circle cx="19.5" cy="27.5" r="1.4" className="jm-p-crater" />
-          <circle cx="27.5" cy="16.5" r="1.1" className="jm-p-crater" />
-        </svg>
-      );
-    case "essays": // cream world with bands and a pen nib
-      return (
-        <svg viewBox="0 0 44 44" className="jm-planet" aria-hidden="true">
-          <circle cx="22" cy="22" r="14" className="jm-p-essays" />
-          <path d="M9.2 18h25.6M8.6 26h26.8" className="jm-p-band" />
-          <path d="M22 15.5l3.4 6.2L22 29l-3.4-7.3z" className="jm-p-glyph" />
-          <path d="M22 21.5v4" className="jm-p-nib" />
-        </svg>
-      );
-    case "review": // muted-gold world with a double ring and a star
-      return (
-        <svg viewBox="0 0 44 44" className="jm-planet" aria-hidden="true">
-          <circle cx="22" cy="22" r="19" className="jm-p-orbit" />
-          <circle cx="22" cy="22" r="13.5" className="jm-p-review" />
-          <path d="m22 15.6 1.9 4.1 4.4.5-3.3 3 .9 4.4-3.9-2.2-3.9 2.2.9-4.4-3.3-3 4.4-.5z" className="jm-p-glyph" />
-        </svg>
-      );
-  }
 }
 
 interface PanelProps {

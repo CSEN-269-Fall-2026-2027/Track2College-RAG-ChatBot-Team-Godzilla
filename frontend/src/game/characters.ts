@@ -31,7 +31,7 @@ export const MENTORS: Mentor[] = [
     name: "Sage",
     title: "General Admissions Guide",
     specialty: "UC requirements, deadlines, and how applications work",
-    species: "owl",
+    species: "human",
     palette: { body: "#8b6b4e", belly: "#f1e2c6", accent: "#2f6fb5", dark: "#3b2a1e" },
     scene: "campus",
     voice: 330,

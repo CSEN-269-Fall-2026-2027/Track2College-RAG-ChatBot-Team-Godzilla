@@ -13,9 +13,9 @@ import {
 import { useAuth } from "../auth";
 import { getStore } from "../data";
 import { VoiceCounselor } from "../agent/VoiceCounselor";
+import { ENTRANCE_H, ENTRANCE_W, entrancePixels, type Office } from "../agent/entrance";
 import {
   agentOf,
-  agentTasks,
   aidDeadlineDate,
   calendarEvents,
   daysUntilUcDeadline,
@@ -27,18 +27,14 @@ import {
   setAgent,
   ucDeadlineDate,
   sirDeadlineDate,
-  type AgentTaskId,
 } from "../agent/logic";
-import { BookIcon, CheckIcon, CopyIcon, ExternalIcon, EyeIcon, FlagIcon, LockIcon, MailIcon, MicIcon, UserIcon } from "../components/icons";
-import { useGame } from "../game/GameProvider";
+import { ArrowRightIcon, CheckIcon, CopyIcon, ExternalIcon, EyeIcon, LockIcon, MailIcon, MicIcon, UserIcon } from "../components/icons";
 import { academicStarted, storyComplete } from "../journey/guided";
-import { computeJourney, PIQ_PROMPTS } from "../journey/logic";
+import { AFTER_APPLY, computeJourney, PIQ_PROMPTS } from "../journey/logic";
 import { chosenPiqs, piqWorkOf } from "../journey/piqs";
 import { completeness, profileSummary, useProfile } from "../profile";
-import { navigate } from "../router";
+import { href, navigate } from "../router";
 import type { AgentState, PersonalInfo, Profile } from "../types";
-
-const ICONS = { counselor: MicIcon, ucAccount: UserIcon, fafsa: BookIcon, sir: FlagIcon } as const;
 
 const message = (error: unknown) => (error instanceof Error ? error.message : "Something went wrong. Try again.");
 const shortDate = (date: string | number) =>
@@ -47,14 +43,28 @@ const shortDate = (date: string | number) =>
     day: "numeric",
     year: "numeric",
   });
+const monthDay = (date: string | number) =>
+  new Date(typeof date === "string" ? `${date}T12:00:00` : date).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
-/** Apply: open at all times, but locked until the story is finished. */
-export function AgentMode() {
+/** The three places the Apply hub leads to, in the order they're shown (not steps). */
+const OFFICES: { id: Office; title: string; blurb: string; cta: string }[] = [
+  { id: "counselor", title: "Counselor", blurb: "Talk through your next move.", cta: "Visit the counselor" },
+  { id: "application", title: "Application assistant", blurb: "Bring your UC application together.", cta: "Open the assistant" },
+  { id: "aid", title: "Financial aid", blurb: "Explore ways to pay for college.", cta: "Explore aid" },
+];
+
+/**
+ * Apply: a hub with the UC deadline and three destinations, each on its own page
+ * (#/agent/counselor, #/agent/application, #/agent/aid) plus the dates view (#/agent/dates).
+ * Locked until the story is finished; the dates stay viewable either way.
+ */
+export function AgentMode({ section = null }: { section?: string | null }) {
   const { profile } = useProfile();
-  return storyComplete(profile, completeness(profile).sections) ? <ApplyWorkspace /> : <ApplyLocked />;
+  if (section === "dates") return <DatesPage />;
+  if (!storyComplete(profile, completeness(profile).sections)) return <ApplyLocked />;
+  if (section === "counselor" || section === "application" || section === "aid") return <OfficePage office={section} />;
+  return <ApplyHub />;
 }
-
-const monthDay = (date: string) => new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
 /** Current time, refreshed every minute so day counts roll over at midnight while the page stays open. */
 function useNow() {
@@ -66,100 +76,345 @@ function useNow() {
   return now;
 }
 
-/** Main column plus a sticky deadline sidebar; the sidebar moves above the content on narrow screens. */
-function ApplyLayout({ children }: { children: ReactNode }) {
+function ApplyPage({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <div className="page-scroll">
-      <div className="page-inner agent-page">
-        <div className="apply-layout">
-          <div className="apply-main">{children}</div>
-          <DeadlineSidebar />
-        </div>
-      </div>
+    <div className="page-scroll apply-bg">
+      <div className={`page-inner agent-page ${className}`}>{children}</div>
     </div>
   );
 }
 
-function DeadlineSidebar() {
+/** The hub: the deadline sign, then the three office entrances side by side. */
+function ApplyHub() {
+  return (
+    <ApplyPage className="apply-hub">
+      <DeadlineSign />
+      <h1 className="apply-hub-title">Where to next?</h1>
+      <ul className="apply-offices">
+        {OFFICES.map((o, i) => (
+          <li key={o.id} className={`apply-office apply-office-${o.id}`}>
+            <div className="apply-office-art">
+              <Entrance office={o.id} />
+            </div>
+            <div className="apply-office-text">
+              <h2>
+                <span className="apply-office-num" aria-hidden="true">
+                  {i + 1}
+                </span>
+                {o.title}
+              </h2>
+              <p>{o.blurb}</p>
+              <OfficeStatus office={o.id} />
+            </div>
+            <a className="btn-primary apply-office-go" href={href("agent", o.id)}>
+              {o.cta} <ArrowRightIcon width={15} height={15} />
+            </a>
+          </li>
+        ))}
+      </ul>
+    </ApplyPage>
+  );
+}
+
+function Entrance({ office, small = false }: { office: Office; small?: boolean }) {
+  return (
+    <svg
+      className={`apply-entrance${small ? " is-small" : ""}`}
+      viewBox={`0 0 ${ENTRANCE_W} ${ENTRANCE_H}`}
+      shapeRendering="crispEdges"
+      aria-hidden="true"
+    >
+      {entrancePixels(office).map((r) => (
+        <rect key={`${r.x}-${r.y}`} x={r.x} y={r.y} width={r.w} height={1} fill={r.fill} />
+      ))}
+    </svg>
+  );
+}
+
+/** A quiet progress line from saved data; nothing invented. */
+function officeStatus(office: Office, profile: Profile): { text: string; done: boolean } {
+  const a = agentOf(profile);
+  if (office === "counselor") {
+    if (a.counselorCall) return { text: `Talked with Jordan ${monthDay(a.counselorCall.endedAt)}`, done: true };
+    if (a.counselorEmail?.sentAt && a.counselor) return { text: `Emailed ${a.counselor.name}`, done: true };
+    if (a.counselor && a.counselorEmail) return { text: "Email ready to send", done: false };
+    return { text: "Not started", done: false };
+  }
+  if (office === "application") {
+    const uc = a.ucAccount;
+    if (uc?.piqAt) return { text: "Essays entered on UC", done: true };
+    if (uc?.aboutAt) return { text: "About you filled in", done: true };
+    if (uc?.verifiedAt || uc?.signedInAt) return { text: "UC account ready", done: true };
+    if (uc) return { text: "UC account started", done: false };
+    return { text: "Not started", done: false };
+  }
+  if (a.fafsaDoneAt) return { text: `Marked done ${monthDay(a.fafsaDoneAt)}`, done: true };
+  return { text: `Priority deadline ${monthDay(aidDeadlineDate(profile))}`, done: false };
+}
+
+function OfficeStatus({ office }: { office: Office }) {
+  const { profile } = useProfile();
+  const { text, done } = officeStatus(office, profile);
+  return (
+    <span className={`apply-status${done ? " is-done" : ""}`}>
+      {done && <CheckIcon width={13} height={13} aria-hidden="true" />}
+      {text}
+    </span>
+  );
+}
+
+/** The sign above the offices: time left to apply for the student's own cycle. */
+function DeadlineSign() {
   const { profile } = useProfile();
   const now = useNow();
   const days = daysUntilUcDeadline(profile, now);
   const period = filingPeriod(profile, now);
-  const upcoming = calendarEvents(profile, now).slice(0, 4);
+  const entering = entryYear(profile, now);
 
   return (
-    <aside className="apply-aside" aria-label="Deadlines">
-      <section
-        className={`apply-countdown${days <= 7 && days >= 0 ? " is-urgent" : ""}${days < 0 ? " is-passed" : ""}`}
-        role="timer"
-        aria-label={days < 0 ? "The UC application deadline has passed" : `${days} days until the UC application deadline`}
-      >
-        <span className="apply-countdown-eyebrow">UC application deadline</span>
-        <p className="apply-countdown-date">
+    <section className="apply-sign" aria-label="UC application deadline">
+      <div className={`apply-sign-board${days <= 7 && days >= 0 ? " is-urgent" : ""}${days < 0 ? " is-passed" : ""}`}>
+        <span className="apply-sign-eyebrow">UC application · Fall {entering}</span>
+        <p
+          className="apply-sign-count"
+          role="timer"
+          aria-label={days < 0 ? "The UC application deadline has passed" : days === 0 ? "Due today" : `${days} days left to apply`}
+        >
           {days > 0 ? (
             <>
-              <strong>{days}</strong>
-              <span className="apply-countdown-unit">
-                <span>day{days === 1 ? "" : "s"}</span>
-                <span>left</span>
-              </span>
+              <strong>{days}</strong> day{days === 1 ? "" : "s"} left to apply
             </>
           ) : (
-            <strong className="is-word">{days < 0 ? "Closed" : "Due today"}</strong>
+            <strong>{days < 0 ? "Applications closed" : "Due today"}</strong>
           )}
         </p>
-        {days < 0 && <p className="apply-countdown-due">Check apply.universityofcalifornia.edu for any extension.</p>}
-        <div className="apply-countdown-period">
-          <div
-            className="apply-countdown-bar"
-            role="progressbar"
-            aria-label="UC filing period elapsed"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(period.progress * 100)}
-          >
-            <span style={{ width: `${period.progress * 100}%` }} />
+        <p className="apply-sign-date">
+          {days < 0 ? (
+            "Check apply.universityofcalifornia.edu for any extension."
+          ) : (
+            <>
+              Due <time dateTime={period.closes}>{shortDate(period.closes)}</time>, 11:59 PM Pacific
+            </>
+          )}
+        </p>
+        <div
+          className="apply-sign-bar"
+          role="progressbar"
+          aria-label="UC filing period elapsed"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(period.progress * 100)}
+        >
+          <span style={{ width: `${period.progress * 100}%` }} />
+        </div>
+        <a className="apply-sign-link" href={href("agent", "dates")}>
+          View dates <ArrowRightIcon width={13} height={13} />
+        </a>
+      </div>
+      <span className="apply-sign-posts" aria-hidden="true" />
+    </section>
+  );
+}
+
+/** Each destination: a back link, the office's heading, then its existing tools. */
+function DestinationPage({ title, blurb, art, children }: { title: string; blurb: string; art?: Office; children: ReactNode }) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => heading.current?.focus({ preventScroll: true }), []);
+  return (
+    <ApplyPage className="apply-dest">
+      <a className="apply-back" href={href("agent")}>
+        <ArrowRightIcon width={15} height={15} style={{ transform: "rotate(180deg)" }} /> Back to Apply
+      </a>
+      <header className="apply-dest-head">
+        {art && <Entrance office={art} small />}
+        <div>
+          <h1 ref={heading} tabIndex={-1}>
+            {title}
+          </h1>
+          <p>{blurb}</p>
+          {art && <OfficeStatus office={art} />}
+        </div>
+      </header>
+      {children}
+    </ApplyPage>
+  );
+}
+
+function OfficePage({ office }: { office: Office }) {
+  const { profile, update } = useProfile();
+  const agent = agentOf(profile);
+  const change = (fn: (a: AgentState) => AgentState) => update((p) => setAgent(p, fn));
+  const o = OFFICES.find((x) => x.id === office)!;
+
+  return (
+    <DestinationPage title={o.title} blurb={o.blurb} art={office}>
+      {office === "counselor" && (
+        <section className="apply-panel" aria-label="Talk to a counselor">
+          <CounselorTask agent={agent} change={change} />
+        </section>
+      )}
+      {office === "application" && (
+        <>
+          <PreparedInfo />
+          <section className="apply-panel" aria-labelledby="uc-account-heading">
+            <h2 id="uc-account-heading" className="apply-panel-title">
+              Your UC application account
+            </h2>
+            <UcAccountTask agent={agent} change={change} />
+          </section>
+        </>
+      )}
+      {office === "aid" && <AidGuide agent={agent} change={change} />}
+    </DestinationPage>
+  );
+}
+
+/** What the assistant will fill in on UC, from the profile and chosen essays (read-only). */
+function PreparedInfo() {
+  const { profile } = useProfile();
+  const { account } = useAuth();
+  const facts = ucFacts(profile, account?.name ?? "");
+  const piqs = ucPiqs(profile);
+  const rows: [string, string][] = [
+    ["First name", facts.first_name],
+    ["Last name", facts.last_name],
+    ["City", facts.city],
+    ["State", facts.state],
+  ];
+  return (
+    <section className="apply-panel" aria-labelledby="prepared-heading">
+      <h2 id="prepared-heading" className="apply-panel-title">
+        Ready to fill in
+      </h2>
+      <p className="agent-lead">The assistant enters these on UC for you. Anything missing is left for you in the UC window.</p>
+      <dl className="apply-prepared">
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd className={value ? undefined : "is-missing"}>{value || "Not in your profile yet"}</dd>
           </div>
-          <div className="apply-countdown-scale">
-            <span>
-              {period.progress > 0 ? "Opened" : "Opens"} {monthDay(period.opens)}
-            </span>
-            <time className="apply-countdown-left" dateTime={period.closes}>
-              {monthDay(period.closes)}
-            </time>
+        ))}
+        <div>
+          <dt>Personal insight answers</dt>
+          <dd className={piqs.length ? undefined : "is-missing"}>
+            {piqs.length ? piqs.map((q) => `${q.number}. ${q.title}`).join(" · ") : "No drafts yet. Write them in Profile → Essays."}
+          </dd>
+        </div>
+      </dl>
+      <p className="field-hint">Your birthday and birthplace come from your counselor call, if you had one.</p>
+    </section>
+  );
+}
+
+/** Financial aid: which form to file, the Cal Grant deadline, and the existing FAFSA / Dream Act task. */
+function AidGuide({ agent, change }: TaskProps) {
+  const { profile } = useProfile();
+  const due = shortDate(aidDeadlineDate(profile));
+  return (
+    <>
+      <section className="apply-panel" aria-labelledby="aid-forms-heading">
+        <h2 id="aid-forms-heading" className="apply-panel-title">
+          File one aid application
+        </h2>
+        <div className="apply-aid-forms">
+          <div>
+            <h3>FAFSA</h3>
+            <p>For U.S. citizens and eligible noncitizens. Opens federal grants, work-study, and loans, and counts for Cal Grant.</p>
           </div>
+          <div>
+            <h3>CA Dream Act Application</h3>
+            <p>For undocumented students, DACA recipients, and others who qualify for California's AB 540 tuition exemption.</p>
+          </div>
+        </div>
+        <ul className="apply-aid-notes">
+          <li>
+            <strong>Cal Grant priority deadline: {due}.</strong> Your school also has to send your GPA, so ask your counselor to confirm it did.
+          </li>
+          <li>Applying to UC doesn't apply you for aid. You're considered for UC grants once your aid application is in.</li>
+        </ul>
+        <a className="apply-inline-link" href="https://admission.universityofcalifornia.edu/tuition-financial-aid/" target="_blank" rel="noreferrer">
+          UC tuition and financial aid <ExternalIcon width={12} height={12} />
+        </a>
+      </section>
+      <section className="apply-panel" aria-labelledby="aid-task-heading">
+        <h2 id="aid-task-heading" className="apply-panel-title">
+          Submit the FAFSA or CA Dream Act
+        </h2>
+        <FafsaTask agent={agent} change={change} />
+      </section>
+    </>
+  );
+}
+
+/** Every upcoming date for the student's cycle, plus the Intent to Register task. */
+function DatesPage() {
+  const { profile, update } = useProfile();
+  const now = useNow();
+  const agent = agentOf(profile);
+  const change = (fn: (a: AgentState) => AgentState) => update((p) => setAgent(p, fn));
+  const events = calendarEvents(profile, now);
+  const period = filingPeriod(profile, now);
+
+  return (
+    <DestinationPage title="Dates" blurb={`Your Fall ${entryYear(profile, now)} application cycle.`}>
+      <section className="apply-panel" aria-labelledby="window-heading">
+        <h2 id="window-heading" className="apply-panel-title">
+          UC filing period
+        </h2>
+        <div className="apply-sign-bar" aria-hidden="true">
+          <span style={{ width: `${period.progress * 100}%` }} />
+        </div>
+        <div className="apply-period-scale">
+          <span>
+            {period.progress > 0 ? "Opened" : "Opens"} {shortDate(period.opens)}
+          </span>
+          <span>Closes {shortDate(period.closes)}</span>
         </div>
       </section>
 
-      {upcoming.length > 0 && (
-        <section className="apply-dates">
-          <h2>Coming up</h2>
-          <ol>
-            {upcoming.map((e) => (
+      <section className="apply-panel" aria-labelledby="dates-heading">
+        <h2 id="dates-heading" className="apply-panel-title">
+          Coming up
+        </h2>
+        {events.length ? (
+          <ol className="apply-dates-list">
+            {events.map((e) => (
               <li key={e.key} className={e.key === "uc-deadline" ? "is-key" : undefined}>
                 <time dateTime={e.date}>
                   <small>{new Date(`${e.date}T12:00:00`).toLocaleDateString(undefined, { month: "short" })}</small>
                   {Number(e.date.slice(8))}
                 </time>
-                <span>{e.title}</span>
+                <span>
+                  <strong>{e.title}</strong>
+                  <small>{e.detail}</small>
+                </span>
               </li>
             ))}
           </ol>
-        </section>
-      )}
-    </aside>
+        ) : (
+          <p className="agent-lead">No upcoming dates for this cycle.</p>
+        )}
+      </section>
+
+      <section className="apply-panel" aria-labelledby="sir-heading">
+        <h2 id="sir-heading" className="apply-panel-title">
+          Submit your Intent to Register
+        </h2>
+        <SirTask agent={agent} change={change} />
+      </section>
+    </DestinationPage>
   );
 }
 
 /** Shown until every story checkpoint before Review & Apply is complete. */
 function ApplyLocked() {
   const { profile } = useProfile();
-  const { updateSettings } = useGame();
   const sections = completeness(profile).sections;
-  const steps = computeJourney(profile, sections, academicStarted(profile)).checkpoints.filter((c) => c.id !== "review");
+  const steps = computeJourney(profile, sections, academicStarted(profile)).checkpoints.filter((c) => !AFTER_APPLY.includes(c.id));
 
   return (
-    <ApplyLayout>
+    <ApplyPage>
+      <DeadlineSign />
       <section className="apply-locked">
         <img
           src="/apply/locked.png"
@@ -167,7 +422,7 @@ function ApplyLocked() {
         />
         <span className="agent-mode-tag">Apply</span>
         <h1>Apply is locked</h1>
-        <p>Finish the story with Sage first. Once these steps are done, Apply opens and Sage handles the busywork for you.</p>
+        <p>Finish these steps in Chatbot first. Once they're done, Apply opens and Sage handles the busywork for you.</p>
         <ul className="apply-locked-steps">
           {steps.map((c) => (
             <li key={c.id} className={c.complete ? "is-done" : undefined}>
@@ -177,82 +432,11 @@ function ApplyLocked() {
             </li>
           ))}
         </ul>
-        <button
-          className="btn-primary"
-          onClick={() => {
-            updateSettings({ storyMode: true });
-            navigate("advisor");
-          }}
-        >
-          Continue the story
+        <button className="btn-primary" onClick={() => navigate("advisor")}>
+          Back to Chatbot
         </button>
       </section>
-    </ApplyLayout>
-  );
-}
-
-/** Story mode is done, so the agent does the application busywork and the student approves it. */
-function ApplyWorkspace() {
-  const { profile, update } = useProfile();
-  const agent = agentOf(profile);
-  const tasks = agentTasks(profile);
-  const firstOpen = tasks.find((t) => !t.done && !t.comingSoon)?.id ?? null;
-  const [open, setOpen] = useState<AgentTaskId | null>(firstOpen);
-  const change = (fn: (a: AgentState) => AgentState) => update((p) => setAgent(p, fn));
-
-  const actionable = tasks.filter((t) => !t.comingSoon);
-  const doneCount = actionable.filter((t) => t.done).length;
-
-  return (
-    <ApplyLayout>
-      <div className="apply-section-head">
-        <h2>Your to-dos</h2>
-        <span>
-          {doneCount} of {actionable.length} done
-        </span>
-      </div>
-      <ol className="agent-tasks">
-        {tasks.map((task, i) => {
-          const Icon = ICONS[task.id];
-          const expanded = open === task.id && !task.comingSoon;
-          return (
-            <li
-              key={task.id}
-              className={`agent-task${task.done ? " done" : ""}${task.comingSoon ? " soon" : ""}${expanded ? " open" : ""}`}
-            >
-              <button
-                type="button"
-                className="agent-task-head"
-                onClick={() => setOpen(expanded ? null : task.id)}
-                disabled={task.comingSoon}
-                aria-expanded={expanded}
-              >
-                <span className="agent-task-num">{task.done ? <CheckIcon width={16} height={16} /> : i + 1}</span>
-                <Icon width={18} height={18} className="agent-task-icon" />
-                <span className="agent-task-text">
-                  <strong>{task.title}</strong>
-                </span>
-                {task.comingSoon ? (
-                  <span className="agent-badge">
-                    <LockIcon width={13} height={13} /> Coming soon
-                  </span>
-                ) : task.done ? (
-                  <span className="agent-badge agent-badge-done">Done</span>
-                ) : null}
-              </button>
-              {expanded && (
-                <div className="agent-task-body">
-                  {task.id === "counselor" && <CounselorTask agent={agent} change={change} />}
-                  {task.id === "ucAccount" && <UcAccountTask agent={agent} change={change} />}
-                  {task.id === "fafsa" && <FafsaTask agent={agent} change={change} />}
-                  {task.id === "sir" && <SirTask agent={agent} change={change} />}
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ol>
-    </ApplyLayout>
+    </ApplyPage>
   );
 }
 

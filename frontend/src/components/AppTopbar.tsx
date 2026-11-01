@@ -1,17 +1,14 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { useAuth } from "../auth";
-import { useGame } from "../game/GameProvider";
 import { storyComplete } from "../journey/guided";
 import { completeness, useProfile } from "../profile";
 import { href, type Route } from "../router";
 import type { Health, Theme } from "../App";
-import { BookIcon, ChatIcon, FileIcon, LockIcon, SparkIcon, Logo, LogoutIcon, MoonIcon, RetryIcon, SunIcon, UserIcon } from "./icons";
+import { ChatIcon, FileIcon, LockIcon, SparkIcon, Logo, LogoutIcon, MoonIcon, RetryIcon, SunIcon, UserIcon } from "./icons";
 import { ResetDataDialog } from "./ResetDataDialog";
 
-/** Story and Manual both live on the Advisor route; `story` picks the mode. */
-const LINKS: { route: Route; label: string; Icon: typeof FileIcon; story?: boolean }[] = [
-  { route: "advisor", label: "Story", Icon: BookIcon, story: true },
-  { route: "advisor", label: "Manual", Icon: ChatIcon, story: false },
+const LINKS: { route: Route; label: string; Icon: typeof FileIcon }[] = [
+  { route: "advisor", label: "Chatbot", Icon: ChatIcon },
   { route: "profile", label: "Profile", Icon: UserIcon },
 ];
 
@@ -22,11 +19,10 @@ interface AppTopbarProps {
   onToggleTheme: () => void;
 }
 
-/** Shared top nav for Advisor (Story / Manual), Profile, and Apply. */
+/** Shared top nav for Chatbot (the Advisor route), Profile, and Apply. */
 export const AppTopbar = memo(function AppTopbar({ route, health, theme, onToggleTheme }: AppTopbarProps) {
   const { account, signOut } = useAuth();
   const { profile } = useProfile();
-  const { state, updateSettings } = useGame();
   const [menuOpen, setMenuOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -60,16 +56,15 @@ export const AppTopbar = memo(function AppTopbar({ route, health, theme, onToggl
           <span>Track2College</span>
         </a>
         <nav className="app-nav" aria-label="App sections">
-          {links.map(({ route: target, label, Icon, story }) => {
-            const active = route === target && (story === undefined || story === state.storyMode);
+          {links.map(({ route: target, label, Icon }) => {
+            const active = route === target;
             return (
               <a
                 key={label}
                 href={href(target)}
-                onClick={story === undefined ? undefined : () => updateSettings({ storyMode: story })}
                 className={active ? "on" : undefined}
                 aria-current={active ? "page" : undefined}
-                title={target === "agent" && applyLocked ? "Unlocks when you finish the story" : undefined}
+                title={target === "agent" && applyLocked ? "Unlocks when you finish the steps in Chatbot" : undefined}
               >
                 <Icon width={16} height={16} />
                 <span>{label}</span>

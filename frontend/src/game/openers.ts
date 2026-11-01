@@ -26,7 +26,7 @@ export function financesUnknown(p: Profile): boolean {
   );
 }
 
-/** First thing a guide says in an empty Manual chat, based on what the profile already shows. */
+/** First thing a guide says in an empty Story chat, based on what the profile already shows. */
 export function openerFor(mentor: Mentor, profile: Profile, name: string): Opener {
   const hi = `Hey${name ? ` ${name}` : ""}!`;
 

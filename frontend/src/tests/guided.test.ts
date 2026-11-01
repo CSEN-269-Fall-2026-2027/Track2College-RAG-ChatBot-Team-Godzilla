@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { blankProfile } from "./fixtures";
 import { applyDrafts, piqRequest } from "../journey/piqs";
 import { completeness } from "../profile";
-import { applyGuidedEffect, inputEffect, nextGuidedTurn, type GuidedEffect } from "../journey/guided";
+import { applyGuidedEffect, inputEffect, nextGuidedTurn, storyComplete, type GuidedEffect } from "../journey/guided";
 import { ACTIVITY_QUESTIONS, computeJourney } from "../journey/logic";
 
-const HANDOFFS: GuidedEffect["type"][] = ["noop", "ask", "openManual", "resume", "generatePiqs", "openEssays"];
+const HANDOFFS: GuidedEffect["type"][] = ["noop", "ask", "focusChat", "resume", "generatePiqs", "openEssays"];
 
 describe("nextGuidedTurn", () => {
   it("asks a grade question with four choices when empty", () => {
@@ -67,6 +67,9 @@ describe("nextGuidedTurn", () => {
       seen.push(turn.id);
       if (turn.finished) break;
       expect(turn.id).not.toBe("idle");
+      // Apply unlocks at Review & Apply; the Financial Aid stop after it never holds Apply up.
+      if (turn.id === "submit") expect(storyComplete(p, completeness(p).sections)).toBe(true);
+      if (turn.checkpointId === "aid") expect(turn.speaker).toBe("penny");
       const choice = turn.choices.find((c) => !HANDOFFS.includes(c.effect.type));
       let effect: GuidedEffect;
       if (turn.campusPicker) {
@@ -98,6 +101,10 @@ describe("nextGuidedTurn", () => {
     }
     expect(seen.includes("idle")).toBe(false);
     expect(seen.length).toBeGreaterThan(5);
+    // Financial Aid is the last stop: asked after submitting, and answering it finishes the story.
+    expect(seen.indexOf("aid-needs")).toBeGreaterThan(seen.indexOf("submit"));
+    expect(seen).toContain("aid-fafsa");
+    expect(seen.at(-1)).toBe("done");
   });
 
   it("moves on to the next chapter when the student defers a question", () => {

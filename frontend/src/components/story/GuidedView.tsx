@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { ucDeadlineDate } from "../../agent/logic";
 import { COLLEGES } from "../../colleges";
-import { useGame } from "../../game/GameProvider";
+import type { Mentor } from "../../game/characters";
 import { applyGuidedEffect, inputEffect, nextGuidedTurn, savedLabel, type GuidedChoice, type GuidedEffect } from "../../journey/guided";
 import { isUc, PIQ_PROMPTS, PIQ_REQUIRED, PIQ_WORD_LIMIT, type CheckpointId } from "../../journey/logic";
 import { ucFacts } from "../../journey/facts";
@@ -16,8 +16,8 @@ interface GuidedViewProps {
   visible: boolean;
   studentName: string;
   userId: string;
-  /** Ask the current level's guide a starter question in the chat on the right. */
-  onAsk: (prompt: string) => void;
+  /** Ask a guide (the current level's by default) a starter question in the chat on the right. */
+  onAsk: (prompt: string, mentorId?: Mentor["id"]) => void;
   /** Chat with the current level's guide (conversation + message box), shown on the right. */
   chat: ReactNode;
   /** Name of that guide (Sage on the final step), for screen readers. */
@@ -30,14 +30,13 @@ interface GuidedViewProps {
 
 /**
  * Story mode: the Journey Map (top) and the current question with its answer bubbles
- * (bottom) on the left; a chat with the current level's guide, like Manual mode, on the right.
+ * (bottom) on the left; a chat with the current level's guide (or the clicked planet's) on the right.
  */
 export function GuidedView({ visible, studentName, userId, onAsk, chat, guideName, selectedStage, onSelectStage }: GuidedViewProps) {
   const { profile, update } = useProfile();
   // Review & Apply: the reply area becomes a UC fun-facts quiz (deadline matches the Apply page).
   const deadline = new Date(`${ucDeadlineDate(profile)}T12:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric" });
   const facts = useMemo(() => ucFacts(deadline), [deadline]);
-  const { updateSettings } = useGame();
   const sections = completeness(profile).sections;
   const [draft, setDraft] = useState("");
   const [skipIds, setSkipIds] = useState<Set<string>>(() => new Set());
@@ -76,11 +75,11 @@ export function GuidedView({ visible, studentName, userId, onAsk, chat, guideNam
       case "resume":
         setSkipIds(new Set());
         return;
-      case "openManual":
-        updateSettings({ storyMode: false });
+      case "focusChat":
+        document.querySelector<HTMLTextAreaElement>(".guided-chat .composer textarea")?.focus();
         return;
       case "ask":
-        onAsk(effect.prompt);
+        onAsk(effect.prompt, effect.mentorId);
         return;
       case "openEssays":
         navigate("profile", "essays");

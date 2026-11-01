@@ -2,6 +2,7 @@ import type { Mentor } from "../game/characters";
 import type { GradeLevel, Profile } from "../types";
 import {
   ACTIVITY_DESC_LIMIT,
+  AFTER_APPLY,
   ACTIVITY_QUESTIONS,
   computeJourney,
   isUc,
@@ -35,6 +36,8 @@ export type GuidedEffect =
   | { type: "setBasics"; patch: Partial<Profile["basics"]> }
   | { type: "setAcademics"; patch: Partial<Profile["academics"]> }
   | { type: "setGoals"; patch: Partial<Profile["goals"]> }
+  /** Financial-aid answers (Profile → Cost & support). */
+  | { type: "setPreferences"; patch: Partial<Profile["preferences"]> }
   /** Answer to a direct activity question; count > 0 adds the entry. */
   | { type: "answerActivity"; questionId: string; count: number }
   /** Optional extra details for a "yes" answer ("" = submitted empty). */
@@ -54,9 +57,10 @@ export type GuidedEffect =
   /** Draft these PIQs with Groq (one as soon as its follow-ups are done); results land in Profile → Essays. */
   | { type: "generatePiqs"; piqIds: string[] }
   | { type: "openEssays" }
-  /** Hand off to a guide in Manual chat with a starter question. */
+  /** Hand off to a guide in the chat with a starter question. */
   | { type: "ask"; mentorId: Mentor["id"]; prompt: string }
-  | { type: "openManual" }
+  /** Put the cursor in the chat box so the student can ask their own question. */
+  | { type: "focusChat" }
   /** Bring back everything deferred this session. */
   | { type: "resume" };
 
@@ -135,10 +139,13 @@ const filled = (v: string) => v.trim().length > 0;
 export const academicStarted = (profile: Profile) =>
   filled(profile.academics.gpaUnweighted) || filled(profile.academics.gpaWeighted) || filled(profile.academics.exams);
 
-/** Story mode ends at Review & Apply: every earlier checkpoint is complete, so Apply takes over. */
+/**
+ * Apply unlocks at Review & Apply: every checkpoint before it is complete, so Apply takes over.
+ * Financial Aid comes after Review & Apply and doesn't hold Apply up.
+ */
 export function storyComplete(profile: Profile, sections: Record<string, number>) {
   const { checkpoints } = computeJourney(profile, sections, academicStarted(profile));
-  return checkpoints.filter((c) => c.id !== "review").every((c) => c.complete);
+  return checkpoints.filter((c) => !AFTER_APPLY.includes(c.id)).every((c) => c.complete);
 }
 const DEFER = { type: "noop" } as const;
 
@@ -166,11 +173,11 @@ export function nextGuidedTurn(
       checkpointId: "done",
       speaker: "sage",
       chapter: "Finish",
-      prompt: hi("you've submitted your UC application — that's the whole path! Next up: watch your email, keep your grades steady, and sort out financial aid."),
+      prompt: hi("you've submitted your UC application and sorted out financial aid — that's the whole path! Next up: watch your email and keep your grades steady."),
       choices: [
-        { id: "aid", label: "Ask Penny what to do about aid now", effect: { type: "ask", mentorId: "penny", prompt: "I just submitted my UC application. What do I need to do for financial aid now (FAFSA or CA Dream Act, Cal Grant)?" } },
+        { id: "aid", label: "Ask Penny what comes next for aid", effect: { type: "ask", mentorId: "penny", prompt: "I submitted my UC application and my FAFSA or CA Dream Act. What should I watch for next with financial aid, like Cal Grant and my aid offers?" } },
         { id: "next", label: "What happens after I submit?", effect: { type: "ask", mentorId: "sage", prompt: "I submitted my UC application. What happens next and what should I watch for?" } },
-        { id: "manual", label: "Ask my own question", effect: { type: "openManual" } },
+        { id: "manual", label: "Ask my own question", effect: { type: "focusChat" } },
       ],
       finished: true,
     };
@@ -197,7 +204,7 @@ export function nextGuidedTurn(
     prompt: hi(`you've set aside everything that's left for now. Next time, we'll start with “${cp.title}”.`),
     choices: [
       { id: "resume", label: "Go back to what I skipped", effect: { type: "resume" } },
-      { id: "manual", label: "Ask a guide a question instead", effect: { type: "openManual" } },
+      { id: "manual", label: "Ask a guide a question instead", effect: { type: "focusChat" } },
     ],
     finished: false,
   };
@@ -468,10 +475,48 @@ function turnsFor(
     });
   }
 
+  if (cp.id === "aid") {
+    const f = profile.preferences;
+    if (f.needsAid === "") {
+      out.push({
+        id: "aid-needs",
+        speaker: "penny",
+        prompt: hi("last stop: paying for college. Do you think you'll need financial aid — grants, scholarships, or work-study?"),
+        choices: [
+          { id: "yes", label: "Yes, I'll need aid", effect: { type: "setPreferences", patch: { needsAid: "yes" } } },
+          { id: "unsure", label: "Not sure yet", effect: { type: "setPreferences", patch: { needsAid: "unsure" } } },
+          { id: "no", label: "No, we've got it covered", effect: { type: "setPreferences", patch: { needsAid: "no" } } },
+        ],
+      });
+    }
+    if (f.fafsa !== "done" && f.needsAid !== "no") {
+      const started = f.fafsa === "in-progress";
+      out.push({
+        id: started ? "aid-fafsa-finish" : "aid-fafsa",
+        speaker: "penny",
+        prompt: started
+          ? hi("how's the FAFSA or California Dream Act Application going? Once it's submitted, this step is done.")
+          : hi("the FAFSA (or the California Dream Act Application, if FAFSA isn't right for you) is how UC and California decide your aid. Have you filed it?"),
+        choices: started
+          ? [
+              { id: "done", label: "It's submitted!", effect: { type: "setPreferences", patch: { fafsa: "done" } } },
+              { id: "help", label: "Help me finish it", effect: { type: "ask", mentorId: "penny", prompt: "I started the FAFSA or California Dream Act Application. What do I still need to finish it, and what documents should I have ready?" } },
+              { id: "later", label: "Not yet", effect: DEFER },
+            ]
+          : [
+              { id: "done", label: "Yes, it's submitted", effect: { type: "setPreferences", patch: { fafsa: "done" } } },
+              { id: "started", label: "I've started it", effect: { type: "setPreferences", patch: { fafsa: "in-progress" } } },
+              { id: "which", label: "Which one should I file?", effect: { type: "ask", mentorId: "penny", prompt: "Should I file the FAFSA or the California Dream Act Application, and how do I get started?" } },
+              { id: "later", label: "Not yet", effect: DEFER },
+            ],
+      });
+    }
+  }
+
   return out;
 }
 
-/** Apply a guided effect to the profile. Hand-off effects (ask/openManual/resume) leave it unchanged. */
+/** Apply a guided effect to the profile. Hand-off effects (ask/focusChat/resume) leave it unchanged. */
 export function applyGuidedEffect(profile: Profile, effect: GuidedEffect, newId: () => string): Profile {
   switch (effect.type) {
     case "setBasics":
@@ -480,6 +525,8 @@ export function applyGuidedEffect(profile: Profile, effect: GuidedEffect, newId:
       return { ...profile, academics: { ...profile.academics, ...effect.patch } };
     case "setGoals":
       return { ...profile, goals: { ...profile.goals, ...effect.patch } };
+    case "setPreferences":
+      return { ...profile, preferences: { ...profile.preferences, ...effect.patch } };
     case "answerActivity": {
       const q = ACTIVITY_QUESTIONS.find((x) => x.id === effect.questionId);
       if (!q) return profile;
@@ -576,7 +623,7 @@ export function savedLabel(effect: GuidedEffect): string | null {
   switch (effect.type) {
     case "noop":
     case "ask":
-    case "openManual":
+    case "focusChat":
     case "resume":
     case "generatePiqs":
     case "openEssays":

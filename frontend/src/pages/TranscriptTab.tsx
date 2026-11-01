@@ -6,7 +6,7 @@ import { useProfile } from "../profile";
 import { href } from "../router";
 import { newId } from "../storage";
 import type { AgArea, CourseLevel, CourseStatus, Transcript, TranscriptCourse } from "../types";
-import { BookIcon, ChatIcon, CheckIcon, FileIcon, PlusIcon, TrashIcon, UploadIcon } from "../components/icons";
+import { ChatIcon, CheckIcon, FileIcon, PlusIcon, TrashIcon, UploadIcon } from "../components/icons";
 
 const GRADE_ORDER: TranscriptCourse["gradeLevel"][] = ["9", "10", "11", "12", "other"];
 const GRADE_TITLE: Record<TranscriptCourse["gradeLevel"], string> = {
@@ -301,9 +301,6 @@ function TranscriptView({ transcript, transcripts, onSelect, onChange, onRemove,
               </div>
             )}
           </div>
-          <a className="card-link plan-link" href={href("profile", "plan")}>
-            <BookIcon width={14} height={14} /> Build a course plan from this transcript
-          </a>
           <a className="card-link plan-link" href={href("profile", "academics")}>
             <CheckIcon width={14} height={14} /> Back to academics
           </a>

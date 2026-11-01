@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useGame } from "../game/GameProvider";
 import { activitiesStatus, journeyOf, PIQ_PROMPTS, PIQ_REQUIRED, PIQ_WORD_LIMIT, setPiqStatus } from "../journey/logic";
 import { canGeneratePiq, chosenPiqs, countWords, editDraft, piqWorkOf } from "../journey/piqs";
 import { usePiqDrafts } from "../journey/usePiqDrafts";
@@ -11,13 +10,9 @@ import type { Profile } from "../types";
 /** Profile → Essays: one card per chosen UC PIQ — drafted automatically from activities, then revised by the student. */
 export function EssayTab({ onAsk }: { onAsk: (text: string) => void }) {
   const { profile } = useProfile();
-  const { updateSettings } = useGame();
   const piq = usePiqDrafts();
 
-  const openStory = () => {
-    updateSettings({ storyMode: true });
-    navigate("advisor");
-  };
+  const openStory = () => navigate("advisor");
 
   const ids = chosenPiqs(profile);
 
@@ -29,7 +24,7 @@ export function EssayTab({ onAsk }: { onAsk: (text: string) => void }) {
         </div>
         <h2>Choose your Personal Insight Questions</h2>
         <p className="essays-empty-sub">
-          UC asks you to answer 4 of 8 questions, {PIQ_WORD_LIMIT} words each. Pick them with Quill in Story mode — once your activities are
+          UC asks you to answer 4 of 8 questions, {PIQ_WORD_LIMIT} words each. Pick them with Quill in Chatbot — once your activities are
           done, Quill drafts each essay from them automatically.
         </p>
         <div className="essays-empty-actions">

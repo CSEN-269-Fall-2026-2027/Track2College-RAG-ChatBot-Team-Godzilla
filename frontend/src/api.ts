@@ -240,6 +240,11 @@ export async function startCounselorCall(signal?: AbortSignal): Promise<string> 
   return (await post<{ conversation_token: string }>("/agent/counselor/voice", {}, signal)).conversation_token;
 }
 
+/** Why a counselor call ended before Jordan said anything (e.g. out of credits), or null. */
+export async function counselorCallProblem(conversationId: string): Promise<string | null> {
+  return (await post<{ problem: string | null }>("/agent/counselor/voice/problem", { conversation_id: conversationId })).problem;
+}
+
 export type UcRunStatus =
   | "opening"
   | "waiting"

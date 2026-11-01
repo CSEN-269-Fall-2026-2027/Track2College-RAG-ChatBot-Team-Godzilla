@@ -107,7 +107,7 @@ export const PROFILE_SECTIONS = [
 export const PROFILE_WORKSPACES = [
   { id: "activities", title: "Activities & awards", blurb: "UC activities list workspace" },
   { id: "essays", title: "Personal insight essays", blurb: "Your four UC PIQ drafts" },
-  { id: "plan", title: "Course plan", blurb: "A year-by-year plan aimed at a UC campus" },
+  { id: "majors", title: "Major selection", blurb: "Majors you're considering, plus a quick major match survey" },
 ] as const;
 
 export type SectionId = (typeof PROFILE_SECTIONS)[number]["id"];
