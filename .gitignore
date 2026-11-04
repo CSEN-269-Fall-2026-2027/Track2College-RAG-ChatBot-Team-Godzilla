@@ -68,3 +68,4 @@ storage-state*.json
 .claude/settings.local.json
 CLAUDE.local.md
 .harness/
+backend/.env
