@@ -14,7 +14,7 @@ import {
 } from "../agent/logic";
 import { ucFacts, shuffled } from "../journey/facts";
 import { storyComplete } from "../journey/guided";
-import { emptyJourney, setCampusMajor, setPiqStatus, toggleCampus, togglePiq } from "../journey/logic";
+import { emptyJourney, setPiqStatus, toggleCampus, togglePiq } from "../journey/logic";
 import type { Profile, UcJourneyState } from "../types";
 import { blankProfile } from "./fixtures";
 
@@ -39,7 +39,8 @@ function storyDoneProfile(): Profile {
     ],
     academics: { ...blankProfile().academics, gpaUnweighted: "3.8" },
   });
-  p = setCampusMajor(toggleCampus(p, "UC Davis", id), "UC Davis", "Biology");
+  p = toggleCampus(p, "UC Davis", id);
+  p = { ...p, goals: { ...p.goals, intendedMajor: "Biology" } };
   let j: UcJourneyState = { ...emptyJourney(), activitiesReviewed: true };
   for (const q of ["leadership", "creativity", "talent", "community"]) j = setPiqStatus(togglePiq(j, q), q, "ready");
   return { ...p, ucJourney: j };

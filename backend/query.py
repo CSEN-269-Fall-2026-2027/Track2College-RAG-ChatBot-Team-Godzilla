@@ -19,7 +19,7 @@ import requests
 from dotenv import load_dotenv
 
 from followup_refs import resolve_followup_query as _resolve_followup_query
-from persona import extract_mood, normalize_persona, persona_prompt
+from persona import extract_mood, mode_prompt, normalize_persona, persona_prompt
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -150,6 +150,7 @@ def generate_answer(
     conversation_history: list | None = None,
     profile_context: str | None = None,
     persona: str | None = None,
+    mode: str | None = None,
 ) -> str:
     """Advisor chat reply, formatted as "Mood: …" (optional) + "Answer:\n…"."""
     persona = normalize_persona(persona) or "sage"
@@ -162,13 +163,28 @@ def generate_answer(
         "Do not invent official deadlines or URLs — if you mention a site, prefer well-known "
         "ones like universityofcalifornia.edu or studentaid.gov."
         f" Today is {date.today():%B %-d, %Y}."
+        "\n\nLENGTH — keep replies short:\n"
+        "• Default to 2–4 sentences, or a short list of at most 5 bullets. Aim for under 120 words.\n"
+        "• Answer the question asked, then stop. No long intros, recaps, or closing pep talks.\n"
+        "• Go longer only when the student asks for detail or a step-by-step walkthrough, or the task "
+        "truly needs it (like drafting or revising an essay).\n"
+        "\nFORMATTING — the chat only shows plain text with:\n"
+        "• **bold** for a few key words, lines starting with \"- \" for bullets, \"1. \" for numbered steps, "
+        "and a short line ending in a colon as a section label.\n"
+        "• Never use horizontal rules (---), # headings, tables, italics, code blocks, emojis, or [text](url) "
+        "links. Write a URL out in full instead.\n"
     )
     if profile_context and profile_context.strip():
         system += (
             "\n\nStudent profile (personalize with this; it is not a source of college facts):\n"
             + profile_context.strip()
+            + "\n\nIf the profile has an APPLICATION PROGRESS section, it records what the student has done "
+            "with Track2College's application tools (counselor email, call with Jordan, UC account, "
+            "submission, Intent to Register, upcoming dates). Use it to answer \"what's done / what's next\" "
+            "questions, and never say something happened that it doesn't show."
         )
     system += persona_prompt(persona)
+    system += mode_prompt(mode)
 
     messages: list[dict] = [{"role": "system", "content": system}]
     for turn in conversation_history or []:

@@ -70,9 +70,6 @@ export function Composer({ busy, onSend, onStop, focusKey, placeholder }: Compos
           </button>
         )}
       </form>
-      <p className="disclaimer">
-        Track2College can make mistakes. Confirm deadlines and requirements with your counselor or the college.
-      </p>
     </div>
   );
 }

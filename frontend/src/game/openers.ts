@@ -1,11 +1,16 @@
 import { PIQ_PROMPTS, journeyOf } from "../journey/logic";
-import type { Profile } from "../types";
+import type { AidMode, Profile, ReviewMode, StoryMode } from "../types";
 import type { Mentor } from "./characters";
 
 export type OpenerAction =
   | { kind: "ask"; label: string; prompt: string }
   /** Saves the PIQ as chosen, then asks Quill to start on it. */
-  | { kind: "pickPiq"; label: string; piqId: string; prompt: string };
+  | { kind: "pickPiq"; label: string; piqId: string; prompt: string }
+  /** Opens one of the application tools (agent/tasks) inside the chat (Review & Apply). */
+  | { kind: "tool"; label: string; tool: ReviewTool };
+
+/** The application tools the Review & Apply personas offer in the chat. */
+export type ReviewTool = "email" | "call" | "apply";
 
 export interface Opener {
   text: string;
@@ -26,9 +31,59 @@ export function financesUnknown(p: Profile): boolean {
   );
 }
 
-/** First thing a guide says in an empty Story chat, based on what the profile already shows. */
-export function openerFor(mentor: Mentor, profile: Profile, name: string): Opener {
+/** The first thing the Review & Apply persona says (its buttons stay under this message). */
+export function reviewModeLine(mode: ReviewMode, name: string): string {
   const hi = `Hey${name ? ` ${name}` : ""}!`;
+  return mode === "counselor"
+    ? `${hi} Want help sending an email to your school counselor? We'll find them first, then draft it together. Or you can meet with Jordan, your virtual counselor, on a video call.`
+    : `${hi} Want help applying? I'll open the UC application and fill in what's in your profile. You can also ask me anything about the application.`;
+}
+
+/** The buttons under the Review & Apply persona's first message. */
+export function reviewActions(mode: ReviewMode): OpenerAction[] {
+  return mode === "counselor"
+    ? [
+        { kind: "tool", label: "Help me email my counselor", tool: "email" },
+        { kind: "tool", label: "Meet with my virtual counselor", tool: "call" },
+      ]
+    : [{ kind: "tool", label: "Yes, help me apply", tool: "apply" }];
+}
+
+/** What Penny says on Financial Aid, by the mode the student picked. */
+export function aidModeLine(mode: AidMode, name: string): string {
+  const hi = `Hey${name ? ` ${name}` : ""}!`;
+  return mode === "fafsa"
+    ? `${hi} Let's get your FAFSA (or California Dream Act Application) done. Tell me where you are with it, or pick an option on the left, and I'll walk you through it one step at a time.`
+    : `${hi} Let's find you some scholarships. I'll use your profile to point you to ones you're likely to qualify for and help you plan your applications. Pick an option on the left or ask me anything.`;
+}
+
+/**
+ * First thing a guide says in an empty Story chat, based on what the profile already shows.
+ * `mode` is set when the chat is Penny's on Financial Aid. The Review & Apply personas
+ * (Counselor, Application assistant) always open with their buttons.
+ */
+export function openerFor(mentor: Mentor, profile: Profile, name: string, mode?: StoryMode | null): Opener {
+  const hi = `Hey${name ? ` ${name}` : ""}!`;
+
+  if (mentor.id === "penny" && (mode === "fafsa" || mode === "scholarships")) {
+    return {
+      text: aidModeLine(mode, name),
+      actions:
+        mode === "fafsa"
+          ? [
+              { kind: "ask", label: "FAFSA or Dream Act?", prompt: "Should I file the FAFSA or the California Dream Act Application, and how do I get started?" },
+              { kind: "ask", label: "What do I need to file?", prompt: "What documents and information do I need to complete the FAFSA, and when is it due?" },
+            ]
+          : [
+              { kind: "ask", label: "Find scholarships for me", prompt: "Based on my profile, what kinds of scholarships am I likely to qualify for, and where should I look?" },
+              { kind: "ask", label: "Help with a scholarship essay", prompt: "Can you help me write a scholarship essay? Start by asking me a few questions, and help me reuse stories from my Personal Insight answers." },
+            ],
+    };
+  }
+
+  if (mentor.id === "counselor" || mentor.id === "assistant") {
+    return { text: reviewModeLine(mentor.id, name), actions: reviewActions(mentor.id) };
+  }
 
   if (mentor.id === "quill") {
     const chosen = PIQ_PROMPTS.filter((q) => q.id in journeyOf(profile).piqs);
@@ -59,7 +114,7 @@ export function openerFor(mentor: Mentor, profile: Profile, name: string): Opene
     };
   }
 
-  if (mentor.id === "milo" && !profile.goals.majors.length) {
+  if (mentor.id === "milo" && !profile.goals.intendedMajor) {
     return {
       text: `${hi} Not sure what to major in yet? Tell me which classes or activities you enjoy, and I'll suggest a few majors to explore.`,
       actions: [],

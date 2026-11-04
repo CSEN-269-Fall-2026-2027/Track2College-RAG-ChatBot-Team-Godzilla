@@ -1,6 +1,6 @@
 import unittest
 
-from persona import extract_mood, normalize_persona, persona_prompt
+from persona import extract_mood, mode_prompt, normalize_mode, normalize_persona, persona_prompt
 
 
 class PersonaTests(unittest.TestCase):
@@ -19,6 +19,22 @@ class PersonaTests(unittest.TestCase):
         self.assertIn("Personal Insight Questions", persona_prompt("quill"))
         self.assertIn("financial aid", persona_prompt("penny"))
         self.assertNotIn("{focus}", persona_prompt("sage"))
+
+    def test_review_modes_set_the_task(self) -> None:
+        self.assertEqual(mode_prompt(None), "")
+        self.assertEqual(mode_prompt("pirate"), "")
+        self.assertEqual(normalize_mode(" Counselor "), "counselor")
+        self.assertIn("school counselor", mode_prompt("counselor"))
+        self.assertIn("Join video call", mode_prompt("counselor"))
+        self.assertIn("help me apply", mode_prompt("assistant"))
+
+    def test_aid_modes_set_the_task(self) -> None:
+        self.assertEqual(normalize_mode(" FAFSA "), "fafsa")
+        self.assertEqual(normalize_mode("scholarships"), "scholarships")
+        self.assertIn("California Dream Act", mode_prompt("fafsa"))
+        self.assertIn("Cal Grant", mode_prompt("fafsa"))
+        self.assertIn("never charge a fee", mode_prompt("scholarships"))
+        self.assertNotIn("Scholarships (Financial Aid step)", mode_prompt("fafsa"))
 
     def test_extracts_trailing_mood_line(self) -> None:
         text = "Answer:\nFile early.\n\nFollow-up Questions you might have:\nQ1. When?\nMood: concerned"

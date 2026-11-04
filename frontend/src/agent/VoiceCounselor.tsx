@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ConversationProvider,
   useConversationControls,
@@ -26,6 +26,14 @@ interface VoiceCounselorProps {
   onEnd: (lines: CallLine[]) => void;
   /** Called when Jordan saves the student's birthday or birthplace. */
   onPersonalInfo: (info: PersonalInfo) => void;
+  /**
+   * "page": intro, join card, and the last conversation below it.
+   * "popup" (Review & Apply pop-up, which explains the call itself): no intro, and the last
+   * conversation is its own card that fills the space under the join card.
+   */
+  variant?: "page" | "popup";
+  /** Shown under the Join button in Jordan's card (the pop-up's "what happens" steps). */
+  details?: ReactNode;
 }
 
 const BIRTH_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -44,7 +52,7 @@ export function VoiceCounselor(props: VoiceCounselorProps) {
   );
 }
 
-function Call({ studentName, profileSummary, ucDeadline, entryYear, lastCall, onEnd, onPersonalInfo }: VoiceCounselorProps) {
+function Call({ studentName, profileSummary, ucDeadline, entryYear, lastCall, onEnd, onPersonalInfo, variant = "page", details }: VoiceCounselorProps) {
   const { startSession, endSession, sendUserMessage, sendUserActivity, setVolume, getOutputVolume } = useConversationControls();
   const { status } = useConversationStatus();
   const { isSpeaking } = useConversationMode();
@@ -264,15 +272,17 @@ function Call({ studentName, profileSummary, ucDeadline, entryYear, lastCall, on
   const initials = (studentName.trim()[0] ?? "Y").toUpperCase();
 
   return (
-    <section className="voice" aria-label="Talk to a counselor">
-      <p className="agent-lead">
-        Jordan is an AI counselor who already knows your profile. They'll check in, ask when you want to start at UC, your birthday and
-        where you were born, and talk through financial aid and the fee waiver. Leave whenever you like.
-      </p>
+    <section className={`voice voice-${variant}`} aria-label="Talk to a counselor">
+      {variant === "page" && (
+        <p className="agent-lead">
+          Jordan is an AI counselor who already knows your profile. They'll check in, ask when you want to start at UC, your birthday and
+          where you were born, and talk through financial aid and the fee waiver. Leave whenever you like.
+        </p>
+      )}
 
       <div className="voice-stage">
         <div className="voice-portrait" aria-hidden="true">
-          <img src="/apply/jordan.png" alt="" />
+          <img src="/mentors/counselor.png" alt="" />
         </div>
         <div className="voice-invite">
           <strong>Jordan · AI counselor</strong>
@@ -281,11 +291,27 @@ function Call({ studentName, profileSummary, ucDeadline, entryYear, lastCall, on
         <button ref={joinBtnRef} type="button" className="btn-primary voice-btn" onClick={join} disabled={joined}>
           <VideoIcon width={17} height={17} /> Join video call
         </button>
+        {details && <div className="voice-details">{details}</div>}
       </div>
+
+      {variant === "popup" && saved.length === 0 && (
+        <div className="voice-log-wrap voice-log-empty">
+          <span className="field-label">Your last conversation</span>
+          <p>After your call, what you and Jordan said shows up here.</p>
+        </div>
+      )}
 
       {saved.length > 0 && (
         <div className="voice-log-wrap">
-          <span className="field-label">Your last conversation</span>
+          <div className="voice-log-head">
+            <span className="field-label">Your last conversation</span>
+            {lastCall && (
+              <span className="voice-log-meta">
+                {new Date(lastCall.endedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })} · {saved.length}{" "}
+                {saved.length === 1 ? "message" : "messages"}
+              </span>
+            )}
+          </div>
           <ol className="voice-log">
             {saved.map((line, i) => (
               <li key={i} className={line.role === "student" ? "is-student" : undefined}>

@@ -1,6 +1,6 @@
 /** UC Journey Map progress rules (pure logic; no React or Supabase). */
 import { describe, expect, it } from "vitest";
-import { computeJourney, emptyJourney, setCampusMajor, setPiqStatus, toggleCampus, togglePiq } from "../journey/logic";
+import { computeJourney, emptyJourney, setPiqStatus, toggleCampus, togglePiq } from "../journey/logic";
 import { STAGE_GUIDE } from "../journey/guides";
 import { GRID, mapLayout, planetPixels, routeLegs } from "../journey/planets";
 import type { Profile } from "../types";
@@ -30,7 +30,8 @@ function readyProfile(): Profile {
       gpaUnweighted: "3.8",
     },
   });
-  p = setCampusMajor(toggleCampus(p, "UC Davis", id), "UC Davis", "Biology");
+  p = toggleCampus(p, "UC Davis", id);
+  p = { ...p, goals: { ...p.goals, intendedMajor: "Biology" } };
   let j = emptyJourney();
   for (const q of ["leadership", "creativity", "talent", "community"]) j = setPiqStatus(togglePiq(j, q), q, "ready");
   return { ...p, ucJourney: j };
@@ -50,14 +51,15 @@ describe("UC journey progress", () => {
     expect(computeJourney(blankProfile(), { ...fullBasics, basics: 0 }, true).checkpoints[0].complete).toBe(false);
   });
 
-  it("needs a major for every saved UC", () => {
+  it("needs one intended major for all saved UCs", () => {
     let p = toggleCampus(blankProfile(), "UCLA", id);
     p = toggleCampus(p, "UC Irvine", id);
-    p = setCampusMajor(p, "UCLA", "History");
     const ucs = computeJourney(p, fullBasics, true).checkpoints[1];
     expect(ucs.complete).toBe(false);
-    expect(ucs.tasks[1].detail).toBe("1 of 2 campuses have a major");
-    expect(computeJourney(setCampusMajor(p, "UC Irvine", "Math"), fullBasics, true).checkpoints[1].complete).toBe(true);
+    expect(ucs.tasks[1].detail).toBe("One major for all your UC campuses");
+    const chosen = { ...p, goals: { ...p.goals, intendedMajor: "Mathematics" } };
+    expect(computeJourney(chosen, fullBasics, true).checkpoints[1].complete).toBe(true);
+    expect(computeJourney(chosen, fullBasics, true).checkpoints[1].tasks[1].detail).toBe("Mathematics at every campus");
   });
 
   it("flags activity descriptions over the 350-character limit", () => {

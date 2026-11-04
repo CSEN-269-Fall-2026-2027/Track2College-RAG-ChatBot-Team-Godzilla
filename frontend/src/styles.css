@@ -569,6 +569,40 @@ a {
   white-space: pre-wrap;
 }
 
+/* A long ready-made question: three lines, then "See more". */
+.bubble-user.is-clamped .bubble-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.bubble-more {
+  display: block;
+  margin: 6px 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  opacity: 0.9;
+  cursor: pointer;
+}
+
+.bubble-more:hover {
+  opacity: 1;
+}
+
+.bubble-more:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .bubble-assistant {
   border-radius: 18px 18px 18px 5px;
   background: var(--bg-user);
@@ -650,6 +684,14 @@ a {
 
 .prose > * + * {
   margin-top: 12px;
+}
+
+.prose code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--bg-subtle);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
 }
 
 .prose-heading {
@@ -1086,13 +1128,6 @@ a {
 
 .send-btn.stop {
   background: var(--text);
-}
-
-.disclaimer {
-  margin: 8px 0 0;
-  text-align: center;
-  font-size: 12px;
-  color: var(--text-faint);
 }
 
 /* ---------- Nav rail ---------- */
@@ -2043,6 +2078,44 @@ input[type="radio"] {
   list-style: none;
 }
 
+/* UC campuses: the one intended major, set apart from the campus grid. */
+.pf-major-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 24px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-subtle);
+}
+
+.pf-major-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pf-major-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.pf-major-text strong {
+  font-size: 16px;
+  color: var(--text);
+}
+
+.pf-major-text strong.is-empty {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
 .pf-campus {
   position: relative;
   display: flex;
@@ -2548,15 +2621,6 @@ input[type="radio"] {
   line-height: 1.5;
 }
 
-.pf-next {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.pf-next:empty {
-  display: none;
-}
-
 /* Essays, transcript, and course plan bring their own cards; match them to the profile panels. */
 .pf-embedded {
   display: flex;
@@ -2573,6 +2637,81 @@ input[type="radio"] {
 
 .pf-embedded .card-head h2 {
   font-size: 16.5px;
+}
+
+/* Academic history: closed sections that open to show and edit their details. */
+.pf-fold {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-elevated);
+}
+
+.pf-fold[open] {
+  border-color: var(--border-strong);
+}
+
+.pf-fold-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 24px;
+  border-radius: 14px;
+  font-size: 16.5px;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+}
+
+.pf-fold-summary::-webkit-details-marker {
+  display: none;
+}
+
+.pf-fold-summary:hover {
+  background: var(--bg-hover);
+}
+
+.pf-fold-summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pf-fold-chevron {
+  flex: none;
+  color: var(--text-muted);
+  transition: transform 0.18s var(--ease);
+}
+
+.pf-fold[open] .pf-fold-chevron {
+  transform: rotate(90deg);
+}
+
+.pf-fold-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px 24px 22px;
+}
+
+/* Cards inside an open section sit flat in it instead of boxing again. */
+.pf-embedded .pf-fold-body > .card {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.pf-fold-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pf-fold-chevron {
+    transition: none;
+  }
 }
 
 .pf-embedded .essays-empty {
@@ -6132,12 +6271,132 @@ a.stat:hover {
 
 .essay-card-question {
   margin: 14px 0 16px;
-  padding: 10px 14px;
-  border-radius: 10px;
+  padding: 12px 16px;
+  border-left: 3px solid var(--accent);
+  border-radius: 4px 10px 10px 4px;
   background: var(--bg-subtle);
+}
+
+.essay-card-question-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin-bottom: 4px;
+}
+
+.essay-card-question-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--text-muted);
-  font-size: 13.5px;
+}
+
+.essay-card-question p {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 560;
   line-height: 1.5;
+}
+
+/* Picking a different PIQ for this card. */
+.essay-change {
+  margin: -6px 0 16px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.essay-change-note {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.essay-change ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.essay-change-option {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.essay-change-option:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.essay-change-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.essay-change-option strong {
+  font-size: 14px;
+}
+
+.essay-change-option span {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+/* "More" menu for the less-used essay actions. */
+.more-menu {
+  position: relative;
+}
+
+.more-menu-list {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  display: grid;
+  min-width: 210px;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-pop);
+}
+
+.more-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  text-align: left;
+}
+
+.more-menu-item:hover:not(:disabled),
+.more-menu-item:focus-visible {
+  background: var(--bg-hover);
+  outline: none;
+}
+
+.more-menu-item:disabled {
+  opacity: 0.5;
+}
+
+.more-menu-item.is-danger {
+  color: var(--danger);
 }
 
 .essay-card-body {
@@ -6339,4 +6598,324 @@ a.stat:hover {
 @media (max-width: 560px) {
   .mj-majors { padding-left: 0; }
   .mj-options { grid-template-columns: 1fr; }
+}
+
+/* ---------- Profile page: readability pass ----------
+   A slimmer banner, more room between and inside sections, and larger secondary text so each
+   piece of information is easy to pick out. Colors, the nav, and About you's facts grid are unchanged. */
+
+.pf-page .field-label {
+  font-size: 13.5px;
+}
+
+.pf-page .field-hint {
+  font-size: 13px;
+}
+
+.pf-page .pf-panel input,
+.pf-page .pf-panel select,
+.pf-page .pf-panel textarea {
+  padding: 10px 14px;
+  font-size: 15px;
+}
+
+.pf-page .pf-panel .form-grid {
+  gap: 20px 24px;
+}
+
+.pf-page .pf-panel-title h2,
+.pf-page .pf-embedded .card-head h2,
+.pf-page .pf-fold-summary {
+  font-size: 18px;
+}
+
+.pf-page .pf-embedded .card-head p {
+  font-size: 14px;
+}
+
+.pf-page .pf-note,
+.pf-page .pf-empty,
+.pf-page .pf-alert p {
+  font-size: 14.5px;
+}
+
+.pf-page .pf-rows li {
+  padding: 14px 0;
+}
+
+.pf-page .pf-row-main strong {
+  font-size: 15.5px;
+}
+
+.pf-page .pf-row-main span,
+.pf-page .pf-row-note {
+  font-size: 14px;
+}
+
+.pf-page .pf-row-value {
+  font-size: 14.5px;
+}
+
+.pf-page .pf-subhead {
+  margin: 28px 0 8px;
+  font-size: 12.5px;
+}
+
+.pf-page .pf-pill {
+  padding: 3px 11px;
+  font-size: 12.5px;
+}
+
+/* UC campuses: roomier tiles, and the intended-major card well clear of them. */
+.pf-page .pf-campus-grid {
+  gap: 12px;
+}
+
+.pf-page .pf-campus {
+  padding: 16px 18px;
+}
+
+.pf-page .pf-campus-name {
+  font-size: 15.5px;
+}
+
+.pf-page .pf-campus-city {
+  font-size: 13.5px;
+}
+
+.pf-page .pf-major-row {
+  margin-top: 28px;
+  padding: 16px 20px;
+}
+
+.pf-page .pf-major-text strong {
+  font-size: 17px;
+}
+
+@media (min-width: 900px) {
+  .pf-page .pf-cover {
+    height: 96px;
+  }
+
+  .pf-page .pf-hero {
+    margin-top: -36px;
+  }
+
+  .pf-page .pf-avatar {
+    width: 84px;
+    height: 84px;
+    font-size: 28px;
+  }
+
+  .pf-page .pf-identity {
+    padding-top: 44px;
+  }
+
+  .pf-page .pf-identity h1 {
+    font-size: 24px;
+  }
+
+  .pf-page .pf-body {
+    gap: 44px;
+    margin-top: 32px;
+  }
+
+  .pf-page .pf-main {
+    gap: 20px;
+  }
+
+  .pf-page .pf-panel,
+  .pf-page .pf-embedded .card {
+    padding: 28px 32px;
+  }
+
+  .pf-page .pf-panel-body {
+    margin-top: 22px;
+  }
+
+  .pf-page .pf-fold-summary {
+    padding: 20px 32px;
+  }
+
+  .pf-page .pf-fold-body {
+    padding: 4px 32px 28px;
+  }
+
+  /* Cards inside an open Academic history section stay flat (see .pf-fold-body > .card). */
+  .pf-page .pf-embedded .pf-fold-body > .card {
+    padding: 0;
+  }
+}
+
+/* ---- Academic history: GPA section footer and the course list */
+
+.pf-fold-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding-top: 4px;
+}
+
+.pf-fold-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.course-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.course-list .course-year + .course-year {
+  margin-top: 18px;
+}
+
+.course-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.course-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+}
+
+.course-item + .course-item {
+  border-top: 1px solid var(--border);
+}
+
+.course-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.course-item-main strong {
+  font-size: 14.5px;
+  font-weight: 620;
+  overflow-wrap: anywhere;
+}
+
+.course-item-meta {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.course-item-grades {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.course-grade-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  font-size: 12.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.course-grade-chip strong {
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.course-item.is-editing {
+  display: block;
+  padding: 18px 16px;
+  background: var(--bg-subtle);
+}
+
+.course-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.course-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+.course-terms {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.course-term-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.course-editor-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.course-delete {
+  color: var(--danger);
+}
+
+.course-list > .btn-dashed {
+  margin-top: 14px;
+}
+
+@media (max-width: 640px) {
+  .course-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .course-item-grades {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-content: flex-start;
+  }
+
+  .course-editor-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Shown instead of the app when the saved profile can't be read (never a blank profile). */
+.profile-load-error {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 14px;
+  min-height: 100vh;
+  padding: 24px 16px;
+  background: var(--bg);
+  color: var(--text);
+  text-align: center;
+}
+
+.profile-load-error p {
+  margin: 0;
+  font-size: 15px;
 }

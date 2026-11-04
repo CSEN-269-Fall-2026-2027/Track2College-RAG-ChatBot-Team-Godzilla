@@ -125,6 +125,7 @@ describe("nextGuidedTurn", () => {
       blankProfile({
         academics: { ...blankProfile().academics, gpaUnweighted: "3.7", exams: "None yet" },
         colleges: [{ id: "1", name: "UCLA", status: "researching", plan: "UC", deadline: "", notes: "", major: "Biology" }],
+        goals: { ...blankProfile().goals, intendedMajor: "Biology" },
         activities: [
           {
             id: "a",
@@ -150,6 +151,7 @@ describe("nextGuidedTurn", () => {
       blankProfile({
         academics: { ...blankProfile().academics, gpaUnweighted: "3.7", exams: "None yet" },
         colleges: [{ id: "1", name: "UCLA", status: "researching", plan: "UC", deadline: "", notes: "", major: "Biology" }],
+        goals: { ...blankProfile().goals, intendedMajor: "Biology" },
         activities: [
           { id: "a", name: "Robotics", role: "Lead", hoursPerWeek: "6", weeksPerYear: "36", years: "2", description: "Built robots.", category: "extracurricular" },
         ],
@@ -165,6 +167,7 @@ describe("nextGuidedTurn", () => {
     let p = blankProfile({
       academics: { ...blankProfile().academics, gpaUnweighted: "3.7", exams: "None yet" },
       colleges: [{ id: "1", name: "UCLA", status: "researching", plan: "UC", deadline: "", notes: "", major: "Biology" }],
+      goals: { ...blankProfile().goals, intendedMajor: "Biology" },
       activities: [
         { id: "a", name: "Robotics", role: "Lead", hoursPerWeek: "6", weeksPerYear: "36", years: "2", description: "Built robots.", category: "extracurricular" },
       ],
@@ -189,6 +192,7 @@ describe("nextGuidedTurn", () => {
     let p = blankProfile({
       academics: { ...blankProfile().academics, gpaUnweighted: "3.7", exams: "None yet" },
       colleges: [{ id: "1", name: "UCLA", status: "researching", plan: "UC", deadline: "", notes: "", major: "Biology" }],
+      goals: { ...blankProfile().goals, intendedMajor: "Biology" },
       activities: [
         { id: "a", name: "Robotics", role: "Lead", hoursPerWeek: "6", weeksPerYear: "36", years: "2", description: "Built robots.", category: "extracurricular" },
       ],
@@ -215,6 +219,7 @@ describe("nextGuidedTurn", () => {
       blankProfile({
         academics: { ...blankProfile().academics, gpaUnweighted: "3.7", exams: "None yet" },
         colleges: [{ id: "1", name: "UCLA", status: "researching", plan: "UC", deadline: "", notes: "", major: "Biology" }],
+        goals: { ...blankProfile().goals, intendedMajor: "Biology" },
       });
     let n = 0;
     const id = () => `act-${n++}`;

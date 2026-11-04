@@ -1,12 +1,23 @@
 # Secrets / local env. All keys live in the root .env; only .env.example is committed.
 .env
 .env.*
+.envrc
+*.env
+*.env.*
 !.env.example
+!.env.*.example
+!*.env.example
 *.pem
 *.key
 *.p12
 credentials*.json
 service-account*.json
+.aws/
+.ssh/
+.npmrc
+.pypirc
+*.jks
+*.keystore
 
 # OS / editor
 .DS_Store
@@ -18,9 +29,9 @@ service-account*.json
 /package-lock.json
 
 # Frontend
-frontend/node_modules/
-frontend/dist/
-frontend/.vite/
+node_modules/
+dist/
+.vite/
 *.tsbuildinfo
 coverage/
 playwright-report/
@@ -32,16 +43,26 @@ __pycache__/
 *.pyo
 .ipynb_checkpoints/
 .pytest_cache/
-backend/.venv/
-backend/venv/
+.venv/
+venv/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 backend/logs/
 backend/*.zip
 
 # UC page dumps from UC_DEBUG=1 (contain student info)
 backend/uc_debug/
+playwright/.auth/
+auth-state*.json
+storage-state*.json
 
 # Logs
 *.log
+*.bak
+*.orig
+*~
 
 # Personal Claude Code settings / scratch
 .claude/settings.local.json

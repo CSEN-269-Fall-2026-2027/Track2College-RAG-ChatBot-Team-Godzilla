@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { ucDeadlineDate } from "../../agent/logic";
 import { COLLEGES } from "../../colleges";
 import type { Mentor } from "../../game/characters";
 import { applyGuidedEffect, inputEffect, nextGuidedTurn, savedLabel, type GuidedChoice, type GuidedEffect } from "../../journey/guided";
 import { isUc, PIQ_PROMPTS, PIQ_REQUIRED, PIQ_WORD_LIMIT, type CheckpointId } from "../../journey/logic";
-import { ucFacts } from "../../journey/facts";
 import { usePiqDrafts } from "../../journey/usePiqDrafts";
 import { JourneyMap } from "../../journey/JourneyMap";
 import { completeness, useProfile } from "../../profile";
 import { navigate } from "../../router";
 import { newId } from "../../storage";
-import { FactQuiz } from "./FactQuiz";
+import { ReviewPersonaPicker } from "./ReviewApply";
+import { mentorById } from "../../game/characters";
+import { STAGE_GUIDE } from "../../journey/guides";
+import { FinancialAid } from "./FinancialAid";
+import type { AidMode, ReviewMode } from "../../types";
 
 interface GuidedViewProps {
   visible: boolean;
@@ -26,17 +28,18 @@ interface GuidedViewProps {
   selectedStage?: CheckpointId | null;
   /** Clicking a map stop: talk to that stop's person in the chat on the right. */
   onSelectStage?: (id: CheckpointId) => void;
+  /** The student switched Review & Apply between Counselor and Application assistant. */
+  onModeChange: (mode: ReviewMode) => void;
+  /** The student switched Financial Aid between FAFSA and Scholarships. */
+  onAidModeChange: (mode: AidMode) => void;
 }
 
 /**
  * Story mode: the Journey Map (top) and the current question with its answer bubbles
  * (bottom) on the left; a chat with the current level's guide (or the clicked planet's) on the right.
  */
-export function GuidedView({ visible, studentName, userId, onAsk, chat, guideName, selectedStage, onSelectStage }: GuidedViewProps) {
+export function GuidedView({ visible, studentName, userId, onAsk, chat, guideName, selectedStage, onSelectStage, onModeChange, onAidModeChange }: GuidedViewProps) {
   const { profile, update } = useProfile();
-  // Review & Apply: the reply area becomes a UC fun-facts quiz (deadline matches the Apply page).
-  const deadline = new Date(`${ucDeadlineDate(profile)}T12:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric" });
-  const facts = useMemo(() => ucFacts(deadline), [deadline]);
   const sections = completeness(profile).sections;
   const [draft, setDraft] = useState("");
   const [skipIds, setSkipIds] = useState<Set<string>>(() => new Set());
@@ -98,6 +101,8 @@ export function GuidedView({ visible, studentName, userId, onAsk, chat, guideNam
   };
 
   const pick = (choice: GuidedChoice) => run(choice.effect);
+  // Financial Aid (once the "do you need aid?" question is answered): FAFSA or Scholarships.
+  const aidModes = turn.checkpointId === "aid" && turn.id !== "aid-needs";
 
   const submitText = (event: FormEvent) => {
     event.preventDefault();
@@ -125,14 +130,21 @@ export function GuidedView({ visible, studentName, userId, onAsk, chat, guideNam
               )}
             </div>
 
-            {turn.checkpointId !== "review" && (
+            {turn.checkpointId !== "review" && !aidModes && (
               <p className="guided-question" role="status">
                 {turn.prompt}
               </p>
             )}
 
             {turn.checkpointId === "review" ? (
-              <FactQuiz facts={facts} />
+              // On Review & Apply with another planet picked, the chat is with that planet's guide alone.
+              <ReviewPersonaPicker
+                onModeChange={onModeChange}
+                only={selectedStage && selectedStage !== "review" ? mentorById(STAGE_GUIDE[selectedStage]) : undefined}
+                onBack={() => onSelectStage?.("review")}
+              />
+            ) : aidModes ? (
+              <FinancialAid turn={turn} onPick={pick} onModeChange={onAidModeChange} />
             ) : turn.campusPicker ? (
               <form
                 className="guided-campus-picker"

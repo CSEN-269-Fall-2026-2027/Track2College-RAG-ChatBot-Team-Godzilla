@@ -14,6 +14,7 @@ pydantic==2.13.2
 
 # Agentic mode: drives the UC application in a visible browser (then: python -m playwright install chromium)
 playwright
+# Cloud mode attaches the same script to a Browserbase session (BROWSERBASE_API_KEY); no extra package needed.
 
 # Text-to-speech
 elevenlabs==2.75.0

@@ -486,7 +486,7 @@
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 2fr) minmax(0, 3fr);
   gap: 12px;
 }
 
@@ -582,6 +582,63 @@
   color: var(--text-muted);
   font-size: 13px;
   font-weight: 600;
+}
+
+/* Restart: a quiet pill on the right of the guide's header; returns the chat to the opening message. */
+.guided-chat-head .chat-restart {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.guided-chat-head .chat-restart:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.guided-chat-head .chat-restart:hover svg {
+  transform: rotate(-120deg);
+}
+
+.guided-chat-head .chat-restart svg {
+  transition: transform 0.3s var(--ease);
+}
+
+.guided-chat-head .chat-restart:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guided-chat-head .chat-restart svg {
+    transition: none;
+  }
+}
+
+/* More air in the conversation: each new question sits well clear of the answer above it. */
+.story-chat-thread .chat-content {
+  gap: 14px;
+}
+
+.story-chat-thread .row-user:not(:first-child) {
+  margin-top: 18px;
+}
+
+.story-chat-thread .row-user + .row-assistant {
+  margin-top: 4px;
 }
 
 
@@ -1122,72 +1179,942 @@
   cursor: default;
 }
 
-/* ---------------------------------------------------------------- Review & Apply: UC fun-facts quiz */
+/* ---------------------------------------------------------------- Review & Apply: Counselor / Application assistant */
 
-.fact-quiz {
+.review-personas {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.fact-quiz-tag {
-  display: block;
-  margin-bottom: 4px;
-  font-size: 11.5px;
+.review-persona-list {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+/* A chat personality card: name on top, big pixel portrait below. Half the row each. */
+.review-persona {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 12px 10px;
+  border: 2px solid var(--story-panel-border);
+  border-radius: 18px;
+  background: var(--bg-elevated, #fff);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+
+.review-persona:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  transform: translateY(-2px);
+}
+
+.review-persona.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.review-persona:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.review-persona-name {
+  font-size: 17px;
+  line-height: 1.2;
+  text-align: center;
+}
+
+/* Another planet picked on Review & Apply: one centered card, not clickable. */
+.review-persona-list.is-single {
+  grid-template-columns: minmax(0, 340px);
+  justify-content: center;
+}
+
+.review-persona.is-only {
+  cursor: default;
+}
+
+.review-persona.is-only:hover {
+  transform: none;
+}
+
+.review-persona-back {
+  align-self: center;
+  padding: 4px 8px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.review-persona-back:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.review-persona-art {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  max-height: 240px;
+  height: auto;
+  aspect-ratio: 424 / 480;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+/* The persona's tool buttons stay under its first message; the open one is highlighted. */
+.story-opener-action.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* ---------------------------------------------------------------- Review & Apply: full-screen tool pop-up */
+/* Sits just under the Jordan call window (z-index 200), which opens on top of it. */
+
+.tool-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: grid;
+  place-items: center;
+  padding: 2vh 2vw;
+  background: rgba(8, 26, 17, 0.58);
+  animation: call-fade 180ms var(--ease);
+}
+
+.tool-dialog {
+  width: min(1560px, 96vw);
+  height: min(1000px, 94vh);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid var(--border-strong);
+  border-radius: 22px;
+  background: var(--bg-elevated, #fff);
+  box-shadow: 0 24px 70px rgba(8, 26, 17, 0.32);
+  overflow: hidden;
+  animation: call-rise 220ms var(--ease);
+}
+
+.tool-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px 16px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tool-dialog-heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.tool-dialog-avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: var(--accent-soft);
+  overflow: hidden;
+}
+
+.tool-dialog-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.tool-dialog-heading h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.tool-dialog-heading p {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.tool-dialog-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.tool-dialog-close:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.tool-dialog-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.tool-dialog-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* Application Assistant: Local / Cloud switch, a two-option radio group with a sliding thumb. */
+.browser-switch-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.browser-switch {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-subtle, var(--bg-hover));
+}
+
+.browser-switch-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc(50% - 3px);
+  border-radius: 9px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  transition: transform 0.2s var(--ease, ease-out);
+}
+
+.browser-switch[data-value="cloud"] .browser-switch-thumb {
+  transform: translateX(100%);
+}
+
+.browser-switch-option {
+  position: relative;
+  z-index: 1;
+  min-width: 68px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.browser-switch-option[aria-checked="true"] {
+  color: var(--text);
+}
+
+.browser-switch-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.browser-switch.is-locked {
+  opacity: 0.6;
+}
+
+.browser-switch.is-locked .browser-switch-option {
+  cursor: not-allowed;
+}
+
+.browser-switch-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.uc-live-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  text-decoration: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .browser-switch-thumb {
+    transition: none;
+  }
+}
+
+.tool-dialog-body {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+}
+
+/* Left: who's helping and what happens. */
+.tool-dialog-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 28px 24px;
+  border-right: 1px solid var(--border);
+  background: var(--bg-sidebar);
+  overflow: auto;
+}
+
+.tool-dialog-guide {
+  align-self: center;
+  width: 132px;
+  height: 150px;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.tool-dialog-from {
+  margin: 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.tool-dialog-from strong {
+  color: var(--text);
+}
+
+.tool-dialog-steps {
+  counter-reset: tool-step;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tool-dialog-steps li {
+  counter-increment: tool-step;
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  gap: 10px;
+  align-items: start;
+  font-size: 14.5px;
+  line-height: 1.45;
+}
+
+.tool-dialog-steps li::before {
+  content: counter(tool-step);
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+}
+
+.tool-dialog-note {
+  margin: auto 0 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+/* Right: the application tool, centered and scrolling on its own. */
+.tool-dialog-main {
+  min-height: 0;
+  overflow: auto;
+  padding: 32px clamp(20px, 4vw, 56px);
+}
+
+.tool-dialog-card {
+  max-width: 780px;
+  margin: 0 auto;
+}
+
+/* The call pop-up fills its height so the last conversation can use all of it. */
+.tool-dialog-call .tool-dialog-main {
+  display: flex;
+  flex-direction: column;
+}
+
+.tool-dialog-call .tool-dialog-card {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  max-width: 1240px; /* room for Jordan's column beside the last conversation */
+}
+
+/* The call has no sidebar: Jordan's own card carries the steps, so the body is one column. */
+.tool-dialog-call .tool-dialog-body {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Phones and narrow windows: the whole screen, steps above the tool. */
+@media (max-width: 860px) {
+  .tool-dialog-backdrop {
+    padding: 0;
+  }
+
+  .tool-dialog {
+    width: 100vw;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .tool-dialog-head {
+    padding: 12px 12px 12px 16px;
+  }
+
+  .tool-dialog-actions {
+    gap: 8px;
+  }
+
+  .browser-switch-hint {
+    display: none;
+  }
+
+  .browser-switch-option {
+    min-width: 54px;
+    padding: 0 8px;
+  }
+
+  .tool-dialog-heading h2 {
+    font-size: 17px;
+  }
+
+  .tool-dialog-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .tool-dialog-aside {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 12px 16px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tool-dialog-guide,
+  .tool-dialog-from,
+  .tool-dialog-note {
+    display: none;
+  }
+
+  .tool-dialog-steps {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    margin: 0;
+  }
+
+  .tool-dialog-steps li {
+    grid-template-columns: 20px 1fr;
+    gap: 6px;
+    font-size: 13px;
+  }
+
+  .tool-dialog-steps li::before {
+    width: 20px;
+    height: 20px;
+    font-size: 11px;
+  }
+
+  .tool-dialog-main {
+    padding: 18px 16px 28px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-dialog-backdrop,
+  .tool-dialog {
+    animation: none;
+  }
+}
+
+
+/* ---- Application Assistant, Cloud mode: the live UC page from the cloud browser, in the modal */
+
+.tool-dialog-card.is-cloud {
+  max-width: 1100px;
+}
+
+.cloud-browser {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+
+.cloud-browser-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+
+.cloud-browser-dots {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+}
+
+.cloud-browser-dots i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.cloud-browser-url {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 12px;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cloud-browser-pill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+}
+
+.cloud-browser-pill.is-busy {
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
-.fact-choice {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
+.cloud-browser-pill.is-turn {
+  background: var(--warning-soft);
+  color: var(--warning);
 }
 
-/* Answered: keep the right/wrong colors at full strength (no disabled fade). */
-.fact-choice:disabled {
-  cursor: default;
-  opacity: 1;
-}
-
-.fact-choice.is-right {
-  border-color: var(--success);
+.cloud-browser-pill.is-good {
   background: var(--success-soft);
   color: var(--success);
 }
 
-.fact-choice.is-wrong {
-  border-color: var(--danger);
+.cloud-browser-pill.is-bad {
   background: var(--danger-soft);
   color: var(--danger);
 }
 
-.fact-choice.is-dim {
-  opacity: 0.5;
-}
-
-.fact-quiz-result {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+.cloud-browser-detail {
+  margin: 0;
   padding: 10px 14px;
-  border-radius: 12px;
-  background: var(--danger-soft);
-  animation: rise 0.2s var(--ease) both;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+  color: var(--text-muted);
 }
 
-.fact-quiz-result.is-right {
+.cloud-browser-detail strong {
+  color: var(--text);
+}
+
+.cloud-browser-detail.is-turn {
+  background: var(--warning-soft);
+}
+
+.cloud-browser-detail.is-good {
   background: var(--success-soft);
 }
 
-.fact-quiz-result p {
-  flex: 1 1 220px;
-  margin: 0;
+.cloud-browser-detail.is-bad {
+  background: var(--danger-soft);
+}
+
+.cloud-browser-screen {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  max-height: 64vh;
+  background: var(--bg);
+}
+
+.cloud-browser-screen iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.cloud-browser-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
   font-size: 14px;
-  line-height: 1.45;
+}
+
+.cloud-browser-empty strong {
   color: var(--text);
+  font-size: 15.5px;
+}
+
+.cloud-browser-empty .btn-primary,
+.cloud-browser-empty .btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.cloud-browser-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: cloud-spin 0.9s linear infinite;
+}
+
+@keyframes cloud-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cloud-browser-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.cloud-browser-foot a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cloud-browser-spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+@media (max-width: 640px) {
+  .cloud-browser-url {
+    display: none;
+  }
+
+  .cloud-browser-bar {
+    justify-content: space-between;
+  }
+
+  .cloud-browser-screen {
+    aspect-ratio: 3 / 4;
+  }
+}
+
+/* ---- UC application tool: Local / Cloud switch at the top of the main area, one big Local button,
+   and the saved UC login in the side column. */
+
+.tool-dialog-card > .browser-switch-wrap {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.uc-run-big {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 56px;
+  border-radius: 14px;
+  font-size: 16.5px;
+  font-weight: 700;
+}
+
+.agent-actions:has(.uc-run-big) {
+  flex-wrap: wrap;
+}
+
+.tool-dialog-aside .uc-creds {
+  margin-top: 4px;
+  background: var(--bg-elevated);
+}
+
+.tool-dialog-aside .uc-cred {
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  padding: 8px 0;
+}
+
+.tool-dialog-aside .uc-cred-label {
+  width: 100%;
+}
+
+.cloud-browser-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 650;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.cloud-browser-close:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.cloud-browser-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---- UC application pop-up: fits a normal laptop screen (about 1440 × 800) without scrolling.
+   The cloud browser view takes whatever height is left, so "Run agent" always stays on screen;
+   the assistant is a bit bigger and everything around it is tighter. */
+
+.tool-dialog-apply .tool-dialog-head {
+  padding: 12px 18px 12px 22px;
+}
+
+.tool-dialog-apply .tool-dialog-heading h2 {
+  font-size: 18px;
+}
+
+.tool-dialog-apply .tool-dialog-heading p {
+  font-size: 13px;
+}
+
+.tool-dialog-apply .tool-dialog-aside {
+  gap: 10px;
+  padding: 18px 18px;
+}
+
+.tool-dialog-apply .tool-dialog-guide {
+  width: 176px;
+  height: 200px;
+}
+
+.tool-dialog-apply .tool-dialog-from {
+  font-size: 13.5px;
+}
+
+.tool-dialog-apply .tool-dialog-steps {
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.tool-dialog-apply .tool-dialog-steps li {
+  grid-template-columns: 22px 1fr;
+  gap: 8px;
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.tool-dialog-apply .tool-dialog-steps li::before {
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+}
+
+.tool-dialog-apply .tool-dialog-main {
+  display: flex;
+  flex-direction: column;
+  padding: 16px clamp(16px, 2.5vw, 32px);
+}
+
+.tool-dialog-apply .tool-dialog-card {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tool-dialog-apply .tool-dialog-card > .browser-switch-wrap {
+  margin-bottom: 0;
+}
+
+.tool-dialog-apply .tool-dialog-card > .agent-step {
+  flex: 1;
+  min-height: 0;
+  gap: 10px;
+}
+
+.tool-dialog-apply .cloud-browser {
+  flex: 1;
+  min-height: 0;
+}
+
+.tool-dialog-apply .cloud-browser-bar {
+  padding: 7px 10px;
+}
+
+.tool-dialog-apply .cloud-browser-detail {
+  padding: 7px 12px;
+  font-size: 13px;
+}
+
+.tool-dialog-apply .cloud-browser-screen {
+  flex: 1;
+  min-height: 180px;
+  aspect-ratio: auto;
+  max-height: none;
+}
+
+.tool-dialog-apply .cloud-browser-foot {
+  padding: 6px 12px;
+}
+
+/* "Prefer to do it yourself?" sits at the right end of the Run agent row. */
+.agent-diy {
+  margin: 0 0 0 auto;
+}
+
+@media (max-width: 860px) {
+  .tool-dialog-apply .tool-dialog-main {
+    display: block;
+  }
+
+  .tool-dialog-apply .cloud-browser-screen {
+    flex: none;
+    aspect-ratio: 3 / 4;
+  }
+
+  .agent-diy {
+    margin-left: 0;
+  }
+}
+
+/* UC application pop-up: leave enough room for the login details beside the browser. */
+.tool-dialog-apply .tool-dialog-actions .browser-switch-wrap {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (min-width: 861px) {
+  .tool-dialog-apply .tool-dialog-body {
+    grid-template-columns: clamp(290px, 22vw, 320px) minmax(0, 1fr);
+  }
+
+  .tool-dialog-apply .tool-dialog-guide {
+    flex: none;
+    width: 225px;
+    height: clamp(150px, 30dvh, 255px);
+  }
+}
+
+.tool-dialog-apply .tool-dialog-aside {
+  min-width: 0;
+}
+
+.tool-dialog-apply .uc-creds {
+  min-width: 0;
+  width: 100%;
+}
+
+.tool-dialog-apply .uc-cred {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  padding: 8px 0;
+}
+
+.tool-dialog-apply .uc-cred-label {
+  grid-column: 1 / -1;
+  width: auto;
+}
+
+.tool-dialog-apply .uc-cred-secret code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tool-dialog-apply .uc-cred-secret .uc-icon-btn {
+  margin-left: auto;
+}
+
+.tool-dialog-apply .tool-dialog-card,
+.tool-dialog-apply .tool-dialog-card.is-cloud {
+  max-width: none;
 }

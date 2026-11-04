@@ -1,7 +1,7 @@
 /**
  * UC fun facts for story mode's Review & Apply step: each is a question with one true answer
  * and three false ones. Only long-standing UC rules go here; the deadline comes from the same
- * helper the Apply page's countdown uses, so the two never disagree.
+ * helper the journey map's countdown uses, so the two never disagree.
  */
 
 export interface UcFact {

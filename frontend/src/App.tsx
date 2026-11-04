@@ -8,7 +8,6 @@ import { navigate, useLocation, type Route } from "./router";
 import { AuthPage } from "./pages/AuthPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { Advisor } from "./pages/Advisor";
-import { AgentMode } from "./pages/AgentMode";
 import { PlanningProvider } from "./planning";
 import { GameProvider } from "./game/GameProvider";
 import { AppTopbar } from "./components/AppTopbar";
@@ -29,7 +28,6 @@ const TITLES: Record<Route, string> = {
   profile: "Profile",
   advisor: "Advisor",
   map: "UC Journey Map",
-  agent: "Apply",
 };
 
 function useTheme() {
@@ -121,7 +119,6 @@ function GatedApp({
         <AppTopbar route={route} health={health} theme={theme} onToggleTheme={toggleTheme} />
         {route === "map" && <JourneyMap userId={userId} onBack={() => navigate(lastRoute.current)} />}
         {route === "profile" && <ProfilePage section={param} onAsk={askAdvisor} />}
-        {route === "agent" && <AgentMode section={param} />}
         <Advisor userId={userId} visible={route === "advisor"} onHealth={setHealth} handoff={handoff} />
       </main>
     </div>

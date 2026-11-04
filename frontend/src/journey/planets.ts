@@ -153,10 +153,10 @@ const SPRITES: Record<CheckpointId, string[]> = {
   ],
   // Review & apply · Admissions Office: clock tower with spire and flag over a long hall.
   review: [
-    "...........kFFFF........",
-    "...........kFFFFF.......",
+    "........................",
+    "........................",
     "...........kFFF.........",
-    "...........k............",
+    "...........kFF..........",
     "...........kk...........",
     "..........kLgk..........",
     ".........kLLggk.........",

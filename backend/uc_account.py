@@ -12,8 +12,11 @@ script, so signing in always picks up wherever the student left off:
 - setup screen    → "application level" set to First-year, start term set to Fall, then Continue
 - anything else   → the student is in their application
 
-Passwords and codes are only held in memory for the run and never logged. This needs
-the backend running on the student's own machine (a server has no screen to show).
+Passwords and codes are only held in memory for the run and never logged.
+
+Two ways to get the browser (the script after that is the same):
+- local → a visible Chrome window on this computer (the backend must run on the student's machine)
+- cloud → a Browserbase session attached over CDP; the student uses it through its live view
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ import threading
 import time
 import uuid
 
+import cloud_browser
 import uc_sections
 
 UC_LOGIN_URL = "https://apply.universityofcalifornia.edu/my-application/login"
@@ -40,6 +44,9 @@ SUBMIT_CODE = re.compile(r"verif|submit|continue|confirm|next", re.I)
 CONTINUE = re.compile(r"^\s*(continue|next|save and continue|save & continue)\b", re.I)
 
 SIGN_IN_WAIT_S = 15
+# How often the run looks at the UC page again. Each look is a couple of round trips to the browser.
+TICK_MS = 300
+PIQ_REQUIRED = 4
 
 _lock = threading.Lock()
 _runs: dict[str, dict] = {}
@@ -73,15 +80,21 @@ def start(
     about_done: bool = False,
     verified: bool = False,
     piqs: list[dict] | None = None,
+    browser: str = "local",
 ) -> str:
     """Starts a run in the background and returns its id. One run at a time.
 
     `facts` is what Track2College knows about the student, used to fill "About you".
     `piqs` are the student's four chosen questions: {"number": 1–8, "title", "text"}.
+    `browser` is "local" (a window on this computer) or "cloud" (Browserbase).
     """
     global _active
     if mode not in ("login", "create"):
         raise UcAccountError("Unknown mode.")
+    if browser not in ("local", "cloud"):
+        raise UcAccountError("Unknown browser mode.")
+    if browser == "cloud" and not cloud_browser.configured():
+        raise UcAccountError("Cloud mode isn't set up on this server yet. Switch to Local to use a window on this computer.")
     if not EMAIL_RE.match(email):
         raise UcAccountError("That email address doesn't look right.")
     if not valid_uc_password(password):
@@ -92,9 +105,17 @@ def start(
         run_id = str(uuid.uuid4())
         _runs[run_id] = {
             "status": "opening",
-            "detail": "Opening the UC application…",
+            "detail": "Starting cloud browser…" if browser == "cloud" else "Opening the UC application…",
             "mode": mode,
+            "browser": browser,
+            # Cloud only: Browserbase's live view, where the student sees and uses the window.
+            "live_url": None,
             "open": True,
+            "cancelled": False,
+            # The assistant filled every field it can this run; the student reviews and submits.
+            "finished": False,
+            # The page the UC window is on, for the cloud browser panel's address bar.
+            "page_url": "",
             # Milestones the frontend saves to the student's profile.
             "created": False,
             "verified": verified,
@@ -103,13 +124,25 @@ def start(
             # What "About you" filling did: filled fields, fields left for the student, things to double-check.
             "about_report": {"filled": [], "missing": [], "check": []},
             # Personal insight: titles entered on UC this run, and ones left alone (with why).
-            "piq_report": {"entered": [], "skipped": []},
+            "piq_report": {"entered": [], "skipped": [], "removed": []},
             "piq": False,
             "code": None,
         }
         _active = run_id
-    threading.Thread(target=_run, args=(run_id, email, password, mode, facts or {}, about_done, verified, piqs or []), daemon=True).start()
+    threading.Thread(
+        target=_run, args=(run_id, email, password, mode, facts or {}, about_done, verified, piqs or [], browser), daemon=True
+    ).start()
     return run_id
+
+
+def active() -> tuple[str, dict] | None:
+    """The run whose UC window is open right now, if any (so a reopened popup can reconnect to it)."""
+    with _lock:
+        run_id = _active
+    if not run_id:
+        return None
+    run = status(run_id)
+    return (run_id, run) if run and run["open"] else None
 
 
 def status(run_id: str) -> dict | None:
@@ -117,7 +150,7 @@ def status(run_id: str) -> dict | None:
         run = _runs.get(run_id)
         if not run:
             return None
-        return {k: v for k, v in run.items() if k != "code"}
+        return {k: v for k, v in run.items() if k not in ("code", "session_id")}
 
 
 def submit_code(run_id: str, code: str) -> None:
@@ -132,6 +165,21 @@ def submit_code(run_id: str, code: str) -> None:
         if run["status"] != "needs_code":
             raise UcAccountError("UC isn't asking for a code right now.")
         run.update(code=code, status="checking_code", detail="Entering your code…")
+
+
+def cancel(run_id: str) -> None:
+    """Stops a run: the script lets go of the window and, in cloud mode, the session is released."""
+    with _lock:
+        run = _runs.get(run_id)
+        if not run:
+            raise UcAccountError("That UC window session wasn't found.")
+        if run["open"]:
+            run.update(cancelled=True, detail="Stopping…")
+
+
+def _cancelled(run_id: str) -> bool:
+    with _lock:
+        return _runs[run_id]["cancelled"]
 
 
 def _set(run_id: str, status_: str, detail: str, **flags: bool) -> None:
@@ -150,12 +198,28 @@ def _closed(run_id: str) -> None:
     with _lock:
         run = _runs[run_id]
         run.update(open=False, code=None)
-        if run["status"] not in ("signed_in", "ready", "about_done", "piq_done", "error"):
+        if run["cancelled"]:
+            run.update(status="closed", detail="Stopped. Continue on UC any time to pick up where you left off.")
+        elif run["browser"] == "cloud" and run["status"] not in ("error",) and not run["finished"]:
+            # Nobody closes a cloud window by hand: the session dropped or hit its time limit.
+            run.update(
+                status="disconnected",
+                detail="The cloud browser disconnected (sessions end after 15 minutes). Retry to pick up where you left off.",
+            )
+        elif run["status"] not in ("signed_in", "ready", "about_done", "piq_done", "error"):
             run.update(status="closed", detail="The UC window was closed. Continue on UC to pick up where you left off.")
 
 
 def _run(
-    run_id: str, email: str, password: str, mode: str, facts: dict[str, str], about_done: bool, verified: bool, piqs: list[dict]
+    run_id: str,
+    email: str,
+    password: str,
+    mode: str,
+    facts: dict[str, str],
+    about_done: bool,
+    verified: bool,
+    piqs: list[dict],
+    browser_mode: str = "local",
 ) -> None:
     try:
         from playwright.sync_api import Error as PlaywrightError, sync_playwright
@@ -164,11 +228,30 @@ def _run(
         _closed(run_id)
         return
 
+    session_id: str | None = None
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False)
-            page = browser.new_page(viewport=None)
+            if browser_mode == "cloud":
+                try:
+                    session_id, connect_url = cloud_browser.create_session()
+                    with _lock:
+                        _runs[run_id]["session_id"] = session_id
+                    browser = p.chromium.connect_over_cdp(connect_url, timeout=60_000)
+                except Exception as exc:  # noqa: BLE001 — any startup failure gets the same clear message
+                    print(f"[uc_account] cloud browser didn't start: {exc}")
+                    _set(run_id, "error", "The cloud browser couldn't start. Retry, or switch to Local.")
+                    return
+                context = browser.contexts[0] if browser.contexts else browser.new_context()
+                page = context.pages[0] if context.pages else context.new_page()
+                with _lock:
+                    _runs[run_id]["live_url"] = cloud_browser.live_url(session_id)
+                _set(run_id, "opening", "Opening the UC application…")
+            else:
+                browser = p.chromium.launch(headless=False)
+                page = browser.new_page(viewport=None)
             page.goto(UC_LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
+            with _lock:
+                _runs[run_id]["page_url"] = page.url
             page.bring_to_front()
             try:
                 _drive(run_id, page, email, password, mode, facts, about_done, verified, piqs)
@@ -181,8 +264,13 @@ def _run(
                     browser.close()
     except Exception as exc:  # noqa: BLE001 — report anything to the student instead of crashing the thread
         print(f"[uc_account] {type(exc).__name__}: {exc}")
-        _set(run_id, "error", "Something went wrong driving the UC site. Close the window and try again.")
+        if browser_mode == "cloud":
+            _set(run_id, "error", "Something went wrong in the cloud browser. Try again, or switch to Local.")
+        else:
+            _set(run_id, "error", "Something went wrong driving the UC site. Close the window and try again.")
     finally:
+        if session_id:
+            cloud_browser.release(session_id)
         _closed(run_id)
 
 
@@ -208,8 +296,10 @@ def _drive(
         _fill_sign_up(page, email, password)
         _set(run_id, "waiting", "Everything's filled in. Check the Terms of Use box and click Create account in the UC window.")
 
-    while not page.is_closed():
-        page.wait_for_timeout(1000)
+    while not page.is_closed() and not _cancelled(run_id):
+        page.wait_for_timeout(TICK_MS)
+        with _lock:
+            _runs[run_id]["page_url"] = page.url
         # A verified account never sees UC's code screen again, so a "ZIP code" box isn't one.
         verified = verified or status(run_id)["verified"]
         screen = _screen(page, look_for_code=not verified)
@@ -265,18 +355,37 @@ def _drive(
                 about.step()
             else:
                 insight.step()
+                if insight.state == "done" and not status(run_id)["finished"]:
+                    with _lock:
+                        _runs[run_id]["finished"] = True
+                    if not piqs:
+                        _set(run_id, "piq_done", "Filled in everything we have. Review it on UC and submit when you're ready.")
+
+
+# Classify the page and mark code inputs together, avoiding separate sidebar/input checks over CDP.
+_SCREEN_JS = """(lookForCode) => {
+  const shown = sel => { const e = document.querySelector(sel); if (!e) return false;
+    const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+  const inApp = !!document.querySelector('#section01 ul a[href]');
+  const code = lookForCode && !inApp ? (__MARK_CODE__)() : 0;
+  return { code, setup: /application level/i.test(document.body ? document.body.innerText : ''),
+           signUp: shown('#signUpEmail'), signIn: shown('#email') };
+}"""
 
 
 def _screen(page, look_for_code: bool = True) -> str:
-    # Inside the application (UC's sidebar showing), a "ZIP code" box is not a verification code.
-    in_app = bool(uc_sections.subpages(page, "About you"))
-    if look_for_code and not in_app and _mark_code_inputs(page):
+    try:
+        seen = page.evaluate(_SCREEN_JS.replace("__MARK_CODE__", _MARK_CODE_JS), look_for_code)
+    except Exception:  # noqa: BLE001 — page navigating; look again next tick
+        return "loading"
+    if seen["code"]:
         return "code"
-    if _visible(page.get_by_text(APP_LEVEL_Q)):
+    if seen["setup"]:
         return "setup"
-    if _visible(page.locator("#signUpEmail")):
+    if seen["signUp"]:
         return "sign_up"
-    if _visible(page.locator("#email")):
+    if seen["signIn"]:
         return "sign_in"
     if "/login" in page.url:
         return "landing"
@@ -351,9 +460,18 @@ def _enter_code(run_id: str, page, code: str) -> None:
     else:
         boxes.last.press("Enter")
 
-    page.wait_for_timeout(4000)
-    if _mark_code_inputs(page):
-        error = _visible_error(page)
+    # A transient navigation error isn't proof that UC accepted the code.
+    deadline = time.monotonic() + 6
+    screen, error = "loading", ""
+    while time.monotonic() < deadline:
+        page.wait_for_timeout(250)
+        screen = _screen(page)
+        error = _visible_error(page) if screen == "code" else ""
+        if screen not in ("code", "loading") or error:
+            break
+    if screen == "loading":
+        _set(run_id, "checking_code", "UC is still loading after your code. Waiting for the next screen…")
+    elif screen == "code":
         _set(run_id, "needs_code", f"UC didn't accept that code{': ' + error if error else ''}. Check the email and try again.")
     else:
         _set(run_id, "verified", "Code accepted. Your UC account is verified.", created=True, verified=True)
@@ -424,17 +542,23 @@ def _choose(page, question: re.Pattern, answers: list[re.Pattern]) -> str:
     return ""
 
 
+# The first visible error message on the page, in one round trip.
+_ERROR_JS = """() => {
+  for (const e of document.querySelectorAll('[role=alert], .error, .alert-danger, .validation-error, .field-validation-error')) {
+    const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
+    if (r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none') {
+      const t = (e.innerText || '').trim(); if (t) return t.slice(0, 200);
+    }
+  }
+  return '';
+}"""
+
+
 def _visible_error(page) -> str:
-    for selector in ("[role=alert]", ".error", ".alert-danger", ".validation-error", ".field-validation-error"):
-        for el in page.locator(selector).all():
-            try:
-                if el.is_visible():
-                    text = el.inner_text().strip()
-                    if text:
-                        return text[:200]
-            except Exception:  # noqa: BLE001 — element went away while reading
-                continue
-    return ""
+    try:
+        return page.evaluate(_ERROR_JS)
+    except Exception:  # noqa: BLE001 — page navigating
+        return ""
 
 
 # The About you subpages we fill today; after these, the run moves on to Personal insight.
@@ -565,14 +689,18 @@ def _same_page(current: str, target: str) -> bool:
 
 class _PersonalInsight:
     """Personal insight: Introduction → Continue → Personal insight questions, then each of the
-    student's four chosen questions in turn (Answer → type the saved response → Save & continue).
+    student's four chosen questions in turn (Answer, or Edit if UC already has one → type the saved
+    response → Save & continue).
 
-    Questions UC already shows as answered are left alone, so running again never overwrites.
+    An answer already on UC is replaced with the student's current essay (even if it's the same), so
+    UC always ends up with what Track2College has.
     """
 
     def __init__(self, run_id: str, page, piqs: list[dict]):
         self.run_id, self.page = run_id, page
         self.pending = sorted(piqs, key=lambda q: q["number"])  # still to enter, in UC's order
+        self.chosen = {q["number"] for q in piqs}
+        self.removed: set[int] = set()  # questions whose old UC answer we deleted (or tried to)
         self.state = "todo" if piqs else "done"  # todo → intro → questions → done
         self.answering: dict | None = None  # the question whose answer page we opened
         self.last_seen: str | None = None
@@ -624,13 +752,22 @@ class _PersonalInsight:
             return
 
         uc_sections.wait_until_settled(self.page)
+        # The student switched questions: UC still has an answer to one they no longer chose. UC only
+        # takes four, so delete those first. Only with a full set of four chosen, so answers the
+        # student is still writing straight on UC are never touched.
+        if len(self.chosen) == PIQ_REQUIRED:
+            for n in uc_sections.answered_piq_numbers(self.page):
+                if n in self.chosen or n in self.removed:
+                    continue
+                self.removed.add(n)
+                _set(self.run_id, "filling", f"Removing your old UC answer to question {n} (you switched questions)…")
+                if uc_sections.delete_piq_answer(self.page, n):
+                    self._report("removed", f"Question {n} (you switched to a different question)")
+                else:
+                    self._report("skipped", f"Question {n}: couldn't delete the old answer; delete it on UC so your new one fits")
+                return  # the page reloads; carry on next time round
         while self.pending:
             q = self.pending[0]
-            answered = uc_sections.piq_answered(self.page, q["number"])
-            if answered:
-                self._report("skipped", f"{q['title']} (already answered on UC)")
-                self.pending.pop(0)
-                continue
             if self.answering is q:
                 # We opened it, but UC came back without it answered: leave it to the student.
                 self._report("skipped", f"{q['title']} (UC didn't save it; please check it)")
@@ -639,8 +776,9 @@ class _PersonalInsight:
             _set(self.run_id, "filling", f"Opening {q['title']}…")
             if uc_sections.open_piq_answer(self.page, q["number"]):
                 self.answering = q
+                self._answer()  # the answer page is open: type it now instead of on the next look
             else:
-                self._report("skipped", f"{q['title']} (couldn't find its Answer button)")
+                self._report("skipped", f"{q['title']} (couldn't find its Answer or Edit button)")
                 self.pending.pop(0)
             return
         self._finish()
@@ -652,15 +790,16 @@ class _PersonalInsight:
             uc_sections.log("on an answer page we didn't open; cancelling")
             uc_sections.cancel_piq_answer(self.page)
             return
-        if uc_sections.piq_box_text(self.page).strip():
-            self._report("skipped", f"{q['title']} (already has an answer on UC)")
+        replacing = bool(uc_sections.piq_box_text(self.page).strip())
+        _set(self.run_id, "filling", f"{'Updating' if replacing else 'Typing'} your answer to {q['title']}…")
+        if replacing and not uc_sections.clear_piq_answer(self.page):
+            self._report("skipped", f"{q['title']} (couldn't clear the answer already on UC; please update it yourself)")
             self.pending.remove(q)
             uc_sections.cancel_piq_answer(self.page)
             return
-        _set(self.run_id, "filling", f"Typing your answer to {q['title']}…")
         uc_sections.type_piq_answer(self.page, q["text"])
         if uc_sections.save_piq_answer(self.page):
-            self._report("entered", q["title"])
+            self._report("entered", f"{q['title']} (updated)" if replacing else q["title"])
             self.pending.remove(q)
         else:
             error = _visible_error(self.page)
@@ -680,7 +819,16 @@ class _PersonalInsight:
             _runs[self.run_id]["piq"] = True
             entered = len(_runs[self.run_id]["piq_report"]["entered"])
         uc_sections.log("Personal insight finished")
-        _set(self.run_id, "piq_done", f"Entered {entered} personal insight answer{'s' if entered != 1 else ''} on UC. Stopping here for now.")
+        summary = f"Entered {entered} personal insight answer{'s' if entered != 1 else ''} on UC."
+        # Exactly the student's four answered (and nothing else): move on with Continue.
+        answered = set(uc_sections.answered_piq_numbers(self.page))
+        if len(self.chosen) == PIQ_REQUIRED and answered == self.chosen:
+            if uc_sections.continue_from_piq_questions(self.page):
+                _set(self.run_id, "piq_done", f"{summary} All four are in, so we clicked Continue.")
+            else:
+                _set(self.run_id, "piq_done", f"{summary} All four are in. Click Continue at the bottom of the page.")
+        else:
+            _set(self.run_id, "piq_done", f"{summary} UC shows {len(answered)} of 4 answered; check the page before clicking Continue.")
 
 
 def _debug_dump(page, name: str) -> None:

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-export const ROUTES = ["profile", "advisor", "map", "agent"] as const;
+export const ROUTES = ["profile", "advisor", "map"] as const;
 export type Route = (typeof ROUTES)[number];
 
 export interface Location {
@@ -14,6 +14,8 @@ export interface Location {
  * in the right place: essays → Profile essays, transcript and the retired course plan → Academic history.
  */
 const LEGACY_PAGES = new Set(["materials", "insights", "overview", "home", "explore"]);
+/** The Apply page was folded into the chatbot (story mode's Review & Apply and Financial Aid steps). */
+const RETIRED_TO_ADVISOR = new Set(["agent"]);
 const LEGACY_SECTION: Record<string, string> = { essays: "essays", transcript: "academics", plan: "academics" };
 
 export function parseLocation(hash: string): Location {
@@ -21,6 +23,7 @@ export function parseLocation(hash: string): Location {
   if (LEGACY_PAGES.has(name)) {
     return { route: "profile", param: (rawParam && LEGACY_SECTION[rawParam]) || "essays" };
   }
+  if (RETIRED_TO_ADVISOR.has(name)) return { route: "advisor", param: null };
   // Empty / unknown hashes open Advisor.
   if (!(ROUTES as readonly string[]).includes(name)) return { route: "advisor", param: null };
   return { route: name as Route, param: rawParam || null };

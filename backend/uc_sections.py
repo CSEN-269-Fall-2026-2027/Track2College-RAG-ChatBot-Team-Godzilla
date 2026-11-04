@@ -10,6 +10,7 @@ Nothing is guessed: no value, no fill.
 from __future__ import annotations
 
 import re
+import time
 
 CATEGORIES = [
     "About you",
@@ -204,7 +205,7 @@ def fill_page(
         _fill_pass(page, rules, facts, fixed, filled, check)
         if len(filled) == before:
             break
-        page.wait_for_timeout(400)
+        page.wait_for_timeout(250)
 
     # Re-scan: whatever is required and still empty is the student's to answer.
     missing = [_short(f["label"]) for f in page.evaluate(_SCAN_JS) if f["required"] and f["empty"] and f["label"]]
@@ -259,8 +260,8 @@ def save_and_continue(page) -> bool:
         return False
     before = (page.url, _fingerprint(page))
     button.first.click()
-    for _ in range(16):
-        page.wait_for_timeout(500)
+    for _ in range(32):
+        page.wait_for_timeout(250)
         if (page.url, _fingerprint(page)) != before:
             return True
     return False
@@ -280,7 +281,7 @@ def click_text(page, name: str) -> bool:
                 if target.is_visible():
                     target.click()
                     log(f"clicked {role} '{name}'")
-                    page.wait_for_timeout(1500)
+                    wait_until_settled(page)
                     return True
             except Exception as exc:  # noqa: BLE001 — element went away
                 log(f"click on '{name}' failed: {type(exc).__name__}")
@@ -399,23 +400,31 @@ def has_fields(page) -> bool:
         return False
 
 
-def wait_until_settled(page, quiet_ms: int = 800, timeout_ms: int = 8000) -> None:
+# Headings and labels plus the field count, in one round trip (each call to a cloud browser costs ~70 ms).
+_SETTLE_JS = """() => [...document.querySelectorAll('h1,h2,legend,label')].map(e => e.innerText).join('|').slice(0, 2000)
+  + '#' + document.querySelectorAll('input:not([type=hidden]), select, textarea').length"""
+
+
+def wait_until_settled(page, quiet_ms: int = 400, timeout_ms: int = 8000) -> None:
     """Waits until the page's fields and labels stop changing (UC renders forms after load)."""
     try:
         page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
     except Exception:  # noqa: BLE001 — keep going on slow loads
         pass
-    last, stable_since, waited = None, 0, 0
-    while waited < timeout_ms:
-        now = _fingerprint(page) + str(has_fields(page))
-        if now == last:
-            stable_since += 200
-            if stable_since >= quiet_ms:
+    start = time.monotonic()
+    last, stable_at = None, start
+    while (time.monotonic() - start) * 1000 < timeout_ms:
+        try:
+            now = page.evaluate(_SETTLE_JS)
+        except Exception:  # noqa: BLE001 — page navigating
+            now = None
+        t = time.monotonic()
+        if now is not None and now == last:
+            if (t - stable_at) * 1000 >= quiet_ms:
                 return
         else:
-            last, stable_since = now, 0
-        page.wait_for_timeout(200)
-        waited += 200
+            last, stable_at = now, t
+        page.wait_for_timeout(150)
 
 
 # Banner and outlines in the UC window, so "waiting on you" never looks like "stuck".
@@ -454,7 +463,7 @@ def show_banner(page, message: str, missing: list[str] | None = None) -> None:
 
 # --- Personal insight questions -------------------------------------------------------------
 # UC lists the 8 prompts as <ol start="N"> blocks with an "Answer" button (id answer_0{N+1});
-# an answered one shows a check mark. Each answer page has an editable box (#answerBox), a
+# an answered one shows a check mark and "Edit" / "Delete" buttons instead (edit_0{N+1}). Each answer page has an editable box (#answerBox), a
 # hidden #answerText that's submitted, #questionCode ("02" for question 1), and #save-btn.
 
 
@@ -474,12 +483,16 @@ def piq_answered(page, number: int) -> bool:
 
 
 def open_piq_answer(page, number: int) -> bool:
-    """Clicks question N's Answer button; True once the answer page shows."""
-    button = page.locator(f"#answer_{number + 1:02d}")
-    if not (button.count() and button.first.is_visible()):
-        button = _piq_box(page, number).locator(".answer-btn")
-    if not (button.count() and button.first.is_visible()):
-        log(f"no Answer button for question {number}")
+    """Clicks question N's Answer button (or Edit, when UC already has an answer); True once the answer page shows."""
+    code = f"{number + 1:02d}"
+    box = _piq_box(page, number)
+    button = None
+    for candidate in (page.locator(f"#answer_{code}"), page.locator(f"#edit_{code}"), box.locator(".answer-btn"), box.locator(".edit-btn")):
+        if candidate.count() and candidate.first.is_visible():
+            button = candidate
+            break
+    if button is None:
+        log(f"no Answer or Edit button for question {number}")
         return False
     button.first.click()
     try:
@@ -489,6 +502,66 @@ def open_piq_answer(page, number: int) -> bool:
         return False
     log(f"opened question {number}")
     return True
+
+
+_ANSWERED_JS = r"""() => [...document.querySelectorAll('.question-box')].flatMap(b => {
+  const ol = b.querySelector('ol[start]'); if (!ol) return [];
+  const c = b.querySelector('.checked'); const btn = b.querySelector('.answer-btn');
+  const done = !!(c && !c.classList.contains('hide') && getComputedStyle(c).display !== 'none')
+    || !!(btn && !/^\s*answer\s*$/i.test(btn.innerText));
+  return done ? [Number(ol.getAttribute('start'))] : [];
+})"""
+
+
+def answered_piq_numbers(page) -> list[int]:
+    """Which of the 8 questions UC shows as answered on the questions page (one round trip)."""
+    try:
+        return sorted(n for n in page.evaluate(_ANSWERED_JS) if 1 <= n <= 8)
+    except Exception:  # noqa: BLE001 — page navigating
+        return []
+
+
+def delete_piq_answer(page, number: int) -> bool:
+    """Deletes UC's saved answer to question N (Delete → UC's "Are you sure?" → Yes); True once it's gone."""
+    code = f"{number + 1:02d}"
+    button = page.locator(f"#delete_{code}")
+    if not (button.count() and button.first.is_visible()):
+        button = _piq_box(page, number).locator(".delete-btn")
+    if not (button.count() and button.first.is_visible()):
+        log(f"no Delete button for question {number}")
+        return False
+    button.first.click()
+    yes = page.locator("#warningYesButton")
+    try:
+        yes.first.wait_for(state="visible", timeout=5_000)
+    except Exception:  # noqa: BLE001
+        log(f"UC's delete confirmation didn't show for question {number}")
+        return False
+    yes.first.click()
+    for _ in range(60):  # UC submits the form and reloads the questions page
+        page.wait_for_timeout(250)
+        try:
+            if not on_piq_answer_page(page) and _piq_box(page, number).count() and not piq_answered(page, number):
+                log(f"deleted question {number}'s answer")
+                return True
+        except Exception:  # noqa: BLE001 — page reloading
+            continue
+    return False
+
+
+def continue_from_piq_questions(page) -> bool:
+    """Clicks Continue at the bottom of the Personal insight questions page; True once UC moves on."""
+    button = page.locator("#save-btn")
+    if on_piq_answer_page(page) or not (button.count() and button.first.is_visible()):
+        log("no Continue button on the questions page")
+        return False
+    before = page.url
+    button.first.click()
+    for _ in range(40):
+        page.wait_for_timeout(250)
+        if page.url != before or not _piq_box(page, 1).count():
+            return True
+    return False
 
 
 def on_piq_answer_page(page) -> bool:
@@ -512,6 +585,22 @@ def piq_box_text(page) -> str:
         return ""
 
 
+def clear_piq_answer(page) -> bool:
+    """Empties the answer box the way a person would (select all, delete); True once it's empty."""
+    box = page.locator("#answerBox").first
+    box.click()
+    page.keyboard.press("ControlOrMeta+A")
+    page.keyboard.press("Backspace")
+    if piq_box_text(page).strip():
+        # Fallback: empty it directly and tell UC's word counter it changed.
+        page.evaluate(
+            "() => { const b = document.getElementById('answerBox'); if (!b) return;"
+            " b.innerHTML = ''; b.dispatchEvent(new Event('input', { bubbles: true })); }"
+        )
+    page.evaluate("() => { const f = document.getElementById('answerText'); if (f) f.value = ''; }")
+    return not piq_box_text(page).strip()
+
+
 def type_piq_answer(page, text: str) -> None:
     """Types the answer the way a person would, so UC's word counter and save logic see it."""
     box = page.locator("#answerBox").first
@@ -523,7 +612,7 @@ def type_piq_answer(page, text: str) -> None:
             page.keyboard.press("Enter")
         page.keyboard.insert_text(para)
     # UC copies the box into this hidden field when saving; fill it too in case that step is skipped.
-    page.evaluate("t => { const f = document.getElementById('answerText'); if (f && !f.value) f.value = t; }", "\n\n".join(paragraphs))
+    page.evaluate("t => { const f = document.getElementById('answerText'); if (f) f.value = t; }", "\n\n".join(paragraphs))
 
 
 def save_piq_answer(page) -> bool:
@@ -533,8 +622,8 @@ def save_piq_answer(page) -> bool:
         log("no Save & continue on the answer page")
         return False
     button.first.click()
-    for _ in range(20):
-        page.wait_for_timeout(500)
+    for _ in range(40):
+        page.wait_for_timeout(250)
         if not on_piq_answer_page(page):
             return True
     return False
@@ -544,4 +633,7 @@ def cancel_piq_answer(page) -> None:
     button = page.locator("#cancel-btn")
     if button.count() and button.first.is_visible():
         button.first.click()
-        page.wait_for_timeout(1500)
+        for _ in range(24):
+            page.wait_for_timeout(250)
+            if not on_piq_answer_page(page):
+                return

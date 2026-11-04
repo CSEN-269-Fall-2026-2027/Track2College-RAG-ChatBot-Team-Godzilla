@@ -104,7 +104,7 @@ export interface Task {
 
 export type CheckpointId = "profile" | "ucs" | "activities" | "essays" | "review" | "aid";
 
-/** Checkpoints after Review & Apply: they don't gate the Apply page (see storyComplete). */
+/** Checkpoints after Review & Apply (see storyComplete). */
 export const AFTER_APPLY: CheckpointId[] = ["review", "aid"];
 
 export interface Checkpoint {
@@ -154,9 +154,9 @@ export function computeJourney(profile: Profile, sections: Record<string, number
         { id: "campus", label: "Save at least one UC campus", done: ucs.length > 0, detail: `${ucs.length} of 9 campuses saved` },
         {
           id: "majors",
-          label: "Choose a major for each saved campus",
-          done: ucs.length > 0 && ucs.every((c) => !!c.major?.trim()),
-          detail: `${ucs.filter((c) => c.major?.trim()).length} of ${ucs.length} campuses have a major`,
+          label: "Choose your intended major",
+          done: !!profile.goals.intendedMajor,
+          detail: profile.goals.intendedMajor ? `${profile.goals.intendedMajor} at every campus` : "One major for all your UC campuses",
         },
       ],
     },
@@ -286,7 +286,4 @@ export function toggleCampus(profile: Profile, name: string, id: () => string): 
   };
 }
 
-export function setCampusMajor(profile: Profile, name: string, major: string): Profile {
-  const key = name.toLowerCase();
-  return { ...profile, colleges: profile.colleges.map((c) => (c.name.toLowerCase() === key ? { ...c, major } : c)) };
-}
+

@@ -1,9 +1,9 @@
 import { journeyOf } from "../journey/logic";
-import type { AgentState, Profile } from "../types";
+import type { AgentState, CallLine, PersonalInfo, Profile } from "../types";
 
 /**
- * Apply: after story mode, the agent does the application busywork and the
- * student only approves it. Pure helpers here.
+ * Application tools (story mode's Review & Apply and Financial Aid steps): the agent does the
+ * application busywork and the student only approves it. Pure helpers here.
  */
 
 export type AgentTaskId = "counselor" | "ucAccount" | "fafsa" | "sir";
@@ -40,9 +40,14 @@ export function agentTasks(profile: Profile): AgentTask[] {
       // Checked off once the UC account exists and is verified.
       done: !!(a.ucAccount?.verifiedAt || a.ucAccount?.signedInAt),
     },
-    { id: "fafsa", title: "Submit the FAFSA or CA Dream Act", done: !!a.fafsaDoneAt },
+    { id: "fafsa", title: "Submit the FAFSA or CA Dream Act", done: fafsaSubmitted(profile) },
     { id: "sir", title: "Submit your Intent to Register", done: !!a.sirDoneAt },
   ];
+}
+
+/** One answer for "is the FAFSA / CA Dream Act in?": the Financial Aid step's, or the old Apply page's flag. */
+export function fafsaSubmitted(profile: Profile): boolean {
+  return profile.preferences.fafsa === "done" || !!agentOf(profile).fafsaDoneAt;
 }
 
 /** UC's allowed special characters; UC needs 8–30 characters and three of four kinds. */
@@ -217,4 +222,74 @@ export function calendarEvents(profile: Profile, now = new Date()): CalendarEven
   }
   const today = now.toISOString().slice(0, 10);
   return events.filter((e) => e.date >= today).sort((p, q) => p.date.localeCompare(q.date));
+}
+
+/** A finished call's transcript as a chat message (what Sage posts once the call with Jordan ends). */
+export function callLogMessage(lines: CallLine[]): string {
+  const log = lines
+    .filter((line) => cleanTranscriptLine(line.text))
+    .map((line) => `**${line.role === "student" ? "You" : "Jordan"}:** ${cleanTranscriptLine(line.text)}`)
+    .join("\n\n");
+  return `Here's the log from your call with Jordan:\n\n${log}`;
+}
+
+const chatDate = (at: string | number) =>
+  new Date(typeof at === "string" ? `${at}T12:00:00` : at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+/**
+ * What the application tools have done, as plain text for the chatbot's profile context: the
+ * school counselor and email, the call with Jordan, the UC account's progress, submission, Intent
+ * to Register, and upcoming dates. The UC password and the birthday/birthplace values never go in;
+ * the chatbot only learns whether those are on file.
+ */
+export function applyProgressSummary(profile: Profile, personal: PersonalInfo | null = null, now = new Date()): string {
+  const a = agentOf(profile);
+  const lines: string[] = [];
+
+  if (a.counselor) {
+    const c = a.counselor;
+    lines.push(`School counselor (confirmed ${chatDate(c.confirmedAt)}): ${[c.name, c.title].filter(Boolean).join(", ")}${c.email ? ` <${c.email}>` : ""}`);
+  } else {
+    lines.push("School counselor: not looked up yet");
+  }
+  const mail = a.counselorEmail;
+  lines.push(
+    "Email to school counselor: " +
+      (mail?.sentAt
+        ? `sent ${chatDate(mail.sentAt)}`
+        : mail?.openedAt
+          ? `opened in Gmail ${chatDate(mail.openedAt)}, not marked sent`
+          : mail
+            ? `drafted ("${mail.subject}"), not sent`
+            : "not drafted"),
+  );
+  lines.push(`Practice call with Jordan (virtual counselor): ${a.counselorCall ? chatDate(a.counselorCall.endedAt) : "none yet"}`);
+
+  const uc = a.ucAccount;
+  if (uc) {
+    const steps = [
+      uc.createdAt && "account created",
+      (uc.verifiedAt || uc.signedInAt) && "verified / signed in",
+      uc.setupAt && "application level and start term set",
+      uc.aboutAt && "\"About you\" filled in",
+      uc.piqAt && "Personal Insight answers entered",
+    ].filter(Boolean);
+    lines.push(`UC application account (${uc.email}): ${steps.length ? steps.join("; ") : "started, not created yet"}`);
+  } else {
+    lines.push("UC application account: not started with the Application assistant");
+  }
+  const submittedAt = journeyOf(profile).submittedAt;
+  lines.push(`UC application submitted: ${submittedAt ? `yes, ${chatDate(submittedAt)}` : "not yet"}`);
+  lines.push(`UC Statement of Intent to Register: ${a.sirDoneAt ? `submitted ${chatDate(a.sirDoneAt)}` : `not yet (due ${chatDate(sirDeadlineDate(profile, now))})`}`);
+
+  if (personal) {
+    const birthday = !!personal.birthDate?.trim();
+    const birthplace = !!(personal.birthCity?.trim() || personal.birthCountry?.trim());
+    lines.push(`Birthday on file for the UC form: ${birthday ? "yes" : "no"}; birthplace on file: ${birthplace ? "yes" : "no"}`);
+  }
+
+  const events = calendarEvents(profile, now).slice(0, 5);
+  if (events.length) lines.push("Upcoming dates: " + events.map((e) => `${chatDate(e.date)} ${e.title}`).join("; "));
+
+  return `APPLICATION PROGRESS (from Track2College's application tools):\n${lines.join("\n")}`;
 }

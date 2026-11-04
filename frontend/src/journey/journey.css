@@ -410,7 +410,7 @@
 /* Selected (whose chat is open): a thin rounded frame around the building and its lawn. */
 .jm-orbit {
   position: absolute;
-  inset: calc(var(--px) * 2) calc(var(--px) * 0.5) calc(var(--px) * -1);
+  inset: calc(var(--px) * 0.5) calc(var(--px) * -1.5) calc(var(--px) * -1.5);
   border: 2px solid var(--cn-ring);
   border-radius: calc(var(--px) * 3);
   opacity: 0;
@@ -428,31 +428,22 @@
   position: absolute;
   left: 50%;
   bottom: 100%;
-  transform: translate(-50%, var(--px));
+  transform: translate(-50%, calc(var(--px) * -2));
   line-height: 0;
 }
 
 /* The Admissions Office flag already reaches the top, so its marker sits above the flag. */
 .jm-stop:last-child .jm-here {
-  transform: translate(-50%, calc(var(--px) * -1));
+  transform: translate(-50%, calc(var(--px) * -4));
 }
 
-/* The marker hovers: a slow bob toward the building it points at. */
-.jm-here svg {
-  animation: jm-hover 2.8s ease-in-out infinite;
-}
-
-@keyframes jm-hover {
-  0%, 100% { transform: translateY(calc(var(--px) * -3)); }
-  50% { transform: translateY(calc(var(--px) * 1)); }
-}
 
 .jm-done-badge {
   position: absolute;
-  right: 6%;
-  top: 14%;
+  right: 0;
+  top: 8%;
   line-height: 0;
-  --px: calc(var(--planet) / 32);
+  --px: calc(var(--planet) / 20);
 }
 
 /* ---- Labels */
@@ -499,10 +490,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .jm-here svg {
-    animation: none;
-  }
-
   .jm-planet-btn,
   .jm-planet,
   .jm-orbit {
@@ -543,8 +530,19 @@
   animation: jm-explore-in 0.2s ease-out;
 }
 
+/* Wide map: "See tasks" hangs under the label without taking space, so selecting a stop
+   never makes its label taller and shifts the whole map. */
+[data-layout="wide"] .jm-label {
+  position: relative;
+}
+
 [data-layout="wide"] .jm-explore {
-  align-self: center;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  width: max-content;
+  margin: 3px auto 0;
 }
 
 [data-layout="tall"] .jm-explore {
@@ -597,3 +595,70 @@
     display: none;
   }
 }
+
+/* ---- Deadline sign: a small board above the buildings (wide map only) */
+
+.jm-sign {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 auto 46px; /* room below for the "you're here" marker */
+  width: max-content;
+  --jm-sign-head: #2f6b4a;
+}
+
+:root[data-theme="dark"] .jm-sign {
+  --jm-sign-head: #24563b;
+}
+
+.jm-sign-board {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 14px 6px;
+  border: 2px solid var(--cn-ink);
+  border-radius: 4px;
+  background: var(--bg-elevated, #fff);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--cn-ink) 18%, transparent);
+}
+
+.jm-sign-head {
+  align-self: stretch;
+  margin: 0 -14px 4px;
+  padding: 3px 10px;
+  background: var(--jm-sign-head);
+  color: #f6efdd;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.jm-sign-count {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--cn-text);
+  white-space: nowrap;
+}
+
+.jm-sign-count strong {
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--cn-sage-deep);
+  font-variant-numeric: tabular-nums;
+}
+
+.jm-sign-count strong.is-text {
+  font-size: 16px;
+}
+
+.jm-sign-board.is-urgent .jm-sign-count strong {
+  color: var(--warning, #b7791f);
+}
+.jm-major { margin-bottom: 8px; }

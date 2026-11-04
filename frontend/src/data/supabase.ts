@@ -67,6 +67,7 @@ export function createSupabaseStore(url: string, anonKey: string): DataStore {
   const analyses = singleton<ProfileAnalysis>(TABLES.analyses);
   const game = singleton<Partial<GameState>>(TABLES.game);
   const personalInfo = singleton<PersonalInfo>(TABLES.personalInfo);
+  // Every chat is kept as a record of what the student asked; the app never loads old ones back.
   const conversations = collection<Conversation>(TABLES.conversations);
   const transcripts = collection<Transcript>(TABLES.transcripts);
   const coursePlans = collection<CoursePlan>(TABLES.coursePlans);
@@ -147,7 +148,7 @@ export function createSupabaseStore(url: string, anonKey: string): DataStore {
           testPlan: "",
           coursework: "",
         },
-        goals: { majors: [], careers: "", whyCollege: "" },
+        goals: { majors: [], intendedMajor: "", careers: "", whyCollege: "" },
         activities: [],
         awards: [],
         colleges: [],

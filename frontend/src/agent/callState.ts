@@ -96,9 +96,13 @@ function normalize(text: string) {
 export const WRAP_UP_HANGUP_MS = 4000;
 
 /**
- * Jordan's scripted goodbye (backend/voice.py, step 5). Spotting it lets the call hang up a
- * moment after Jordan finishes, before the agent's "Are you still there?" silence prompt.
+ * Jordan's scripted goodbyes (backend/voice.py): step 5 of the apply path, or the end of the chat
+ * path. Spotting one lets the call hang up a moment after Jordan finishes, before the agent's
+ * "Are you still there?" silence prompt.
  */
 export function isWrapUpLine(text: string): boolean {
-  return /thanks so much for talking with me today/i.test(text) && /go ahead with your uc application/i.test(text);
+  return (
+    /thanks so much for talking with me today/i.test(text) &&
+    (/go ahead with your uc application/i.test(text) || /come back any time you have more questions/i.test(text))
+  );
 }

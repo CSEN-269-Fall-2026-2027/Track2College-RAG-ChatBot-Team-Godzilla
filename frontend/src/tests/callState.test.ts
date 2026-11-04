@@ -74,6 +74,10 @@ describe("isWrapUpLine", () => {
     ).toBe(true);
   });
 
+  it("spots the chat path's goodbye too", () => {
+    expect(isWrapUpLine("Thanks so much for talking with me today, Maya! Come back any time you have more questions.")).toBe(true);
+  });
+
   it("ignores other lines, including the silence prompt", () => {
     expect(isWrapUpLine("Are you still there? If you have any more questions, feel free to ask!")).toBe(false);
     expect(isWrapUpLine("Thanks so much for talking with me today!")).toBe(false);

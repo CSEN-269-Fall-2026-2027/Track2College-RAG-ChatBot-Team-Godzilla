@@ -117,3 +117,28 @@ export function editDraft(profile: Profile, piqId: string, text: string): Profil
 
 export const countWords = (text: string) => (text.trim() ? text.trim().split(/\s+/).length : 0);
 export const overLimit = (text: string) => countWords(text) > PIQ_WORD_LIMIT;
+
+/**
+ * Swaps one chosen PIQ for another the student hasn't picked. The old question's work stays saved
+ * (so switching back brings its draft back); the new one starts from whatever was saved for it.
+ */
+export function swapPiq(profile: Profile, from: string, to: string): Profile {
+  const journey = journeyOf(profile);
+  if (!(from in journey.piqs) || to in journey.piqs) return profile;
+  const piqs = { ...journey.piqs };
+  delete piqs[from];
+  piqs[to] = piqWorkOf(profile, to).draft ? "drafting" : "not-started";
+  return { ...profile, ucJourney: { ...journey, piqs } };
+}
+
+/** Deletes the student's response to a PIQ (keeps the question chosen and any personal answer). */
+export function deleteDraft(profile: Profile, piqId: string): Profile {
+  const work = piqWorkOf(profile, piqId);
+  if (!work.draft) return profile;
+  const { draft: _removed, ...rest } = work;
+  return {
+    ...profile,
+    piqWork: { ...profile.piqWork, [piqId]: rest },
+    ucJourney: setPiqStatus(journeyOf(profile), piqId, "not-started"),
+  };
+}

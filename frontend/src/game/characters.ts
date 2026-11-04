@@ -12,7 +12,7 @@ export interface Palette {
 
 export interface Mentor {
   /** Also the backend persona id (backend/persona.py). */
-  id: "sage" | "penny" | "quill" | "milo";
+  id: "sage" | "penny" | "quill" | "milo" | "counselor" | "assistant";
   name: string;
   title: string;
   specialty: string;
@@ -102,8 +102,39 @@ export const MENTORS: Mentor[] = [
 
 export const DEFAULT_MENTOR = MENTORS[0];
 
+/**
+ * Review & Apply's two chat personalities. The student picks one on that step; they aren't in
+ * the general mentor list. Their ids match the Review & Apply modes and the backend personas.
+ */
+export const REVIEW_GUIDES: Mentor[] = [
+  {
+    id: "counselor",
+    name: "Counselor",
+    title: "Reach your school counselor",
+    specialty: "Emailing your school counselor and practice meetings with Jordan, your virtual counselor",
+    species: "human",
+    palette: { body: "#1f6b4f", belly: "#f7ecd0", accent: "#1f6b4f", dark: "#14213d" },
+    scene: "office",
+    voice: 350,
+    greeting: (name) => `Hey${name ? ` ${name}` : ""}! Want help reaching your school counselor?`,
+    suggestions: [],
+  },
+  {
+    id: "assistant",
+    name: "Application Assistant",
+    title: "Fill in your UC application",
+    specialty: "Opening the UC application and filling in what's in your profile",
+    species: "human",
+    palette: { body: "#1e3a6e", belly: "#e9dcc0", accent: "#d4a017", dark: "#14213d" },
+    scene: "campus",
+    voice: 360,
+    greeting: (name) => `Hey${name ? ` ${name}` : ""}! Want help applying?`,
+    suggestions: [],
+  },
+];
+
 export function mentorById(id: string | null | undefined): Mentor {
-  return MENTORS.find((m) => m.id === id) ?? DEFAULT_MENTOR;
+  return MENTORS.find((m) => m.id === id) ?? REVIEW_GUIDES.find((m) => m.id === id) ?? DEFAULT_MENTOR;
 }
 
 const FINANCE = /\b(fafsa|financial aid|scholarship|grant|loan|tuition|cost|afford|money|pay|price|cal grant|dream act|work[- ]study|net price)\b/i;

@@ -65,6 +65,11 @@ class ChatRequest(BaseModel):
         max_length=32,
         description="Optional Story-mode mentor id (sage, penny, quill, milo) that sets the answer's voice.",
     )
+    mode: Optional[str] = Field(
+        None,
+        max_length=32,
+        description="Optional Story-mode step mode: Review & Apply (counselor, assistant) for Sage, or Financial Aid (fafsa, scholarships) for Penny.",
+    )
 
 
 class ProfileAnalysisRequest(BaseModel):
@@ -265,6 +270,8 @@ class UcAccountStartRequest(BaseModel):
     verified: bool = False
     # The student's four chosen personal insight questions with their saved answers.
     piqs: List[UcPiq] = Field(default_factory=list, max_length=4)
+    # "local": a window on this computer; "cloud": a Browserbase session the student uses via live view.
+    browser: str = Field("local", pattern="^(local|cloud)$")
 
 
 class UcAccountStartResponse(BaseModel):
@@ -275,6 +282,10 @@ class UcAccountStatusResponse(BaseModel):
     status: str
     detail: str
     mode: str
+    browser: str = "local"
+    live_url: Optional[str] = None
+    page_url: str = ""
+    finished: bool = False
     open: bool
     created: bool
     verified: bool
@@ -350,6 +361,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
             conversation_history=memory_snapshot,
             profile_context=request.profile_context,
             persona=request.persona,
+            mode=request.mode,
         )
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Chat generation failed: {error}")
@@ -501,6 +513,7 @@ def agent_uc_account_start(request: UcAccountStartRequest) -> UcAccountStartResp
             request.about_done,
             request.verified,
             [q.model_dump() for q in request.piqs],
+            request.browser,
         )
     except uc_account.UcAccountError as error:
         raise HTTPException(status_code=400, detail=str(error))
@@ -546,6 +559,49 @@ def agent_counselor_voice_problem(request: CounselorCallProblemRequest) -> dict:
         print(f"[voice] Could not look up the call: {error}")
         return {"problem": None}
 
+
+
+@app.on_event("startup")
+def close_leftover_cloud_browsers() -> None:
+    """A restart forgets any open run, so close this app's cloud browsers that are still running."""
+    import threading
+
+    import cloud_browser
+
+    threading.Thread(target=cloud_browser.release_leftovers, daemon=True).start()
+
+
+@app.get("/agent/uc-account/active")
+def agent_uc_account_active() -> dict:
+    """The UC window that's open right now, if any, so a reopened popup can show and stop it."""
+    found = uc_account.active()
+    if not found:
+        return {"run_id": None, "run": None}
+    run_id, run = found
+    return {"run_id": run_id, "run": UcAccountStatusResponse(**run).model_dump()}
+
+
+@app.post("/agent/uc-account/close-cloud")
+def agent_uc_account_close_cloud() -> dict:
+    """Ends the open run (if any) and closes every cloud browser of this app that nothing is using."""
+    found = uc_account.active()
+    if found:
+        uc_account.cancel(found[0])
+    import cloud_browser
+
+    # The stopped run releases its own session too; releasing it twice is harmless.
+    closed = cloud_browser.release_leftovers()
+    return {"ok": True, "stopped_run": bool(found), "closed_sessions": closed}
+
+
+@app.post("/agent/uc-account/cancel/{run_id}")
+def agent_uc_account_cancel(run_id: str) -> dict:
+    """Stops a run; in cloud mode its Browserbase session is released."""
+    try:
+        uc_account.cancel(run_id)
+    except uc_account.UcAccountError as error:
+        raise HTTPException(status_code=404, detail=str(error))
+    return {"ok": True}
 
 
 @app.post("/agent/uc-account/code/{run_id}")

@@ -1,6 +1,7 @@
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { COLLEGES } from "../colleges";
+import { MAJOR_CHOICES } from "../constants";
 import { usePlanning } from "../planning";
 import { academicHistoryStatus, completeness, useProfile } from "../profile";
 import { navigate } from "../router";
@@ -16,7 +17,6 @@ import {
   PIQ_REQUIRED,
   PIQ_WORD_LIMIT,
   REVIEW_MANUAL,
-  setCampusMajor,
   setPiqStatus,
   toggleCampus,
   togglePiq,
@@ -24,6 +24,7 @@ import {
   type Checkpoint,
   type CheckpointId,
 } from "./logic";
+import { daysUntilUcDeadline, entryYear } from "../agent/logic";
 import { mentorById } from "../game/characters";
 import { STAGE_GUIDE } from "./guides";
 import { GRID, mapLayout, planetPixels, routeLegs } from "./planets";
@@ -53,7 +54,7 @@ const MAP_LABEL: Record<CheckpointId, string> = {
   ucs: "Choose UCs",
   activities: "Activities list",
   essays: "Four essays",
-  review: "Review & apply",
+  review: "Apply",
   aid: "Financial aid",
 };
 
@@ -187,6 +188,8 @@ export function JourneyMap({
             )}
           </svg>
 
+          {layout === "wide" && <DeadlineSign profile={profile} />}
+
           <ol className="jm-stops" aria-label="Checkpoints">
             {checkpoints.map((c, i) => {
               const state = c.complete ? "complete" : i === current && !finished ? "current" : "upcoming";
@@ -228,8 +231,6 @@ export function JourneyMap({
                     <strong aria-hidden="true">{MAP_LABEL[c.id]}</strong>
                     <small aria-hidden="true">
                       <span>{status}</span>
-                      <span className="jm-label-sep"> · </span>
-                      <span>{person.name}</span>
                     </small>
                     {/* Story mode: the selected chapter offers its full to-do list. */}
                     {onSelect && isActive && (
@@ -288,6 +289,27 @@ export function JourneyMap({
           />,
           document.body,
         )}
+    </div>
+  );
+}
+
+/** A small sign over the map: days left until the UC deadline. */
+function DeadlineSign({ profile }: { profile: Profile }) {
+  const days = daysUntilUcDeadline(profile);
+  return (
+    <div className="jm-sign" role="note" aria-label={days < 0 ? "The UC application deadline has passed" : days === 0 ? "UC application due today" : `${days} days left to apply`}>
+      <div className={`jm-sign-board${days <= 7 && days >= 0 ? " is-urgent" : ""}`} aria-hidden="true">
+        <span className="jm-sign-head">UC app · Fall {entryYear(profile)}</span>
+        <span className="jm-sign-count">
+          {days > 0 ? (
+            <>
+              <strong>{days}</strong> day{days === 1 ? "" : "s"} left
+            </>
+          ) : (
+            <strong className="is-text">{days < 0 ? "Closed" : "Due today"}</strong>
+          )}
+        </span>
+      </div>
     </div>
   );
 }
@@ -481,15 +503,22 @@ function CheckpointPanel({ checkpoint: c, index, state, profile, update, setJour
 }
 
 function CampusPicker({ profile, update }: { profile: Profile; update: PanelProps["update"] }) {
-  const listId = "jm-majors";
   return (
     <div className="jm-campuses">
-      <p className="jm-note">Pick the campuses you'll apply to and your intended major at each. These save to your college list.</p>
-      <datalist id={listId}>
-        {profile.goals.majors.map((m) => (
-          <option key={m} value={m} />
+      <p className="jm-note">Pick the campuses you'll apply to and one intended major for all of them.</p>
+      <select
+        className="jm-input jm-major"
+        value={profile.goals.intendedMajor}
+        aria-label="Intended major (all UC campuses)"
+        onChange={(e) => update((p) => ({ ...p, goals: { ...p.goals, intendedMajor: e.target.value } }))}
+      >
+        <option value="">Intended major…</option>
+        {MAJOR_CHOICES.map((m) => (
+          <option key={m} value={m}>
+            {m}
+          </option>
         ))}
-      </datalist>
+      </select>
       <ul>
         {COLLEGES.map((college) => {
           const saved = profile.colleges.find((c) => c.name.toLowerCase() === college.name.toLowerCase());
@@ -510,16 +539,6 @@ function CampusPicker({ profile, update }: { profile: Profile; update: PanelProp
               >
                 <ExternalIcon width={13} height={13} />
               </a>
-              {saved && (
-                <input
-                  className="jm-input"
-                  list={listId}
-                  value={saved.major ?? ""}
-                  placeholder="Intended major"
-                  aria-label={`Intended major at ${college.name}`}
-                  onChange={(e) => update((p) => setCampusMajor(p, college.name, e.target.value))}
-                />
-              )}
             </li>
           );
         })}

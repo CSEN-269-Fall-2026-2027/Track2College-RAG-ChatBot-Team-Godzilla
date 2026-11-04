@@ -1,3 +1,5 @@
+import { agentOf, setAgent, sirDeadlineDate } from "../agent/logic";
+import { MAJOR_CHOICES } from "../constants";
 import type { Mentor } from "../game/characters";
 import type { GradeLevel, Profile } from "../types";
 import {
@@ -11,7 +13,6 @@ import {
   PIQ_REQUIRED,
   PIQ_WORD_LIMIT,
   REVIEW_MANUAL,
-  setCampusMajor,
   setPiqStatus,
   toggleCampus,
   togglePiq,
@@ -45,13 +46,14 @@ export type GuidedEffect =
   | { type: "toggleCampus"; campus: string }
   /** Replace the UC campus list with these names (checkbox picker submit). */
   | { type: "setCampuses"; campuses: string[] }
-  | { type: "setMajor"; campus: string; major: string }
   | { type: "togglePiq"; piqId: string }
   /** Replace chosen PIQs with exactly these ids (checkbox picker; expect four). */
   | { type: "setPiqs"; piqIds: string[] }
   | { type: "setPiqReady"; piqId: string }
   | { type: "toggleCheck"; checkId: string }
   | { type: "markSubmitted" }
+  /** UC Statement of Intent to Register: submitted on UC's site, recorded here (true) or undone (false). */
+  | { type: "setSirDone"; done: boolean }
   | { type: "applyText"; field: TextField; value: string }
   | { type: "setPiqAnswer"; piqId: string; questionId: string; value: string }
   /** Draft these PIQs with Groq (one as soon as its follow-ups are done); results land in Profile → Essays. */
@@ -70,7 +72,6 @@ export type TextField =
   | "graduationYear"
   | "gpaUnweighted"
   | "exams"
-  | "major"
   | "activityDetails"
   | "piqAnswer";
 
@@ -96,7 +97,6 @@ export interface GuidedTurn {
     placeholder: string;
     field: TextField;
     submitLabel: string;
-    campus?: string;
     /** For "piqAnswer": which PIQ the personal information is for. */
     piqId?: string;
     /** PIQ answer key, or ACTIVITY_QUESTIONS id for "activityDetails". */
@@ -123,7 +123,6 @@ export function inputEffect(turn: GuidedTurn, value: string): GuidedEffect | nul
     return { type: "setPiqAnswer", piqId: input.piqId, questionId: input.questionId, value: value.trim() };
   }
   if (!input || !value.trim()) return null;
-  if (input.field === "major" && input.campus) return { type: "setMajor", campus: input.campus, major: value };
   return { type: "applyText", field: input.field, value };
 }
 
@@ -168,13 +167,22 @@ export function nextGuidedTurn(
   const journey = computeJourney(profile, sections, academicStarted(profile));
 
   if (journey.finished) {
+    // After admission offers, the last real step is accepting one: UC's Statement of Intent to Register.
+    const sirDone = !!agentOf(profile).sirDoneAt;
+    const sirDue = new Date(`${sirDeadlineDate(profile)}T12:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric" });
     return {
-      id: "done",
+      id: sirDone ? "done-sir" : "done",
       checkpointId: "done",
       speaker: "sage",
       chapter: "Finish",
-      prompt: hi("you've submitted your UC application and sorted out financial aid — that's the whole path! Next up: watch your email and keep your grades steady."),
+      prompt: sirDone
+        ? hi("you've submitted your UC application, sorted out financial aid, and accepted your spot. Congratulations — you did the whole path!")
+        : hi(`you've submitted your UC application and sorted out financial aid — that's the whole path! Next up: watch your email and keep your grades steady. Once offers come in, accept one by submitting your Statement of Intent to Register by ${sirDue}.`),
       choices: [
+        sirDone
+          ? { id: "sir-undo", label: "I haven't submitted my Intent to Register", effect: { type: "setSirDone", done: false } }
+          : { id: "sir", label: "I submitted my Intent to Register", effect: { type: "setSirDone", done: true } },
+        { id: "dates", label: "What dates are coming up?", effect: { type: "ask", mentorId: "sage", prompt: "Looking at my upcoming dates, what's next for me and when is each one due?" } },
         { id: "aid", label: "Ask Penny what comes next for aid", effect: { type: "ask", mentorId: "penny", prompt: "I submitted my UC application and my FAFSA or CA Dream Act. What should I watch for next with financial aid, like Cal Grant and my aid offers?" } },
         { id: "next", label: "What happens after I submit?", effect: { type: "ask", mentorId: "sage", prompt: "I submitted my UC application. What happens next and what should I watch for?" } },
         { id: "manual", label: "Ask my own question", effect: { type: "focusChat" } },
@@ -191,7 +199,9 @@ export function nextGuidedTurn(
   for (const cp of order) {
     const turn = turnsFor(cp, profile, sections, hi).find((t) => !skipIds.has(t.id));
     if (turn) {
-      return { ...turn, checkpointId: cp.id, chapter: `${cp.short} · ${cp.done}/${cp.total} done`, finished: false };
+      // Review & Apply's count is the checklist of earlier steps, so it gets just its name.
+      const chapter = cp.id === "review" ? cp.short : `${cp.short} · ${cp.done}/${cp.total} done`;
+      return { ...turn, checkpointId: cp.id, chapter, finished: false };
     }
   }
 
@@ -317,22 +327,19 @@ function turnsFor(
         campusPicker: true,
       });
     }
-    for (const c of ucs.filter((u) => !u.major?.trim())) {
-      const own = profile.goals.majors.find((m) => m && m !== "Undeclared");
+    if (ucs.length && !profile.goals.intendedMajor) {
       out.push({
-        id: `major-${c.name}`,
+        id: "major",
         speaker: "milo",
-        prompt: hi(`each campus asks for a major. What do you want to study at ${c.name}?`),
+        prompt: hi("what do you want to study? Pick one major. It's the one you'll apply for at every UC campus."),
         choices: [
-          ...(own ? [{ id: "same", label: `${own} (your interest)`, effect: { type: "setMajor" as const, campus: c.name, major: own } }] : []),
-          { id: "und", label: "Undeclared / exploring", effect: { type: "setMajor", campus: c.name, major: "Undeclared" } },
+          ...MAJOR_CHOICES.map((m) => ({ id: `major-${m}`, label: m, effect: { type: "setGoals" as const, patch: { intendedMajor: m } } })),
           {
             id: "ask",
-            label: `Help me pick a major at ${c.name}`,
-            effect: { type: "ask", mentorId: "milo", prompt: `Help me choose a major to apply for at ${c.name}. Which majors there fit my interests, and are any impacted?` },
+            label: "Help me pick a major",
+            effect: { type: "ask", mentorId: "milo", prompt: "Help me choose a major to apply for at my UC campuses. Which majors fit my interests, and are any impacted?" },
           },
         ],
-        input: { placeholder: "Or type a major…", field: "major", submitLabel: "Save major", campus: c.name },
       });
     }
   }
@@ -567,8 +574,6 @@ export function applyGuidedEffect(profile: Profile, effect: GuidedEffect, newId:
       });
       return { ...profile, colleges: [...nonUc, ...nextUc] };
     }
-    case "setMajor":
-      return setCampusMajor(profile, effect.campus, effect.major);
     case "togglePiq":
       return { ...profile, ucJourney: togglePiq(journeyOf(profile), effect.piqId) };
     case "setPiqs": {
@@ -589,6 +594,8 @@ export function applyGuidedEffect(profile: Profile, effect: GuidedEffect, newId:
     }
     case "markSubmitted":
       return { ...profile, ucJourney: { ...journeyOf(profile), submittedAt: Date.now() } };
+    case "setSirDone":
+      return setAgent(profile, (a) => ({ ...a, sirDoneAt: effect.done ? Date.now() : undefined }));
     case "setPiqAnswer":
       return setPiqAnswer(profile, effect.piqId, effect.questionId, effect.value);
     case "applyText": {
@@ -605,8 +612,6 @@ export function applyGuidedEffect(profile: Profile, effect: GuidedEffect, newId:
           return applyGuidedEffect(profile, { type: "setAcademics", patch: { gpaUnweighted: v } }, newId);
         case "exams":
           return applyGuidedEffect(profile, { type: "setAcademics", patch: { exams: v } }, newId);
-        case "major":
-          return applyGuidedEffect(profile, { type: "setGoals", patch: { majors: [v] } }, newId);
         case "activityDetails":
         case "piqAnswer":
           return profile;
@@ -636,8 +641,6 @@ export function savedLabel(effect: GuidedEffect): string | null {
       return effect.campuses.length
         ? `Saved ${effect.campuses.length} UC campus${effect.campuses.length === 1 ? "" : "es"}`
         : null;
-    case "setMajor":
-      return `Saved major at ${effect.campus}: ${effect.major}`;
     case "togglePiq":
       return "Updated your PIQ choices";
     case "setPiqs":
@@ -648,10 +651,14 @@ export function savedLabel(effect: GuidedEffect): string | null {
       return "Checked off on your review list";
     case "markSubmitted":
       return "Recorded your UC submission";
+    case "setSirDone":
+      return effect.done ? "Recorded your Intent to Register" : "Marked Intent to Register not done";
     case "answerActivity":
       return effect.count > 0 ? "Added to your activities list" : null;
     case "activityDetails":
       return effect.value.trim() ? "Saved your activity details" : null;
+    case "setGoals":
+      return effect.patch.intendedMajor ? `Saved your major: ${effect.patch.intendedMajor}` : "Saved to your profile";
     default:
       return "Saved to your profile";
   }

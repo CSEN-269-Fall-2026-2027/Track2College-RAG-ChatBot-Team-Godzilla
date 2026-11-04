@@ -13,6 +13,8 @@ export interface Message {
   mentorId?: string;
   responseTimeMs?: number;
   error?: boolean;
+  /** Sent by a ready-made button (not typed): long ones show collapsed with "See more". */
+  preset?: boolean;
   createdAt: number;
 }
 
@@ -113,8 +115,13 @@ export interface Profile {
     coursework: string;
   };
   goals: {
-    /** General major interests for advising; campus-specific majors live on colleges[].major. */
+    /** General major interests for advising (from onboarding). */
     majors: string[];
+    /**
+     * The one major the student applies for at every UC campus: one of UC_MAJORS, "Other", or ""
+     * (not chosen yet). Replaces the old per-campus colleges[].major.
+     */
+    intendedMajor: string;
     /** @deprecated Not required for UC prep; preserved if previously saved. */
     careers: string;
     /** @deprecated Not required for UC prep; preserved if previously saved. */
@@ -193,7 +200,20 @@ export interface CallLine {
   text: string;
 }
 
+/** How Sage helps on story mode's Review & Apply step. */
+export type ReviewMode = "counselor" | "assistant";
+
+/** What Penny helps with on story mode's Financial Aid step. */
+export type AidMode = "fafsa" | "scholarships";
+
+/** A story step's mode, sent with the chat so the guide's prompt follows it. */
+export type StoryMode = ReviewMode | AidMode;
+
 export interface AgentState {
+  /** Story mode's Review & Apply step: Counselor or Application assistant (switchable any time). */
+  reviewMode?: ReviewMode;
+  /** Story mode's Financial Aid step: FAFSA or Scholarships (switchable any time). */
+  aidMode?: AidMode;
   /** Which counselor the "Talk to a counselor" task shows: the AI voice call or the student's own school counselor. */
   counselorMode?: "virtual" | "school";
   /** Counselor the student confirmed. */

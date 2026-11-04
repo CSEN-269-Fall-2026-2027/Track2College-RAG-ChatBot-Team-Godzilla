@@ -59,8 +59,9 @@ export function sendChat(
   profileContext: string | null,
   signal?: AbortSignal,
   persona: string | null = null,
+  mode: string | null = null,
 ): Promise<ChatResponse> {
-  return post("/chat", { query, session_id: sessionId, profile_context: profileContext || null, persona }, signal);
+  return post("/chat", { query, session_id: sessionId, profile_context: profileContext || null, persona, mode }, signal);
 }
 
 export function analyzeProfile(
@@ -262,12 +263,21 @@ export type UcRunStatus =
   | "about_done"
   | "piq_done"
   | "closed"
+  | "disconnected"
   | "error";
 
 export interface UcRun {
   status: UcRunStatus;
   detail: string;
   mode: "login" | "create";
+  /** Where the browser runs: a window on this computer, or a Browserbase session. */
+  browser?: UcBrowser;
+  /** Cloud only: Browserbase's live view, where the student sees and uses the UC window. */
+  live_url?: string | null;
+  /** The page the UC window is on (the cloud panel's address bar). */
+  page_url?: string;
+  /** The assistant filled every field it can; the student reviews and submits on UC. */
+  finished?: boolean;
   /** The UC window is still open on the student's screen. */
   open: boolean;
   /** Milestones reached in this window, for saving to the profile. */
@@ -281,7 +291,7 @@ export interface UcRun {
   /** The student's personal insight answers were entered on UC. */
   piq: boolean;
   /** Personal insight questions entered this run, and ones left alone (with why). */
-  piq_report: { entered: string[]; skipped: string[] };
+  piq_report: { entered: string[]; skipped: string[]; removed?: string[] };
 }
 
 /** A chosen personal insight question (UC's numbering, 1–8) and the student's saved answer. */
@@ -289,6 +299,31 @@ export interface UcPiq {
   number: number;
   title: string;
   text: string;
+}
+
+/** "local": a Chrome window on this computer. "cloud": a Browserbase browser the student uses through its live view. */
+export type UcBrowser = "local" | "cloud";
+
+/** Stops the UC run; in cloud mode the server releases the Browserbase session. */
+export async function cancelUcAccount(runId: string): Promise<void> {
+  await post(`/agent/uc-account/cancel/${encodeURIComponent(runId)}`, {});
+}
+
+/** The UC window that's open right now (e.g. from before the popup was closed), or null. */
+export async function activeUcRun(): Promise<{ runId: string; run: UcRun } | null> {
+  try {
+    const response = await fetch(`${API_BASE}/agent/uc-account/active`);
+    if (!response.ok) return null;
+    const data = (await response.json()) as { run_id: string | null; run: UcRun | null };
+    return data.run_id && data.run ? { runId: data.run_id, run: data.run } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Stops any open run and closes every cloud browser this app left running. */
+export async function closeCloudBrowsers(): Promise<{ stopped_run: boolean; closed_sessions: number }> {
+  return post("/agent/uc-account/close-cloud", {});
 }
 
 /** Types the student's UC verification code into the open UC window. */
@@ -306,6 +341,7 @@ export async function startUcAccount(
   /** UC already verified this account, so its emailed-code screen won't appear again. */
   verified = false,
   piqs: UcPiq[] = [],
+  browser: UcBrowser = "local",
 ): Promise<string> {
   const result = await post<{ run_id: string }>("/agent/uc-account/start", {
     email,
@@ -315,6 +351,7 @@ export async function startUcAccount(
     about_done: aboutDone,
     verified,
     piqs,
+    browser,
   });
   return result.run_id;
 }

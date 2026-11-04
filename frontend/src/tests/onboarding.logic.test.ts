@@ -95,7 +95,7 @@ describe("onboarding logic", () => {
         testPlan: "",
         coursework: "",
       },
-      goals: { majors: [], careers: "", whyCollege: "" },
+      goals: { majors: [], intendedMajor: "", careers: "", whyCollege: "" },
     });
     expect(p.academics.gpaUnweighted).toBe("");
     expect(p.goals.majors).toEqual([]);

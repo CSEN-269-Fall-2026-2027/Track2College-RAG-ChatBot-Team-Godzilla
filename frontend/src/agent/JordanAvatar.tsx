@@ -12,7 +12,8 @@ interface JordanAvatarProps {
 }
 
 /*
- * Sprite layers the same size as /apply/jordan.png (334 × 378), cut from Jordan's own pixels:
+ * Jordan is the Counselor character (/mentors/counselor.png, 424 × 480). The sprite layers are the
+ * same size, drawn over his face:
  * closed eyelids for blinking and two mouth frames. The base art has no mouth, so the closed
  * frame shows no overlay.
  */
@@ -71,10 +72,10 @@ export function JordanAvatar({ speaking, getLevel, silentPlayback, reducedMotion
 
   return (
     <div ref={layersRef} className={`jordan${speaking ? " is-speaking" : ""}`} data-mouth="0" aria-hidden="true">
-      <img src="/apply/jordan.png" alt="" draggable={false} />
-      <img className="jordan-lids" src="/apply/jordan-blink.png" alt="" draggable={false} />
-      <img className="jordan-mouth jordan-mouth-1" src="/apply/jordan-mouth-1.png" alt="" draggable={false} />
-      <img className="jordan-mouth jordan-mouth-2" src="/apply/jordan-mouth-2.png" alt="" draggable={false} />
+      <img src="/mentors/counselor.png" alt="" draggable={false} />
+      <img className="jordan-lids" src="/mentors/counselor-blink.png" alt="" draggable={false} />
+      <img className="jordan-mouth jordan-mouth-1" src="/mentors/counselor-mouth-1.png" alt="" draggable={false} />
+      <img className="jordan-mouth jordan-mouth-2" src="/mentors/counselor-mouth-2.png" alt="" draggable={false} />
     </div>
   );
 }
