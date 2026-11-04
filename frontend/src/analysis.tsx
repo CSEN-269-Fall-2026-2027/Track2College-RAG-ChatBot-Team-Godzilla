@@ -49,7 +49,7 @@ export function AnalysisProvider({ userId, children }: { userId: string; childre
       const result = await analyzeProfile(
         profileSummary(snapshot),
         snapshot.colleges.map((c) => c.name),
-        snapshot.goals.majors,
+        [snapshot.goals.intendedMajor, ...snapshot.goals.majors].filter(Boolean),
         controller.signal,
       );
       const saved: ProfileAnalysis = { ...result, generatedAt: Date.now(), profileHash: profileHash(snapshot) };

@@ -111,18 +111,30 @@ def _course(row: dict) -> dict | None:
     }
 
 
+def _unique(courses: list[dict]) -> list[dict]:
+    """Drops rows the model repeated word for word (same course, year, term and grade)."""
+    seen: set[tuple] = set()
+    kept = []
+    for c in courses:
+        key = (c["name"].lower(), c["grade_level"], c["term"].lower(), c["grade"].upper())
+        if key not in seen:
+            seen.add(key)
+            kept.append(c)
+    return kept
+
+
 def analyze_transcript(file_name: str, mime_type: str, content_base64: str) -> dict:
     transcript_text = extract_text(file_name, mime_type, content_base64)
     raw = complete(SYSTEM_PROMPT, f"=== Transcript ===\n{transcript_text}", max_tokens=6000)
     if not raw:
-        raise RuntimeError("The language model didn't respond. Make sure Ollama (or your RunPod endpoint) is running.")
+        raise RuntimeError("The language model didn't respond. Check GROQ_API_KEY in .env at the project root.")
     try:
         data = parse_json(raw)
     except (ValueError, json.JSONDecodeError) as exc:
         print(f"[transcript] Could not parse model output: {exc}\n{raw[:800]}")
         raise RuntimeError("We couldn't make sense of that transcript. Please try again.") from exc
 
-    courses = [c for c in (_course(row) for row in data.get("courses") or [] if isinstance(row, dict)) if c]
+    courses = _unique([c for c in (_course(row) for row in data.get("courses") or [] if isinstance(row, dict)) if c])
     if not courses:
         raise TranscriptError("We couldn't find any courses in that file. Is it a high school transcript?")
 

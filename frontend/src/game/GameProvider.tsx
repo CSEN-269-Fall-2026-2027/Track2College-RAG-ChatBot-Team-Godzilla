@@ -4,7 +4,7 @@ import { readJSON, userKey, writeJSON } from "../storage";
 import { mentorById, type Mentor } from "./characters";
 import { hydrateGameState, type GameState } from "./progress";
 
-type Settings = Pick<GameState, "mentorId" | "storyMode" | "sound" | "speech">;
+type Settings = Pick<GameState, "mentorId" | "sound" | "speech">;
 
 interface GameContextValue {
   state: GameState;
@@ -15,7 +15,7 @@ interface GameContextValue {
 const GameContext = createContext<GameContextValue | null>(null);
 const SAVE_DELAY_MS = 800;
 
-/** Holds Story-mode preferences: chosen mentor, view mode, sound and read-aloud. */
+/** Holds Story-mode preferences: chosen mentor, sound and read-aloud. */
 export function GameProvider({ userId, children }: { userId: string; children: ReactNode }) {
   const localKey = userKey(userId, "game");
   // Local copy renders instantly and covers projects that haven't run the game_progress migration yet.

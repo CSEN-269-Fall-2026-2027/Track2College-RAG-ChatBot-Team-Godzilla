@@ -1,41 +1,36 @@
-# Supabase for Track2College
+# Supabase setup
 
-Cloud auth and persistence for accounts, profiles, advisor chats, transcripts, analyses, and course plans.
+Supabase handles email sign-in, student data, and private transcript uploads.
 
-## What’s configured
+1. Create or open your Supabase project.
+2. Paste [schema.sql](schema.sql) into its SQL editor and run it. It creates the
+   tables, per-user access policies, and private `transcripts` bucket.
+3. Enable email sign-in under Authentication. Add `http://localhost:5500` to the
+   allowed redirect URLs for password resets.
+4. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the root `.env` using
+   the same project's URL and public anon/publishable key. Never use a
+   service-role or secret key in the frontend.
+5. Restart the frontend and create an account. If email confirmation is enabled,
+   confirm your email before signing in.
 
-| Capability | Status |
-| ---------- | ------ |
-| Auth (email/password, confirm email, password reset) | Frontend via `@supabase/supabase-js` |
-| `profiles` | RLS table, JSON `data` |
-| `profile_analyses` | RLS table |
-| `conversations` | RLS table |
-| `transcripts` | RLS table |
-| `course_plans` | RLS table |
-| Storage bucket `transcripts` | Private; path `<user_id>/<transcript_id>/<file>` |
+The frontend requires Supabase; there is no local account fallback. Each table
+uses row-level security so signed-in users can access only their own records.
+Transcript uploads use paths under the user's ID in the private bucket.
 
-Schema source of truth: [`schema.sql`](./schema.sql). Applied to the linked project with MCP as migration `track2college_tables_and_rls`.
+## Schema changes
 
-## Frontend env
+Editing `schema.sql` doesn't update the live database. Run it again in the same
+project's SQL editor after a schema change. The current script can be rerun;
+`create table if not exists` won't change columns on an existing table, so column
+changes need an explicit migration.
 
-Copy into `frontend/.env.local` (gitignored):
+If you see `PGRST205` (table not found), check that `.env` points to the right
+project and apply the schema. If needed, refresh the API schema cache:
 
-```bash
-VITE_API_URL=http://127.0.0.1:8000
-VITE_SUPABASE_URL=https://<project-ref>.supabase.co
-VITE_SUPABASE_ANON_KEY=<anon-or-publishable-key>
+```sql
+notify pgrst, 'reload schema';
 ```
 
-Both values are **required**. The app no longer has a localStorage account fallback.
-
-## Dashboard checklist
-
-1. Open the project and wait until status is **Active / healthy** (resume if paused).
-2. **Authentication → Providers**: Email enabled.
-3. **Authentication → URL configuration**: add your app origin (e.g. `http://localhost:5500`) for password-reset redirects.
-4. **Storage**: confirm the `transcripts` bucket exists (re-run the storage section of `schema.sql` if the project was restored without Storage tables).
-5. Optional: disable “Confirm email” under Auth for faster local testing.
-
-## Re-apply schema
-
-In the SQL editor, paste `schema.sql`, or use the Supabase MCP `apply_migration` tool with that SQL.
+The `personal_info` table stores birthday and birthplace from voice calls.
+If it was missing during a call, apply the schema and repeat the call to save
+those answers.

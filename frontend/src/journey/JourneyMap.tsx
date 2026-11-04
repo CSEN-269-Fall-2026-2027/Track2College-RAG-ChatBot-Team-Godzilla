@@ -1,12 +1,12 @@
 import { createPortal } from "react-dom";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { COLLEGES } from "../colleges";
+import { MAJOR_CHOICES } from "../constants";
 import { usePlanning } from "../planning";
 import { academicHistoryStatus, completeness, useProfile } from "../profile";
 import { navigate } from "../router";
 import { readJSON, userKey, writeJSON } from "../storage";
 import type { PiqStatus, Profile, UcJourneyState } from "../types";
-type Pose = "idle" | "run-a" | "run-b" | "jump";
 import { ArrowRightIcon, CheckIcon, ExternalIcon, PixelMapIcon, XIcon } from "../components/icons";
 import {
   ACTIVITY_DESC_LIMIT,
@@ -17,44 +17,73 @@ import {
   PIQ_REQUIRED,
   PIQ_WORD_LIMIT,
   REVIEW_MANUAL,
-  setCampusMajor,
   setPiqStatus,
   toggleCampus,
   togglePiq,
   UC_APPLY_URL,
   type Checkpoint,
+  type CheckpointId,
 } from "./logic";
-import { LAYOUTS, MapScene, type Layout } from "./MapScene";
+import { daysUntilUcDeadline, entryYear } from "../agent/logic";
+import { mentorById } from "../game/characters";
+import { STAGE_GUIDE } from "./guides";
+import { GRID, mapLayout, planetPixels, routeLegs } from "./planets";
 
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-const WALK_MS = 900;
+/** How long the "stage completed" route draw lasts. */
+const ARRIVE_MS = 1400;
 
-function useLayout(): Layout {
-  const query = "(max-width: 720px)";
-  const [tall, setTall] = useState(() => window.matchMedia(query).matches);
-  useEffect(() => {
-    const mq = window.matchMedia(query);
-    const on = () => setTall(mq.matches);
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
+
+/** Size of an element's content box, kept current with a ResizeObserver. */
+function useBoxSize<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => setSize({ width: entry.contentRect.width, height: entry.contentRect.height }));
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
-  return tall ? "tall" : "wide";
+  return [ref, size] as const;
 }
+
+/** Short map labels, in journey order. */
+const MAP_LABEL: Record<CheckpointId, string> = {
+  profile: "Basic info",
+  ucs: "Choose UCs",
+  activities: "Activities list",
+  essays: "Four essays",
+  review: "Apply",
+  aid: "Financial aid",
+};
+
+/** Each chapter's campus building (pixel art), computed once. */
+const ART = Object.fromEntries((Object.keys(MAP_LABEL) as CheckpointId[]).map((id) => [id, planetPixels(id)])) as Record<
+  CheckpointId,
+  ReturnType<typeof planetPixels>
+>;
+
+type Pt = { x: number; y: number };
 
 export function JourneyMap({
   userId,
   onBack,
   embedded = false,
+  selected = null,
+  onSelect,
 }: {
   userId: string;
   onBack?: () => void;
-  /** Story-mode side panel: same map (player, labels, progress), no full-page chrome. */
+  /** Story-mode side panel: same map and progress, no full-page chrome. */
   embedded?: boolean;
+  /** The stop whose person the student chose to talk to (Story mode), shown as selected. */
+  selected?: CheckpointId | null;
+  /** Story mode: clicking a stop switches the chat on the right to that stop's person. */
+  onSelect?: (id: CheckpointId) => void;
 }) {
   const { profile, update } = useProfile();
   const { transcripts } = usePlanning();
-  const responsive = useLayout();
-  const layout: Layout = embedded ? "wide" : responsive;
   const sections = completeness(profile).sections;
   const academicStarted = academicHistoryStatus(profile, transcripts).started;
   const journey = useMemo(() => computeJourney(profile, sections, academicStarted), [profile, sections, academicStarted]);
@@ -62,38 +91,45 @@ export function JourneyMap({
   const [open, setOpen] = useState<number | null>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
 
-  // Walk the player from the last checkpoint they saw to the current one.
+  // When a stage is completed since the student last looked, draw the new stretch of route.
+  // Progress itself always comes from computeJourney.
   const seenKey = userKey(userId, "ucMapSeen");
-  const [shown, setShown] = useState(() => Math.min(readJSON(seenKey, current), current));
-  const [pose, setPose] = useState<Pose>("idle");
+  const reached = finished ? checkpoints.length : current;
+  const [arrived, setArrived] = useState<{ from: number; to: number } | null>(null);
+  const lastSeen = useRef(Math.min(readJSON(seenKey, reached), reached));
   useEffect(() => {
-    writeJSON(seenKey, current);
-    if (shown === current) return;
-    if (reducedMotion()) {
-      setShown(current);
-      return;
-    }
-    let frame = 0;
-    const id = window.setInterval(() => setPose(++frame % 2 ? "run-a" : "run-b"), 140);
-    const raf = requestAnimationFrame(() => setShown(current));
-    const done = window.setTimeout(() => {
-      window.clearInterval(id);
-      setPose("jump");
-      window.setTimeout(() => setPose("idle"), 260);
-    }, WALK_MS);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.clearInterval(id);
-      window.clearTimeout(done);
-    };
-  }, [current, seenKey]);
+    writeJSON(seenKey, reached);
+    const from = lastSeen.current;
+    lastSeen.current = reached;
+    if (reached <= from || reducedMotion()) return;
+    setArrived({ from, to: reached });
+    const done = window.setTimeout(() => setArrived(null), ARRIVE_MS);
+    return () => window.clearTimeout(done);
+  }, [reached, seenKey]);
 
-  const { w, h, nodes } = LAYOUTS[layout];
-  const pct = (x: number, y: number) => ({
-    left: `${(x / w) * 100}%`,
-    top: `${(y / h) * 100}%`,
-  });
-  const [px, py] = nodes[Math.min(shown, nodes.length - 1)] ?? nodes[0];
+  // Story mode always shows whose chat is open: the clicked stop, else the current chapter's.
+  const active = onSelect ? (selected ?? checkpoints[finished ? checkpoints.length - 1 : current].id) : null;
+
+  // Wide: six campus buildings in a straight line from the start pad on the left to the flag
+  // on the right. Narrow: a vertical list with labels beside each building.
+  const [fitRef, box] = useBoxSize<HTMLDivElement>();
+  const layout = mapLayout(box.width);
+  const planet = layout === "tall" ? 72 : box.width >= 640 ? 96 : box.width >= 480 ? 72 : 48;
+
+  // The route runs through the buildings' measured centres, from the start pad to the flag.
+  const skyRef = useRef<HTMLDivElement>(null);
+  const [points, setPoints] = useState<Pt[]>([]);
+  useLayoutEffect(() => {
+    const sky = skyRef.current;
+    if (!sky) return;
+    const origin = sky.getBoundingClientRect();
+    const next = [...sky.querySelectorAll<HTMLElement>("[data-anchor]")].map((el) => {
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2 - origin.left), y: Math.round(r.top + r.height / 2 - origin.top) };
+    });
+    setPoints((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+  }, [layout, planet, box.width, box.height]);
+  const legs = useMemo(() => routeLegs(points), [points]);
 
   const setJourney = useCallback((change: (j: UcJourneyState) => UcJourneyState) => update((p) => ({ ...p, ucJourney: change(journeyOf(p)) })), [update]);
 
@@ -102,51 +138,115 @@ export function JourneyMap({
     opener.current?.focus();
   }, []);
 
+  const openChapter = (i: number, from: HTMLButtonElement) => {
+    opener.current = from;
+    setOpen(i);
+  };
+
   const progress = (
     <div className="jm-overall" aria-live="polite">
-      <strong>{completeCount} of 5 checkpoints complete</strong>
+      <strong>
+        {completeCount} of {checkpoints.length} checkpoints complete
+      </strong>
       <span className="jm-bar" aria-hidden="true">
-        <span style={{ width: `${(completeCount / 5) * 100}%` }} />
+        <span style={{ width: `${(completeCount / checkpoints.length) * 100}%` }} />
       </span>
     </div>
   );
 
   const mapBoard = (
-    <div className={`jm-map jm-map-${layout}`} style={{ aspectRatio: `${w} / ${h}` }}>
-      <MapScene layout={layout} ids={checkpoints.map((c) => c.id)} lit={checkpoints.map((c) => c.complete)} />
-      <div className={`jm-player jm-pose-${pose}`} style={pct(px - 9, py)} aria-hidden="true">
-        <img src="/journey/player.png" alt="" width={28} height={44} draggable={false} />
-      </div>
-      <ol className="jm-nodes" aria-label="Checkpoints">
-        {checkpoints.map((c, i) => {
-          const state = c.complete ? "complete" : i === current ? "current" : "upcoming";
-          const [x, y] = nodes[i];
-          return (
-            <li key={c.id} className={`jm-node jm-node-${state} jm-label-${layout === "tall" ? (x < w / 2 ? "right" : "left") : "below"}`} style={pct(x, y)}>
-              <button
-                onClick={(e) => {
-                  opener.current = e.currentTarget;
-                  setOpen(i);
-                }}
-                aria-label={`Checkpoint ${i + 1}: ${c.title}. ${state === "complete" ? "Complete" : state === "current" ? "Current" : "Upcoming"}. ${c.summary}.`}
-              >
-                <span className="jm-node-dot" aria-hidden="true">
-                  {state === "complete" ? <CheckIcon width={14} height={14} /> : state === "current" ? "★" : i + 1}
-                </span>
-                <span className="jm-node-text">
-                  <span className="jm-node-title">{c.title}</span>
-                  <span className="jm-node-meta">
-                    <span className={`jm-state jm-state-${state}`}>
-                      {state === "complete" ? "Complete" : state === "current" ? "You are here" : "Upcoming"}
+    <div className="jm-sky-fit" data-layout={layout} ref={fitRef}>
+      {box.width > 0 && (
+        <span className="jm-stars" aria-hidden="true">
+          {DETAILS.map(([left, top, kind], i) => (
+            <span key={i} data-kind={kind} style={{ left: `${left}%`, top: `${top}%`, "--px": `${planet / GRID}px` } as CSSProperties}>
+              <PixelArt rows={DETAIL_ART[kind]} fill={DETAIL_FILL[kind]} />
+            </span>
+          ))}
+        </span>
+      )}
+      {box.width > 0 && (
+        <div
+          className="jm-sky"
+          ref={skyRef}
+          style={{ "--planet": `${planet}px`, "--px": `${planet / GRID}px` } as CSSProperties}
+        >
+          <svg className="jm-route" aria-hidden="true">
+            {/* Leg i runs from building i to building i + 1; Basic info is the start. */}
+            {legs.map((d, i) => (
+              <path key={`base-${i}`} d={d} className="jm-route-base" />
+            ))}
+            {legs.map((d, i) =>
+              i < reached ? (
+                <path
+                  key={`lit-${i}`}
+                  d={d}
+                  pathLength={1}
+                  className={`jm-route-lit${arrived && i >= arrived.from && i < arrived.to ? " is-drawing" : ""}`}
+                />
+              ) : null,
+            )}
+          </svg>
+
+          {layout === "wide" && <DeadlineSign profile={profile} />}
+
+          <ol className="jm-stops" aria-label="Checkpoints">
+            {checkpoints.map((c, i) => {
+              const state = c.complete ? "complete" : i === current && !finished ? "current" : "upcoming";
+              const person = mentorById(STAGE_GUIDE[c.id]);
+              const isActive = active === c.id;
+              const status = state === "complete" ? "Done" : state === "current" ? "You're here" : i === current + 1 ? "Up next" : "Later";
+              return (
+                <li
+                  key={c.id}
+                  className={`jm-stop jm-stop-${state}${isActive ? " is-selected" : ""}`}
+                >
+                  <button
+                    type="button"
+                    className="jm-planet-btn"
+                    onClick={(e) => (onSelect ? onSelect(c.id) : openChapter(i, e.currentTarget))}
+                    aria-pressed={onSelect ? isActive : undefined}
+                    aria-label={`${MAP_LABEL[c.id]}, chapter ${i + 1}: ${status}. ${onSelect ? `Talk to ${person.name}.` : "Open chapter."}`}
+                  >
+                    <span className="jm-orbit" aria-hidden="true" />
+                    <span className="jm-planet-art" data-anchor>
+                      <svg viewBox={`0 0 ${GRID} ${GRID}`} shapeRendering="crispEdges" className="jm-planet" aria-hidden="true">
+                        {ART[c.id].map((r) => (
+                          <rect key={`${r.x}-${r.y}`} x={r.x} y={r.y} width={r.w} height={1} fill={r.fill} />
+                        ))}
+                      </svg>
                     </span>
-                    {c.summary}
+                    {state === "current" && (
+                      <span className="jm-here" aria-hidden="true">
+                        <PixelArt rows={HERE_MARK} fill="var(--cn-gold)" />
+                      </span>
+                    )}
+                    {state === "complete" && (
+                      <span className="jm-done-badge" aria-hidden="true">
+                        <PixelArt rows={CHECK_BADGE} />
+                      </span>
+                    )}
+                  </button>
+                  <span className="jm-label">
+                    <strong aria-hidden="true">{MAP_LABEL[c.id]}</strong>
+                    <small aria-hidden="true">
+                      <span>{status}</span>
+                    </small>
+                    {/* Story mode: the selected chapter offers its full to-do list. */}
+                    {onSelect && isActive && (
+                      <button type="button" className="jm-explore" onClick={(e) => openChapter(i, e.currentTarget)}>
+                        See tasks
+                        <span className="jm-sr"> for {MAP_LABEL[c.id]}</span>
+                        <ArrowRightIcon width={12} height={12} aria-hidden="true" />
+                      </button>
+                    )}
                   </span>
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ol>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      )}
     </div>
   );
 
@@ -167,12 +267,15 @@ export function JourneyMap({
       )}
 
       <div className="jm-scroll">
-        {embedded && <div className="jm-embedded-head">{progress}</div>}
         {mapBoard}
-        {finished && <p className="jm-finished">🎓 You've recorded your UC application as submitted. Keep an eye on your follow-ups in Review &amp; Apply.</p>}
+        {finished && (
+          <p className="jm-finished">
+            You've submitted your UC application and your financial aid application. Keep an eye on your follow-ups in Review &amp; Apply.
+          </p>
+        )}
       </div>
 
-      {/* Portaled to <body> so it sits above everything; inside Story mode the map lives in a stacking context below the mode switch, which covered the close button. */}
+      {/* Portaled to <body> so it sits above everything, including Story mode's stacking contexts. */}
       {open !== null &&
         createPortal(
           <CheckpointPanel
@@ -187,6 +290,68 @@ export function JourneyMap({
           document.body,
         )}
     </div>
+  );
+}
+
+/** A small sign over the map: days left until the UC deadline. */
+function DeadlineSign({ profile }: { profile: Profile }) {
+  const days = daysUntilUcDeadline(profile);
+  return (
+    <div className="jm-sign" role="note" aria-label={days < 0 ? "The UC application deadline has passed" : days === 0 ? "UC application due today" : `${days} days left to apply`}>
+      <div className={`jm-sign-board${days <= 7 && days >= 0 ? " is-urgent" : ""}`} aria-hidden="true">
+        <span className="jm-sign-head">UC app · Fall {entryYear(profile)}</span>
+        <span className="jm-sign-count">
+          {days > 0 ? (
+            <>
+              <strong>{days}</strong> day{days === 1 ? "" : "s"} left
+            </>
+          ) : (
+            <strong className="is-text">{days < 0 ? "Closed" : "Due today"}</strong>
+          )}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Small pixel sprites: "#" is outline ink, "o" the fill colour, "g" green, "w" cream. */
+const HERE_MARK = ["#######", "#ooooo#", ".#ooo#.", "..#o#..", "...#..."];
+/** Background details: faint sparkles in the sky band, grass tufts along the bottom. */
+/** Background details: barely-there leaves, book outlines, and tiny sparkles near the edges. */
+const DETAIL_ART = {
+  sparkle: [".o.", "ooo", ".o."],
+  dot: ["o"],
+  leaf: ["..oo", ".ooo", "ooo.", "o..."],
+  book: [".oo.oo.", "o..o..o", "o..o..o", "ooooooo"],
+};
+const DETAIL_FILL: Record<keyof typeof DETAIL_ART, string> = {
+  sparkle: "var(--cn-gold)",
+  dot: "var(--cn-gold)",
+  leaf: "var(--cn-sage-deep)",
+  book: "var(--cn-route-deep)",
+};
+/** Positions (% of the map box), kept to the corners and edges, clear of the buildings and labels. */
+const DETAILS: [number, number, keyof typeof DETAIL_ART][] = [
+  [3, 7, "leaf"],
+  [17, 5, "dot"],
+  [41, 8, "sparkle"],
+  [66, 5, "book"],
+  [93, 9, "dot"],
+  [2, 94, "book"],
+  [31, 94, "sparkle"],
+  [73, 93, "leaf"],
+  [95, 86, "dot"],
+];
+const CHECK_BADGE = ["#######", "#ggggg#", "#ggggw#", "#gggwg#", "#wgwgg#", "#gwggg#", "#######"];
+
+function PixelArt({ rows, fill = "var(--cn-sage-deep)" }: { rows: string[]; fill?: string }) {
+  const colour: Record<string, string> = { "#": "#232a3a", o: fill, g: "#3f7a55", w: "#fbf6e8" };
+  return (
+    <svg viewBox={`0 0 ${rows[0].length} ${rows.length}`} shapeRendering="crispEdges" style={{ width: `calc(var(--px) * ${rows[0].length})` }}>
+      {rows.flatMap((row, y) =>
+        [...row].map((ch, x) => (colour[ch] ? <rect key={`${x}-${y}`} x={x} y={y} width={1} height={1} fill={colour[ch]} /> : null)),
+      )}
+    </svg>
   );
 }
 
@@ -328,7 +493,7 @@ function CheckpointPanel({ checkpoint: c, index, state, profile, update, setJour
             </>
           )}
 
-          {c.id === "essays" && <PiqPicker journey={j} setJourney={setJourney} onOpenTool={() => go("materials", "essays")} />}
+          {c.id === "essays" && <PiqPicker journey={j} setJourney={setJourney} onOpenTool={() => go("profile", "essays")} />}
 
           {c.id === "review" && <ReviewPanel journey={j} setJourney={setJourney} />}
         </div>
@@ -338,15 +503,22 @@ function CheckpointPanel({ checkpoint: c, index, state, profile, update, setJour
 }
 
 function CampusPicker({ profile, update }: { profile: Profile; update: PanelProps["update"] }) {
-  const listId = "jm-majors";
   return (
     <div className="jm-campuses">
-      <p className="jm-note">Pick the campuses you'll apply to and your intended major at each. These save to your college list.</p>
-      <datalist id={listId}>
-        {profile.goals.majors.map((m) => (
-          <option key={m} value={m} />
+      <p className="jm-note">Pick the campuses you'll apply to and one intended major for all of them.</p>
+      <select
+        className="jm-input jm-major"
+        value={profile.goals.intendedMajor}
+        aria-label="Intended major (all UC campuses)"
+        onChange={(e) => update((p) => ({ ...p, goals: { ...p.goals, intendedMajor: e.target.value } }))}
+      >
+        <option value="">Intended major…</option>
+        {MAJOR_CHOICES.map((m) => (
+          <option key={m} value={m}>
+            {m}
+          </option>
         ))}
-      </datalist>
+      </select>
       <ul>
         {COLLEGES.map((college) => {
           const saved = profile.colleges.find((c) => c.name.toLowerCase() === college.name.toLowerCase());
@@ -367,16 +539,6 @@ function CampusPicker({ profile, update }: { profile: Profile; update: PanelProp
               >
                 <ExternalIcon width={13} height={13} />
               </a>
-              {saved && (
-                <input
-                  className="jm-input"
-                  list={listId}
-                  value={saved.major ?? ""}
-                  placeholder="Intended major"
-                  aria-label={`Intended major at ${college.name}`}
-                  onChange={(e) => update((p) => setCampusMajor(p, college.name, e.target.value))}
-                />
-              )}
             </li>
           );
         })}

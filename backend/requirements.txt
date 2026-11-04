@@ -1,29 +1,20 @@
 # Web server
 fastapi==0.109.2
 uvicorn[standard]==0.32.1
-gunicorn
 
-# RAG / embeddings
-qdrant-client==1.11.3
-pysqlite3-binary
-torch --index-url https://download.pytorch.org/whl/cpu
-sentence-transformers
-transformers
-
-# HTTP + async utils
+# HTTP + env
 requests>=2.32.2
-aiohttp
-certifi
-yarl
 python-dotenv==1.0.1
 
-# Web scraping
-beautifulsoup4
-lxml
+# Transcript / PDF support
 pypdf
-
-# Chunking
-tiktoken
 
 # Pydantic pin for compatibility
 pydantic==2.13.2
+
+# Agentic mode: drives the UC application in a visible browser (then: python -m playwright install chromium)
+playwright
+# Cloud mode attaches the same script to a Browserbase session (BROWSERBASE_API_KEY); no extra package needed.
+
+# Text-to-speech
+elevenlabs==2.75.0

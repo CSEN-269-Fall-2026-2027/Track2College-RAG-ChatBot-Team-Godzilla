@@ -7,8 +7,7 @@ import { ChatIcon, FileIcon, Logo, LogoutIcon, MoonIcon, RetryIcon, SunIcon, Use
 import { ResetDataDialog } from "./ResetDataDialog";
 
 const LINKS: { route: Route; label: string; Icon: typeof FileIcon }[] = [
-  { route: "advisor", label: "Advisor", Icon: ChatIcon },
-  { route: "materials", label: "Materials", Icon: FileIcon },
+  { route: "advisor", label: "Chatbot", Icon: ChatIcon },
   { route: "profile", label: "Profile", Icon: UserIcon },
 ];
 
@@ -19,7 +18,7 @@ interface AppTopbarProps {
   onToggleTheme: () => void;
 }
 
-/** Shared top nav for Advisor, Materials, and Profile. */
+/** Shared top nav for Chatbot (the Advisor route) and Profile. */
 export const AppTopbar = memo(function AppTopbar({ route, health, theme, onToggleTheme }: AppTopbarProps) {
   const { account, signOut } = useAuth();
   const { profile } = useProfile();
@@ -42,6 +41,7 @@ export const AppTopbar = memo(function AppTopbar({ route, health, theme, onToggl
     };
   }, [menuOpen]);
 
+  const links = LINKS;
   const name = profile.basics.firstName || account?.name || "";
   const initials = (name.trim()[0] ?? "?").toUpperCase() + (profile.basics.lastName.trim()[0] ?? "").toUpperCase();
 
@@ -53,11 +53,11 @@ export const AppTopbar = memo(function AppTopbar({ route, health, theme, onToggl
           <span>Track2College</span>
         </a>
         <nav className="app-nav" aria-label="App sections">
-          {LINKS.map(({ route: target, label, Icon }) => {
+          {links.map(({ route: target, label, Icon }) => {
             const active = route === target;
             return (
               <a
-                key={target}
+                key={label}
                 href={href(target)}
                 className={active ? "on" : undefined}
                 aria-current={active ? "page" : undefined}

@@ -142,7 +142,7 @@ export function OnboardingPage({ theme, onToggleTheme, onFinished }: OnboardingP
       return;
     }
     setFinishedAnim(true);
-    // Route to Advisor before marking complete so the gated app doesn't open Materials on an empty hash.
+    // Route to Advisor before marking complete so the gated app doesn't open on an empty hash.
     onFinished();
     update((p) => markComplete(p));
   };
