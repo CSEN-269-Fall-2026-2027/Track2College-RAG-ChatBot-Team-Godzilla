@@ -10,6 +10,7 @@ to UC's 350-word limit.
 
 import re
 import time
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 
 from query import _call_groq, last_failure
@@ -151,7 +152,29 @@ RULES:
    it shaped them. Keep the focus on the student.
 6. Length: between {MIN_WORDS} and {WORD_LIMIT} words. UC rejects anything over {WORD_LIMIT} words.
 7. Output ONLY the essay text as plain paragraphs. No preface, no notes, no word count.
+8. UC's application rejects special characters. NEVER use a hyphen (-), an em dash, or an en dash, even in
+   compound words: write "first generation" and "part time", or reword the sentence. Use only plain English
+   letters, numbers, spaces and these marks: . , ! ? ' ; : ( ). No curly quotes, symbols, emoji or accented letters.
 """
+
+_DASHES = "\u2010\u2011\u2012\u2013\u2014\u2015\u2212"
+_REPLACEMENTS = str.maketrans(
+    {"\u2018": "'", "\u2019": "'", "\u201c": "", "\u201d": "", '"': "", "\u2026": "...", "\u00a0": " ", "&": " and ", "%": " percent"}
+)
+
+
+def _plain_characters(text: str) -> str:
+    """The model can miss rule 8, and UC refuses the whole answer over one character, so this makes sure."""
+    text = unicodedata.normalize("NFKD", text).translate(_REPLACEMENTS)
+    dash = f"[-{_DASHES}]"
+    text = re.sub(rf"(\d)\s*{dash}\s*(\d)", r"\1 to \2", text)  # 10-12 → 10 to 12
+    text = re.sub(rf"(\w){dash}(\w)", r"\1 \2", text)  # first-generation → first generation
+    text = re.sub(rf"\s*{dash}+\s*", ", ", text)  # a pause in a sentence → a comma
+    text = re.sub(r"[^A-Za-z0-9 \n.,!?';:()]", "", text)
+    text = re.sub(r"^[ ,]+|[ ,]+$", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\s+([.,!?;:])", r"\1", text)
+    text = re.sub(r",([.,!?;:])", r"\1", text)
+    return re.sub(r" {2,}", " ", text).strip()
 
 
 def word_count(text: str) -> int:
@@ -163,7 +186,7 @@ def _clean(text: str) -> str:
     # Drop a leading "Title:"/"Essay:" style label or trailing word-count note if the model adds one.
     text = re.sub(r"^(title|essay|response)\s*:.*\n+", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\n+\(?\s*word count[^\n]*$", "", text, flags=re.IGNORECASE)
-    return text.strip()
+    return _plain_characters(text)
 
 
 def _trim_to_limit(text: str, limit: int = WORD_LIMIT) -> str:

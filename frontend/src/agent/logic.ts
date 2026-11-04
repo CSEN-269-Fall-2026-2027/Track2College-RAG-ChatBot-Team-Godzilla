@@ -22,7 +22,44 @@ export function agentOf(profile: Profile): AgentState {
 
 export function setAgent(profile: Profile, change: (a: AgentState) => AgentState): Profile {
   const journey = journeyOf(profile);
-  return { ...profile, ucJourney: { ...journey, agent: change(journey.agent ?? {}) } };
+  const agent = journey.agent ?? {};
+  const next = change(agent);
+  return next === agent ? profile : { ...profile, ucJourney: { ...journey, agent: next } };
+}
+
+export const sameEmail = (a?: string, b?: string) => (a ?? "").trim().toLowerCase() === (b ?? "").trim().toLowerCase();
+
+/**
+ * What one look at a UC run adds to the saved login. Each milestone is saved once, so the next visit
+ * continues from it, and the same state comes back when nothing is new, so nothing is written.
+ * A login is only saved once UC has accepted it: `created` means UC took the new account, or the
+ * sign-in worked.
+ */
+export function withUcRunProgress(
+  a: AgentState,
+  run: { status: string; created: boolean; verified: boolean; setup: boolean; about: boolean; piq: boolean },
+  login: { email: string; password: string } | null,
+  now: number,
+): AgentState {
+  const accepted = run.created ? login : null;
+  const current = a.ucAccount;
+  const isCurrent = !login || sameEmail(current?.email, login.email);
+  const uc = isCurrent && current ? current : accepted ? { email: accepted.email, generatedAt: now } : null;
+  if (!uc) return a;
+  const next = {
+    ...uc,
+    ...(accepted ? { email: accepted.email, password: accepted.password } : {}),
+    createdAt: uc.createdAt ?? (run.created ? now : undefined),
+    verifiedAt: uc.verifiedAt ?? (run.verified ? now : undefined),
+    setupAt: uc.setupAt ?? (run.setup ? now : undefined),
+    aboutAt: uc.aboutAt ?? (run.about ? now : undefined),
+    piqAt: uc.piqAt ?? (run.piq ? now : undefined),
+    signedInAt: uc.signedInAt ?? (run.status === "signed_in" ? now : undefined),
+  };
+  const same =
+    current === uc &&
+    (["email", "password", "createdAt", "verifiedAt", "setupAt", "aboutAt", "piqAt", "signedInAt"] as const).every((k) => next[k] === uc[k]);
+  return same ? a : { ...a, ucAccount: next };
 }
 
 export function agentTasks(profile: Profile): AgentTask[] {
@@ -48,34 +85,6 @@ export function agentTasks(profile: Profile): AgentTask[] {
 /** One answer for "is the FAFSA / CA Dream Act in?": the Financial Aid step's, or the old Apply page's flag. */
 export function fafsaSubmitted(profile: Profile): boolean {
   return profile.preferences.fafsa === "done" || !!agentOf(profile).fafsaDoneAt;
-}
-
-/** UC's allowed special characters; UC needs 8–30 characters and three of four kinds. */
-const UC_SPECIALS = "!@#$%^&*+<>?.-";
-
-/**
- * A 16-character password that meets UC's rules with all four kinds of character.
- * Look-alike characters (O/0, l/1/I) are left out so it's easy to copy by hand.
- */
-export function generateUcPassword(random: (n: number) => number = secureRandom) {
-  const sets = ["abcdefghijkmnpqrstuvwxyz", "ABCDEFGHJKLMNPQRSTUVWXYZ", "23456789", UC_SPECIALS];
-  const all = sets.join("");
-  const chars = sets.map((set) => set[random(set.length)]);
-  while (chars.length < 16) chars.push(all[random(all.length)]);
-  for (let i = chars.length - 1; i > 0; i--) {
-    const j = random(i + 1);
-    [chars[i], chars[j]] = [chars[j], chars[i]];
-  }
-  return chars.join("");
-}
-
-/** Uniform random integer in [0, n) from the browser's crypto source. */
-function secureRandom(n: number) {
-  const limit = Math.floor(0x1_0000_0000 / n) * n;
-  const buf = new Uint32Array(1);
-  do crypto.getRandomValues(buf);
-  while (buf[0] >= limit);
-  return buf[0] % n;
 }
 
 /** Opens Gmail's compose window in the given account with everything filled in; the student clicks Send. */

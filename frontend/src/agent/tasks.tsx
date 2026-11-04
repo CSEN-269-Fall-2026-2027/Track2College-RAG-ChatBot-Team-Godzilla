@@ -22,7 +22,7 @@ import {
 import { useAuth } from "../auth";
 import { getStore } from "../data";
 import { VoiceCounselor } from "./VoiceCounselor";
-import { generateUcPassword, gmailComposeUrl, mailtoUrl, entryYear, ucDeadlineDate } from "./logic";
+import { gmailComposeUrl, mailtoUrl, entryYear, sameEmail, ucDeadlineDate, withUcRunProgress } from "./logic";
 import { CheckIcon, CopyIcon, ExternalIcon, EyeIcon, MailIcon, RetryIcon, UserIcon, XIcon } from "../components/icons";
 import { PIQ_PROMPTS } from "../journey/logic";
 import { chosenPiqs, piqWorkOf } from "../journey/piqs";
@@ -311,7 +311,6 @@ export function SchoolCounselor({ agent, change }: TaskProps) {
           <label className="field">
             <span className="field-label">Message</span>
             <textarea rows={10} value={draft.body} onChange={(e) => change((a) => ({ ...a, counselorEmail: { ...draft, body: e.target.value } }))} />
-            <span className="field-hint">Edit anything you like. It opens in Gmail exactly like this, and you click Send.</span>
           </label>
           <div className="agent-actions">
             <a className="btn-primary" href={gmailComposeUrl(counselor.email, draft.subject, draft.body)} target="_blank" rel="noreferrer" onClick={opened}>
@@ -358,9 +357,18 @@ function CounselorSteps({ at }: { at: number }) {
 
 const UC_LOGIN_URL = "https://apply.universityofcalifornia.edu/my-application/login";
 
-const UC_RESET_URL = "https://apply.universityofcalifornia.edu/my-application/resetPassword";
 
 const EMAIL_OK = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/** The UC login from the side panel, before UC has accepted it. */
+export interface UcLoginDraft {
+  email: string;
+  password: string;
+}
+
+// The login of the run in progress (in memory only), so it can be saved once UC accepts it, even if
+// the popup was closed and reopened while the run was going.
+let runLogin: { email: string; password: string } | null = null;
 
 /**
  * Creates (or signs in to) the student's UC application account. The backend opens UC in a
@@ -370,10 +378,13 @@ const EMAIL_OK = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 export function UcAccountTask({
   agent,
   change,
+  login,
   browser = "cloud",
   onBusyChange,
   onRunBrowser,
 }: TaskProps & {
+  /** The login from the side panel (UcLogin). */
+  login: UcLoginDraft | null;
   /** A run that was already open when the popup opened: the popup's switch follows its mode. */
   onRunBrowser?: (browser: UcBrowser) => void;
   /** Where the next run's browser starts (the popup's Local / Cloud switch). */
@@ -383,15 +394,14 @@ export function UcAccountTask({
 }) {
   const { account } = useAuth();
   const { profile } = useProfile();
-  const saved = agent.ucAccount;
-  const [email, setEmail] = useState(saved?.email ?? account?.email ?? "");
+  // A login already in the profile for this email: UC has it, so runs sign in and never create.
+  const saved = login && sameEmail(agent.ucAccount?.email, login.email) ? agent.ucAccount : undefined;
   const [run, setRun] = useState<UcRun | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const runId = useRef<string | null>(null);
   const changeRef = useRef(change);
   changeRef.current = change;
-
   // Reopening the popup: reconnect to a UC window that's still open (it may be using cloud time).
   const onRunBrowserRef = useRef(onRunBrowser);
   onRunBrowserRef.current = onRunBrowser;
@@ -417,23 +427,7 @@ export function UcAccountTask({
         const next = await ucAccountStatus(id, controller.signal);
         if (runId.current !== id) return;
         setRun(next);
-        // Save each milestone once, so the next visit continues from it.
-        changeRef.current((a) => {
-          const uc = a.ucAccount;
-          if (!uc) return a;
-          const now = Date.now();
-          const nextUc = {
-            ...uc,
-            createdAt: uc.createdAt ?? (next.created ? now : undefined),
-            verifiedAt: uc.verifiedAt ?? (next.verified ? now : undefined),
-            setupAt: uc.setupAt ?? (next.setup ? now : undefined),
-            aboutAt: uc.aboutAt ?? (next.about ? now : undefined),
-            piqAt: uc.piqAt ?? (next.piq ? now : undefined),
-            signedInAt: next.status === "signed_in" ? now : uc.signedInAt,
-          };
-          const same = (["createdAt", "verifiedAt", "setupAt", "aboutAt", "piqAt", "signedInAt"] as const).every((k) => nextUc[k] === uc[k]);
-          return same ? a : { ...a, ucAccount: nextUc };
-        });
+        changeRef.current((a) => withUcRunProgress(a, next, runLogin, Date.now()));
       } catch (e) {
         if (!controller.signal.aborted) {
           setError(message(e));
@@ -448,11 +442,13 @@ export function UcAccountTask({
   }, [run]);
 
   // The last start, so Retry can repeat it.
-  const lastLaunch = useRef<{ mode: "login" | "create"; creds: { email: string; password: string } } | null>(null);
+  const launched = useRef(false);
 
   const launch = async (mode: "login" | "create", creds: { email: string; password: string }) => {
     setError(null);
-    lastLaunch.current = { mode, creds };
+    launched.current = true;
+    setStopping(false);
+    runLogin = creds;
     const starting: UcRun = {
       status: "opening",
       detail: browser === "cloud" ? "Starting cloud browser…" : "Opening the UC application…",
@@ -481,8 +477,8 @@ export function UcAccountTask({
         creds.password,
         mode,
         { ...ucFacts(profile, account?.name ?? ""), ...(await personalFacts(account?.id)) },
-        !!agent.ucAccount?.aboutAt,
-        !!(agent.ucAccount?.verifiedAt || agent.ucAccount?.signedInAt),
+        !!saved?.aboutAt,
+        !!(saved?.verifiedAt || saved?.signedInAt),
         ucPiqs(profile),
         browser,
       );
@@ -496,14 +492,15 @@ export function UcAccountTask({
     }
   };
 
-  const retry = () => {
-    if (lastLaunch.current) void launch(lastLaunch.current.mode, lastLaunch.current.creds);
-  };
-
-  const createAccount = () => {
-    const creds = { email: email.trim(), password: generateUcPassword() };
-    change((a) => ({ ...a, ucAccount: { ...creds, generatedAt: Date.now() } }));
-    launch("create", creds);
+  // Runs with the login from the side panel. If the profile already has this email, sign in;
+  // otherwise create the account (the server signs in if UC refuses).
+  const runIt = () => {
+    if (!login) return;
+    if (!login.password) {
+      setError("Add your UC password on the left, then run again.");
+      return;
+    }
+    void launch(saved ? "login" : "create", { email: login.email, password: login.password });
   };
 
   const sendCode = async (event: FormEvent) => {
@@ -524,11 +521,15 @@ export function UcAccountTask({
     onBusyChange?.(busy);
   }, [busy, onBusyChange]);
 
+  // Set before the session ends: a live view left on screen shows a DevTools "connection closed" box.
+  const [stopping, setStopping] = useState(false);
   const stop = async () => {
     if (!runId.current) return;
+    setStopping(true);
     try {
       await cancelUcAccount(runId.current);
     } catch (e) {
+      setStopping(false);
       setError(message(e));
     }
   };
@@ -536,146 +537,153 @@ export function UcAccountTask({
   const [closing, setClosing] = useState(false);
   const closeCloud = async () => {
     setClosing(true);
+    setStopping(true);
     setError(null);
     try {
       await closeCloudBrowsers();
     } catch (e) {
+      setStopping(false);
       setError(message(e));
     } finally {
       setClosing(false);
     }
   };
 
-  const cloudPanel = browser === "cloud" && (
-    <CloudBrowserPanel
-      run={run?.browser === "cloud" ? run : null}
-      onRetry={lastLaunch.current ? retry : null}
-      onClose={closeCloud}
-      closing={closing || run?.detail === "Stopping…"}
-    />
-  );
   const errorBox = error && (
     <p className="form-error" role="alert">
       {error}
     </p>
   );
 
-  // No UC login saved under this Track2College account yet: make one.
-  if (!saved) {
-    return (
-      <div className="agent-step">
-        <p className="agent-lead">
-          We'll open the official UC application {browser === "cloud" ? "in a cloud browser" : "on this computer"}, make you a strong password, and fill in UC's sign-up form. You just agree
-          to UC's terms and click Create account.
+  // UC's one-time code goes straight to the open window and is never saved.
+  const codePopup = run?.open && (run.status === "needs_code" || run.status === "checking_code") && (
+    <div className="cloud-browser-popup-backdrop">
+      <form className="cloud-browser-popup" role="dialog" aria-modal="true" aria-labelledby="uc-code-title" onSubmit={sendCode}>
+        <h3 id="uc-code-title">Please enter your verification code</h3>
+        <p>
+          UC sent it to your email{login ? <> at <strong>{login.email}</strong></> : null}. Check your spam folder if you don't see it.
         </p>
-        <label className="field">
-          <span className="field-label">Email for your UC account</span>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
-          <span className="field-hint">Use an email you'll check through senior year. UC sends every update here.</span>
-        </label>
-        <div className="agent-actions">
-          <button type="button" className="btn-primary" onClick={createAccount} disabled={!EMAIL_OK.test(email.trim())}>
-            <UserIcon width={16} height={16} /> Create my UC account
-          </button>
-        </div>
+        {run.detail.startsWith("UC didn't accept") && (
+          <p className="form-error" role="alert">
+            {run.detail}
+          </p>
+        )}
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value.replace(/\s/g, ""))}
+          aria-label="Verification code"
+          placeholder="e.g. 123456"
+          autoComplete="one-time-code"
+          maxLength={10}
+          autoFocus
+          disabled={run.status === "checking_code"}
+        />
+        <button type="submit" className="btn-primary" disabled={code.length < 4 || run.status === "checking_code"}>
+          {run.status === "checking_code" ? "Checking your code…" : "Enter code"}
+        </button>
         {errorBox}
+      </form>
+    </div>
+  );
+
+  const cloudPanel = browser === "cloud" && (
+    <CloudBrowserPanel
+      popup={codePopup}
+      run={run?.browser === "cloud" ? run : null}
+      onRetry={launched.current ? runIt : null}
+      onClose={closeCloud}
+      closing={closing || (stopping && !!run?.open) || run?.detail === "Stopping…"}
+    />
+  );
+
+  const localComputer = browser === "local" && <img className="uc-local-computer" src="/computer.png" alt="" />;
+
+  // No login yet: the student adds one in the side panel (UcLogin).
+  if (!login) {
+    return (
+      <div className={`agent-step${browser === "local" ? " uc-local-step" : ""}`}>
+        {localComputer}
+        {browser === "local" && (
+          <div className="uc-tumbleweed-track" aria-hidden="true">
+            <img className="uc-tumbleweed" src="/tumbleweed.png" alt="" />
+          </div>
+        )}
+        {browser === "local" ? <div className="uc-local-below">{errorBox}</div> : errorBox}
         {cloudPanel}
       </div>
     );
   }
 
-  const done = !!(saved.verifiedAt || saved.signedInAt);
-  // Once UC has the account, signing in always picks up wherever the student left off there.
-  const exists = !!(saved.createdAt || done);
+  // Cloud runs report their status in the browser panel instead.
+  const runStatus = run && run.browser !== "cloud" && <UcRunStatus run={run} />;
+  const codeForm = run?.open && run.browser !== "cloud" && run.status === "needs_code" && (
+    <form className="uc-code" onSubmit={sendCode}>
+      <label className="field">
+        <span className="field-label">Verification code from UC</span>
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value.replace(/\s/g, ""))}
+          placeholder="e.g. 123456"
+          autoComplete="one-time-code"
+          maxLength={10}
+          autoFocus
+        />
+        <span className="field-hint">Check {login.email} (and your spam folder) for an email from UC.</span>
+      </label>
+      <button type="submit" className="btn-primary" disabled={code.length < 4}>
+        Enter code
+      </button>
+    </form>
+  );
+  const stopButton = busy && (
+    <button type="button" className="btn-ghost" onClick={stop} disabled={run?.detail === "Stopping…"}>
+      Stop
+    </button>
+  );
+  const doItYourself = (
+    <p className="field-hint agent-diy">
+      Prefer to do it yourself?{" "}
+      <a href={UC_LOGIN_URL} target="_blank" rel="noreferrer">
+        Open the UC application
+      </a>
+      .
+    </p>
+  );
+
+  // Local: the computer stays centered and the button stays put; run messages only grow below them.
+  if (browser === "local") {
+    return (
+      <div className="agent-step uc-local-step">
+        {localComputer}
+        <div className="uc-local-below">
+          <div className="agent-actions">
+            <button type="button" className="btn-primary uc-run-big" onClick={runIt} disabled={busy}>
+              <ExternalIcon width={18} height={18} /> {busy ? "Running on this computer…" : "Run on this computer"}
+            </button>
+            {stopButton}
+            {doItYourself}
+          </div>
+          {runStatus}
+          {codeForm}
+          {errorBox}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="agent-step">
-      {/* Cloud runs report their status in the browser panel instead. */}
-      {run && run.browser !== "cloud" && <UcRunStatus run={run} />}
+      {runStatus}
       {cloudPanel}
-
-      {run?.open && run.status === "needs_code" && (
-        <form className="uc-code" onSubmit={sendCode}>
-          <label className="field">
-            <span className="field-label">Verification code from UC</span>
-            <input
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\s/g, ""))}
-              placeholder="e.g. 123456"
-              autoComplete="one-time-code"
-              maxLength={10}
-              autoFocus
-            />
-            <span className="field-hint">Check {saved.email} (and your spam folder) for an email from UC.</span>
-          </label>
-          <button type="submit" className="btn-primary" disabled={code.length < 4}>
-            Enter code
-          </button>
-        </form>
-      )}
-
-      {browser === "local" ? (
-        <div className="agent-actions">
-          <button
-            type="button"
-            className="btn-primary uc-run-big"
-            onClick={() => launch(exists || run?.status === "login_failed" ? "login" : "create", saved)}
-            disabled={busy}
-          >
-            <ExternalIcon width={18} height={18} /> {busy ? "Running on this computer…" : "Run on this computer"}
-          </button>
-          {busy && (
-            <button type="button" className="btn-ghost" onClick={stop} disabled={run?.detail === "Stopping…"}>
-              Stop
-            </button>
-          )}
-          {!busy && run?.status === "login_failed" && (
-            <a className="btn-ghost" href={UC_RESET_URL} target="_blank" rel="noreferrer">
-              Reset it on UC <ExternalIcon width={12} height={12} />
-            </a>
-          )}
-        </div>
-      ) : (
+      {codeForm}
       <div className="agent-actions">
-        {exists || run?.status === "login_failed" ? (
-          <button type="button" className="btn-primary" onClick={() => launch("login", saved)} disabled={busy}>
-            <ExternalIcon width={16} height={16} /> {busy ? "Agent is running…" : "Run agent"}
-          </button>
-        ) : (
-          <>
-            <button type="button" className="btn-primary" onClick={() => launch("create", saved)} disabled={busy}>
-              <UserIcon width={16} height={16} /> {busy ? "UC window is open…" : "Open UC sign-up again"}
-            </button>
-            <button type="button" className="btn-ghost" onClick={() => launch("login", saved)} disabled={busy}>
-              I already created it — sign me in
-            </button>
-          </>
-        )}
-        {busy && (
-          <button type="button" className="btn-ghost" onClick={stop} disabled={run?.detail === "Stopping…"}>
-            Stop
-          </button>
-        )}
-        {!busy && run?.status === "login_failed" && (
-          <a className="btn-ghost" href={UC_RESET_URL} target="_blank" rel="noreferrer">
-            Reset it on UC <ExternalIcon width={12} height={12} />
-          </a>
-        )}
-        <p className="field-hint agent-diy">
-          Prefer to do it yourself?{" "}
-          <a href={UC_LOGIN_URL} target="_blank" rel="noreferrer">
-            Open the UC application
-          </a>
-          .
-        </p>
-      </div>
-      )}
-
-      {!exists && !busy && (
-        <button type="button" className="agent-link" onClick={() => change(({ ucAccount: _u, ...a }) => a)}>
-          Start over with a different email
+        <button type="button" className="btn-primary" onClick={runIt} disabled={busy}>
+          <ExternalIcon width={16} height={16} /> {busy ? "Agent is running…" : "Run agent"}
         </button>
-      )}
-      {errorBox}
+        {stopButton}
+        {doItYourself}
+      </div>
+      {!codePopup && errorBox}
     </div>
   );
 }
@@ -765,25 +773,32 @@ const YOUR_TURN = new Set(["waiting", "needs_code", "login_failed", "needs_you"]
  * click into it to sign in or enter UC's code, and the assistant picks up again once the page moves on.
  */
 function CloudBrowserPanel({
+  popup,
   run,
   onRetry,
   onClose,
   closing,
 }: {
+  /** Shown centered over the browser, e.g. UC asking for a verification code. */
+  popup?: ReactNode;
   run: UcRun | null;
   onRetry: (() => void) | null;
   /** Closes the cloud browser (and any leftover ones) so it stops using browser time. */
   onClose: () => void;
   closing: boolean;
 }) {
-  const failed = !!run && !run.open && (run.status === "error" || run.status === "disconnected");
+  const failed = !!run && !run.open && (run.status === "error" || run.status === "disconnected" || run.status === "login_failed");
+  const failedTitle = run?.status === "login_failed" ? "Wrong email or password" : run?.status === "disconnected" ? "The cloud browser disconnected" : "The cloud browser couldn't start";
   const ended = !!run && !run.open && !failed;
-  const liveUrl = run?.open ? run.live_url : null;
+  const liveUrl = run?.open && !closing ? run.live_url : null;
   const yourTurn = !!liveUrl && !run?.finished && YOUR_TURN.has(run?.status ?? "");
+  // The code popup asks for this itself, so nothing should point the student at the browser instead.
+  const askingCode = run?.status === "needs_code" || run?.status === "checking_code";
 
   let pill: { text: string; tone: "busy" | "turn" | "bad" | "idle" } | null;
   if (!run) pill = { text: "Not started", tone: "idle" };
-  else if (failed) pill = { text: run.status === "disconnected" ? "Disconnected" : "Couldn't start", tone: "bad" };
+  else if (closing && run.open) pill = { text: "Closing", tone: "busy" };
+  else if (failed) pill = { text: run.status === "disconnected" ? "Disconnected" : run.status === "login_failed" ? "Couldn't sign in" : "Couldn't start", tone: "bad" };
   else if (run.finished) pill = null;
   else if (ended) pill = { text: "Session ended", tone: "idle" };
   else if (yourTurn) pill = { text: "Your turn", tone: "turn" };
@@ -797,8 +812,8 @@ function CloudBrowserPanel({
   } else if (run && failed) {
     screen = (
       <div className="cloud-browser-empty">
-        <strong>{run.status === "disconnected" ? "The cloud browser disconnected" : "The cloud browser couldn't start"}</strong>
-        <span>{run.detail}</span>
+        <strong>{failedTitle}</strong>
+        {run.status !== "login_failed" && <span>{run.detail}</span>}
         {onRetry && (
           <button type="button" className="btn-primary" onClick={onRetry}>
             <RetryIcon width={15} height={15} /> Retry
@@ -810,7 +825,7 @@ function CloudBrowserPanel({
     screen = (
       <div className="cloud-browser-empty">
         <span className="cloud-browser-spinner" aria-hidden="true" />
-        <strong>{run.detail}</strong>
+        <strong>{closing ? "Closing the browser…" : run.detail}</strong>
       </div>
     );
   } else if (run) {
@@ -862,9 +877,11 @@ function CloudBrowserPanel({
         </button>
       </div>
 
-      {run && (run.open || failed) && (
-        <p className={`cloud-browser-detail${yourTurn ? " is-turn" : ""}${failed ? " is-bad" : ""}${run.finished ? " is-good" : ""}`}>
-          {yourTurn ? (
+      {run?.open && !closing && (
+        <p className={`cloud-browser-detail${yourTurn ? " is-turn" : ""}${run.finished ? " is-good" : ""}`}>
+          {askingCode ? (
+            "UC is waiting for your verification code."
+          ) : yourTurn ? (
             <>
               <strong>Take over in the browser below.</strong> {run.detail} The assistant picks back up when you're done.
             </>
@@ -878,7 +895,10 @@ function CloudBrowserPanel({
         </p>
       )}
 
-      <div className="cloud-browser-screen">{screen}</div>
+      <div className="cloud-browser-screen">
+        {screen}
+        {!closing && popup}
+      </div>
 
       {liveUrl && (
         <div className="cloud-browser-foot">
@@ -898,26 +918,131 @@ function UcRunStatus({ run }: { run: UcRun }) {
     <div className={`uc-run${good ? " is-good" : bad ? " is-bad" : ""}`} role="status" aria-live="polite">
       {run.open && !good && !bad && <span className="uc-run-dot" aria-hidden="true" />}
       {good && <CheckIcon width={16} height={16} />}
-      <span>{run.detail}</span>
+      {run.status === "login_failed" ? <strong>{run.detail}</strong> : <span>{run.detail}</span>}
     </div>
   );
 }
 
-/** The student's saved UC email and password, with show and copy (shown beside the UC application tool). */
-export function UcCredentials({ email, password }: { email: string; password: string }) {
+/**
+ * The UC login in the tool's side panel: one button to enter it, whether the account is new or not,
+ * then the login with show, copy and edit. Nothing here saves to the profile: the login is saved when
+ * a run gets it accepted by UC.
+ */
+export function UcLogin({
+  change,
+  locked,
+  login,
+  onLogin,
+}: TaskProps & { locked: boolean; login: UcLoginDraft | null; onLogin: (login: UcLoginDraft | null) => void }) {
+  const { account } = useAuth();
+  const [formOpen, setFormOpen] = useState(false);
+  const close = () => setFormOpen(false);
+
+  if (formOpen && !locked) {
+    return (
+      <UcLoginForm
+        initialEmail={login?.email ?? account?.email ?? ""}
+        initialPassword={login?.password ?? ""}
+        onCancel={close}
+        onSave={(email, password) => {
+          onLogin({ email, password });
+          close();
+        }}
+      />
+    );
+  }
+
+  if (!login) {
+    return (
+      <div className="uc-login-choice">
+        <button type="button" className="btn-primary uc-run-big" onClick={() => setFormOpen(true)}>
+          <UserIcon width={18} height={18} /> Add my UC account
+        </button>
+      </div>
+    );
+  }
+
   return (
+    <>
     <div className="uc-creds" aria-label="Your UC login">
       <div className="uc-cred">
         <span className="uc-cred-label">Email</span>
-        <span className="uc-cred-value">{email}</span>
-        <CopyButton value={email} label="Copy email" />
+        <span className="uc-cred-value">{login.email}</span>
+        <CopyButton value={login.email} label="Copy email" />
       </div>
       <div className="uc-cred">
         <span className="uc-cred-label">Password</span>
-        <SecretValue value={password} />
-        <CopyButton value={password} label="Copy password" />
+        {login.password ? (
+          <>
+            <SecretValue value={login.password} />
+            <CopyButton value={login.password} label="Copy password" />
+          </>
+        ) : (
+          <span className="uc-cred-value">Not set yet</span>
+        )}
       </div>
+      <button type="button" className="agent-link" onClick={() => setFormOpen(true)} disabled={locked}>
+        Edit email or password
+      </button>
     </div>
+    <div className="uc-start-over">
+      <button
+        type="button"
+        className="btn-ghost"
+        disabled={locked}
+        onClick={() => {
+          change(({ ucAccount: _u, ...a }) => a);
+          onLogin(null);
+        }}
+      >
+        Start over
+      </button>
+    </div>
+    </>
+  );
+}
+
+function UcLoginForm({
+  initialEmail,
+  initialPassword,
+  onCancel,
+  onSave,
+}: {
+  initialEmail: string;
+  initialPassword: string;
+  onCancel: () => void;
+  onSave: (email: string, password: string) => void;
+}) {
+  const [email, setEmail] = useState(initialEmail);
+  const [password, setPassword] = useState(initialPassword);
+  const [shown, setShown] = useState(false);
+  const ready = EMAIL_OK.test(email.trim()) && password.length >= 8 && password.length <= 30;
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (ready) onSave(email.trim(), password);
+  };
+  return (
+    <form className="uc-creds uc-login-form" onSubmit={submit}>
+      <label className="field">
+        <span className="field-label">UC email</span>
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="off" />
+      </label>
+      <label className="field">
+        <span className="field-label">UC password</span>
+        <span className="uc-cred-value uc-cred-secret">
+          <input type={shown ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" maxLength={30} />
+          <button type="button" className="uc-icon-btn" onClick={() => setShown((s) => !s)} aria-label={shown ? "Hide password" : "Show password"}>
+            <EyeIcon crossed={shown} width={15} height={15} />
+          </button>
+        </span>
+      </label>
+      <button type="submit" className="btn-primary" disabled={!ready}>
+        Use this login
+      </button>
+      <button type="button" className="agent-link" onClick={onCancel}>
+        Cancel
+      </button>
+    </form>
   );
 }
 

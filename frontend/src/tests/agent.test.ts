@@ -6,9 +6,9 @@ import {
   daysUntilUcDeadline,
   entryYear,
   filingPeriod,
-  generateUcPassword,
   gmailComposeUrl,
   setAgent,
+  withUcRunProgress,
   cleanTranscriptLine,
   withoutAudioTags,
 } from "../agent/logic";
@@ -170,17 +170,38 @@ describe("Apply", () => {
     expect(calendarEvents(p, oct30)[0]).toMatchObject({ key: "counselor-followup", date: "2026-11-06" });
   });
 
-  it("generates UC passwords that meet UC's rules every time", () => {
-    for (let i = 0; i < 200; i++) {
-      const pw = generateUcPassword();
-      expect(pw).toHaveLength(16);
-      expect(pw).toMatch(/^[A-Za-z0-9!@#$%^&*+<>?.-]+$/);
-      expect(pw).toMatch(/[a-z]/);
-      expect(pw).toMatch(/[A-Z]/);
-      expect(pw).toMatch(/[0-9]/);
-      expect(pw).toMatch(/[!@#$%^&*+<>?.-]/);
-      expect(pw).not.toMatch(/[O0lI1]/);
-    }
+  describe("saving a UC run's progress", () => {
+    const login = { email: "maya@example.com", password: "Tq7#mVx2!pLr9Kd4" };
+    const quiet = { status: "filling", created: false, verified: false, setup: false, about: false, piq: false };
+    const inside = { ...quiet, status: "signed_in", created: true, verified: true };
+
+    it("changes nothing, so saves nothing, when a run has no news", () => {
+      const a = withUcRunProgress({}, inside, login, 1);
+      expect(withUcRunProgress(a, inside, login, 2)).toBe(a);
+      expect(withUcRunProgress(a, { ...inside, status: "filling" }, login, 3)).toBe(a);
+      const profile = setAgent(blankProfile(), () => a);
+      expect(setAgent(profile, (x) => withUcRunProgress(x, inside, login, 4))).toBe(profile);
+    });
+
+    it("saves a new milestone once", () => {
+      const a = withUcRunProgress({}, inside, login, 1);
+      const b = withUcRunProgress(a, { ...inside, piq: true }, login, 2);
+      expect(b.ucAccount?.piqAt).toBe(2);
+      expect(b.ucAccount?.signedInAt).toBe(1);
+      expect(withUcRunProgress(b, { ...inside, piq: true }, login, 3)).toBe(b);
+    });
+
+    it("saves a login only once UC accepts it", () => {
+      expect(withUcRunProgress({}, quiet, login, 1)).toEqual({});
+      expect(withUcRunProgress({}, inside, login, 1).ucAccount).toMatchObject(login);
+    });
+
+    it("replaces the saved password once UC accepts a corrected one", () => {
+      const a = withUcRunProgress({}, inside, login, 1);
+      const fixed = { ...login, password: "N3w!Password#99" };
+      expect(withUcRunProgress(a, quiet, fixed, 2)).toBe(a);
+      expect(withUcRunProgress(a, inside, fixed, 2).ucAccount?.password).toBe(fixed.password);
+    });
   });
 
   it("checks off the UC application once the account is created and verified", () => {

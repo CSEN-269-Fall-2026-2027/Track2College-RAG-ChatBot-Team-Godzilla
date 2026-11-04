@@ -6,13 +6,18 @@ UC's "Create an account" form.
 The window is driven by looking at which UC screen is showing, not by a fixed
 script, so signing in always picks up wherever the student left off:
 
-- sign-up form    → filled in; the student agrees to UC's terms and clicks Create account
-- sign-in form    → signed in with the saved email and password
+- sign-up form    → filled in, UC's terms box checked and Create account clicked (the student asked
+                    for this by pressing Run). If UC refuses the account, the run signs in instead.
+- sign-in form    → signed in with the saved email and password. If UC refuses, the run shuts down.
 - code screen     → waits for the verification code the student types on Track2College
 - setup screen    → "application level" set to First-year, start term set to Fall, then Continue
 - anything else   → the student is in their application
 
-Passwords and codes are only held in memory for the run and never logged.
+Passwords and codes are only held in memory for the run and never logged: the run registers them
+with redact, and everything it prints, reports or saves for debugging goes through redact first.
+
+Every run belongs to the student who started it (`owner`, from their verified session). Status,
+codes, cancelling and reconnecting only work for that student; to anyone else the run doesn't exist.
 
 Two ways to get the browser (the script after that is the same):
 - local → a visible Chrome window on this computer (the backend must run on the student's machine)
@@ -28,6 +33,7 @@ import time
 import uuid
 
 import cloud_browser
+import redact
 import uc_sections
 
 UC_LOGIN_URL = "https://apply.universityofcalifornia.edu/my-application/login"
@@ -40,12 +46,17 @@ FIRST_YEAR = re.compile(r"first[\s-]*year", re.I)
 START_TERM_Q = re.compile(r"when do you hope to start", re.I)
 FALL = re.compile(r"fall", re.I)
 WINTER = re.compile(r"winter", re.I)
-SUBMIT_CODE = re.compile(r"verif|submit|continue|confirm|next", re.I)
+# Where UC's login page puts its messages, both its own form checks and a refused submit.
+SIGN_UP_ERRORS = "#signUpEmail-error, #verifyEmail-error, #signUpPassword-error, #termsOfUse-error"
+SIGN_IN_ERRORS = "#email-error, #password-error"
+# Not "Resend verification code", which would also match "verif".
+SUBMIT_CODE = re.compile(r"^(?!.*(?:resend|send again|new code)).*(?:verif|submit|continue|confirm|next)", re.I)
 CONTINUE = re.compile(r"^\s*(continue|next|save and continue|save & continue)\b", re.I)
 
 SIGN_IN_WAIT_S = 15
+CREATE_WAIT_S = 30
 # How often the run looks at the UC page again. Each look is a couple of round trips to the browser.
-TICK_MS = 300
+TICK_MS = 150
 PIQ_REQUIRED = 4
 
 _lock = threading.Lock()
@@ -81,14 +92,19 @@ def start(
     verified: bool = False,
     piqs: list[dict] | None = None,
     browser: str = "local",
+    *,
+    owner: str,
 ) -> str:
     """Starts a run in the background and returns its id. One run at a time.
 
     `facts` is what Track2College knows about the student, used to fill "About you".
     `piqs` are the student's four chosen questions: {"number": 1–8, "title", "text"}.
     `browser` is "local" (a window on this computer) or "cloud" (Browserbase).
+    `owner` is the signed-in student's id; only they can see or control the run.
     """
     global _active
+    if not owner:
+        raise UcAccountError("Sign in to use the UC assistant.")
     if mode not in ("login", "create"):
         raise UcAccountError("Unknown mode.")
     if browser not in ("local", "cloud"):
@@ -101,9 +117,12 @@ def start(
         raise UcAccountError("The password doesn't meet UC's rules.")
     with _lock:
         if _active and _runs[_active]["open"]:
-            raise UcAccountError("A UC window is already open. Finish or close it first.")
+            if _runs[_active]["owner"] == owner:
+                raise UcAccountError("A UC window is already open. Finish or close it first.")
+            raise UcAccountError("The UC assistant is helping another student right now. Try again in a few minutes.")
         run_id = str(uuid.uuid4())
         _runs[run_id] = {
+            "owner": owner,
             "status": "opening",
             "detail": "Starting cloud browser…" if browser == "cloud" else "Opening the UC application…",
             "mode": mode,
@@ -135,31 +154,47 @@ def start(
     return run_id
 
 
-def active() -> tuple[str, dict] | None:
-    """The run whose UC window is open right now, if any (so a reopened popup can reconnect to it)."""
+def active(owner: str) -> tuple[str, dict] | None:
+    """This student's run whose UC window is open right now, if any (so a reopened popup can reconnect)."""
     with _lock:
         run_id = _active
     if not run_id:
         return None
-    run = status(run_id)
+    run = status(run_id, owner)
     return (run_id, run) if run and run["open"] else None
 
 
-def status(run_id: str) -> dict | None:
+def _owned(run_id: str, owner: str) -> dict | None:
+    """The run, only if this student started it (call with _lock held)."""
+    run = _runs.get(run_id)
+    return run if run and owner and run["owner"] == owner else None
+
+
+def status(run_id: str, owner: str) -> dict | None:
     with _lock:
-        run = _runs.get(run_id)
+        run = _owned(run_id, owner)
         if not run:
             return None
-        return {k: v for k, v in run.items() if k not in ("code", "session_id")}
+        return {k: v for k, v in run.items() if k not in ("code", "session_id", "owner")}
 
 
-def submit_code(run_id: str, code: str) -> None:
+def open_sessions(excluding_owner: str | None = None) -> set[str]:
+    """Cloud sessions that open runs are using (other students' when excluding_owner is given)."""
+    with _lock:
+        return {
+            run["session_id"]
+            for run in _runs.values()
+            if run["open"] and run.get("session_id") and run["owner"] != excluding_owner
+        }
+
+
+def submit_code(run_id: str, owner: str, code: str) -> None:
     """Hands the student's verification code to the open UC window."""
     code = code.strip().replace(" ", "")
     if not CODE_RE.match(code):
         raise UcAccountError("Codes are 4–10 letters or numbers. Check UC's email and try again.")
     with _lock:
-        run = _runs.get(run_id)
+        run = _owned(run_id, owner)
         if not run or not run["open"]:
             raise UcAccountError("The UC window isn't open anymore. Continue on UC to get a new code screen.")
         if run["status"] != "needs_code":
@@ -167,10 +202,10 @@ def submit_code(run_id: str, code: str) -> None:
         run.update(code=code, status="checking_code", detail="Entering your code…")
 
 
-def cancel(run_id: str) -> None:
+def cancel(run_id: str, owner: str) -> None:
     """Stops a run: the script lets go of the window and, in cloud mode, the session is released."""
     with _lock:
-        run = _runs.get(run_id)
+        run = _owned(run_id, owner)
         if not run:
             raise UcAccountError("That UC window session wasn't found.")
         if run["open"]:
@@ -184,13 +219,19 @@ def _cancelled(run_id: str) -> bool:
 
 def _set(run_id: str, status_: str, detail: str, **flags: bool) -> None:
     with _lock:
-        _runs[run_id].update(status=status_, detail=detail, **flags)
+        _runs[run_id].update(status=status_, detail=redact.redact(detail), **flags)
 
 
 def _take_code(run_id: str) -> str | None:
     with _lock:
         code, _runs[run_id]["code"] = _runs[run_id]["code"], None
         return code
+
+
+def _current(run_id: str, field: str):
+    """A value from the run itself, for the run's own thread (students go through status())."""
+    with _lock:
+        return _runs[run_id][field]
 
 
 def _closed(run_id: str) -> None:
@@ -200,13 +241,13 @@ def _closed(run_id: str) -> None:
         run.update(open=False, code=None)
         if run["cancelled"]:
             run.update(status="closed", detail="Stopped. Continue on UC any time to pick up where you left off.")
-        elif run["browser"] == "cloud" and run["status"] not in ("error",) and not run["finished"]:
+        elif run["browser"] == "cloud" and run["status"] not in ("error", "login_failed") and not run["finished"]:
             # Nobody closes a cloud window by hand: the session dropped or hit its time limit.
             run.update(
                 status="disconnected",
                 detail="The cloud browser disconnected (sessions end after 15 minutes). Retry to pick up where you left off.",
             )
-        elif run["status"] not in ("signed_in", "ready", "about_done", "piq_done", "error"):
+        elif run["status"] not in ("signed_in", "ready", "about_done", "piq_done", "error", "login_failed"):
             run.update(status="closed", detail="The UC window was closed. Continue on UC to pick up where you left off.")
 
 
@@ -229,16 +270,18 @@ def _run(
         return
 
     session_id: str | None = None
+    redact.remember(password)
     try:
         with sync_playwright() as p:
             if browser_mode == "cloud":
                 try:
                     session_id, connect_url = cloud_browser.create_session()
+                    redact.remember(connect_url)
                     with _lock:
                         _runs[run_id]["session_id"] = session_id
                     browser = p.chromium.connect_over_cdp(connect_url, timeout=60_000)
                 except Exception as exc:  # noqa: BLE001 — any startup failure gets the same clear message
-                    print(f"[uc_account] cloud browser didn't start: {exc}")
+                    print(redact.redact(f"[uc_account] cloud browser didn't start: {exc}"))
                     _set(run_id, "error", "The cloud browser couldn't start. Retry, or switch to Local.")
                     return
                 context = browser.contexts[0] if browser.contexts else browser.new_context()
@@ -263,7 +306,7 @@ def _run(
                 if browser.is_connected():
                     browser.close()
     except Exception as exc:  # noqa: BLE001 — report anything to the student instead of crashing the thread
-        print(f"[uc_account] {type(exc).__name__}: {exc}")
+        print(redact.redact(f"[uc_account] {type(exc).__name__}: {exc}"))
         if browser_mode == "cloud":
             _set(run_id, "error", "Something went wrong in the cloud browser. Try again, or switch to Local.")
         else:
@@ -272,6 +315,7 @@ def _run(
         if session_id:
             cloud_browser.release(session_id)
         _closed(run_id)
+        redact.forget_all()
 
 
 def _drive(
@@ -285,32 +329,57 @@ def _drive(
     verified: bool,
     piqs: list[dict] | None = None,
 ) -> None:
-    """Reacts to whichever UC screen is showing until the student closes the window."""
+    """Reacts to whichever UC screen is showing until the student closes the window, or until UC
+    has refused both creating the account and signing in."""
     may_sign_in = mode == "login"
     about = _AboutYou(run_id, page, {**facts, "email": email}, done=about_done)
     insight = _PersonalInsight(run_id, page, piqs or [])
     signed_in_at: float | None = None
     setup_done = False
+    create_error = ""  # Why UC refused the new account, if it did.
+    create_clicked_at = 0.0
+
+    def sign_in_instead(reason: str) -> None:
+        nonlocal create_error, may_sign_in
+        create_error, may_sign_in = reason, True
+        _set(run_id, "signing_in", "UC couldn't create that account, so we're trying to sign in instead…")
+        page.goto(UC_LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
 
     if mode == "create":
-        _fill_sign_up(page, email, password)
-        _set(run_id, "waiting", "Everything's filled in. Check the Terms of Use box and click Create account in the UC window.")
+        try:
+            _fill_sign_up(page, email, password)
+            page.click("#signUpButton", timeout=10_000)
+            create_clicked_at = time.monotonic()
+            _set(run_id, "creating", "Creating your UC account…")
+        except Exception:  # noqa: BLE001 — no usable sign-up form: try signing in
+            if page.is_closed():
+                raise
+            sign_in_instead("the sign-up form didn't work")
 
     while not page.is_closed() and not _cancelled(run_id):
         page.wait_for_timeout(TICK_MS)
         with _lock:
             _runs[run_id]["page_url"] = page.url
         # A verified account never sees UC's code screen again, so a "ZIP code" box isn't one.
-        verified = verified or status(run_id)["verified"]
+        verified = verified or _current(run_id, "verified")
         screen = _screen(page, look_for_code=not verified)
-        current = status(run_id)["status"]
+        current = _current(run_id, "status")
+
+        if current == "creating":
+            error = _form_error(page, SIGN_UP_ERRORS)
+            if not error and screen == "sign_up" and time.monotonic() - create_clicked_at > CREATE_WAIT_S:
+                error = "UC didn't answer"
+            if error:
+                sign_in_instead(error)
+                continue
 
         if screen == "code":
             code = _take_code(run_id)
             if code:
                 _enter_code(run_id, page, code)
                 may_sign_in = True  # UC may send a newly verified student back to sign in
-            elif current not in ("needs_code", "checking_code"):
+            elif current != "needs_code":
+                # Also after a code that came back to this screen: the student needs to try again.
                 _set(run_id, "needs_code", "UC emailed you a verification code. Type it in here.", created=True)
 
         elif screen == "setup":
@@ -327,24 +396,23 @@ def _drive(
                     error = _visible_error(page)
                     _set(run_id, "ready", f"{picked} UC didn't move on{': ' + error if error else ''}. Check the page and click Continue.", setup=True)
 
-        elif screen == "sign_up":
-            if current == "waiting":
-                error = _visible_error(page)
-                if error:
-                    _set(run_id, "waiting", f"UC says: {error}")
-
         elif screen in ("sign_in", "landing"):
-            if current == "waiting":
-                # The sign-up form closed: UC took it and moves on to email verification.
-                _set(run_id, "submitted", "UC accepted the form. Watch your email for a verification code.", created=True)
+            if current == "creating":
+                # The sign-up form closed with no complaint. Signing in proves UC took it.
+                _set(run_id, "submitted", "UC accepted the form. Signing you in…")
                 may_sign_in = True
             elif may_sign_in:
                 may_sign_in = False
                 signed_in_at = time.monotonic()
                 _sign_in(page, email, password)
                 _set(run_id, "signing_in", "Signing you in…")
-            elif signed_in_at and current == "signing_in" and time.monotonic() - signed_in_at > SIGN_IN_WAIT_S:
-                _set(run_id, "login_failed", _visible_error(page) or "UC didn't accept that email and password.")
+            elif signed_in_at and current == "signing_in":
+                error = _form_error(page, SIGN_IN_ERRORS)
+                if error or time.monotonic() - signed_in_at > SIGN_IN_WAIT_S:
+                    # The student gets the short version; UC's own words stay in the backend console.
+                    uc_sections.log(f"sign-in refused: {error or 'no message'}; sign-up: {create_error or 'not tried'}")
+                    _set(run_id, "login_failed", "Wrong email or password")
+                    return
 
         elif screen == "inside":
             if current not in ("ready", "signed_in", "filling", "needs_you", "about_done", "piq_done"):
@@ -355,7 +423,7 @@ def _drive(
                 about.step()
             else:
                 insight.step()
-                if insight.state == "done" and not status(run_id)["finished"]:
+                if insight.state == "done" and not _current(run_id, "finished"):
                     with _lock:
                         _runs[run_id]["finished"] = True
                     if not piqs:
@@ -370,7 +438,8 @@ _SCREEN_JS = """(lookForCode) => {
   const inApp = !!document.querySelector('#section01 ul a[href]');
   const code = lookForCode && !inApp ? (__MARK_CODE__)() : 0;
   return { code, setup: /application level/i.test(document.body ? document.body.innerText : ''),
-           signUp: shown('#signUpEmail'), signIn: shown('#email') };
+           signUp: shown('#signUpEmail'), signIn: shown('#email'),
+           loginPage: !inApp && !!document.querySelector('#loginForm, #signUpForm') };
 }"""
 
 
@@ -387,7 +456,8 @@ def _screen(page, look_for_code: bool = True) -> str:
         return "sign_up"
     if seen["signIn"]:
         return "sign_in"
-    if "/login" in page.url:
+    # A refused sign-up comes back at /creatAccount: still UC's login page, not the application.
+    if "/login" in page.url or seen["loginPage"]:
         return "landing"
     return "inside"
 
@@ -405,9 +475,11 @@ def _fill_sign_up(page, email: str, password: str) -> None:
     page.fill("#signUpEmail", email)
     page.fill("#verifyEmail", email)
     page.fill("#signUpPassword", password)
+    # Clicked on the box itself: the label around it also holds a link that opens the terms in a new tab.
     terms = page.locator("#termsOfUse")
-    terms.scroll_into_view_if_needed()
-    terms.focus()
+    terms.evaluate("box => { if (!box.checked) box.click(); }")
+    if not terms.is_checked():
+        raise UcAccountError("UC's terms box didn't check.")
 
 
 def _sign_in(page, email: str, password: str) -> None:
@@ -424,13 +496,15 @@ _MARK_CODE_JS = """() => {
   document.querySelectorAll('[data-t2c-code]').forEach(e => e.removeAttribute('data-t2c-code'));
   const shown = e => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+  // UC's page is titled "Verify Account": any plain box on it is the code, whatever it's named.
+  const verifyPage = /verif/i.test(document.title);
   let n = 0;
   for (const e of document.querySelectorAll('input')) {
     if (!['text', 'tel', 'number', ''].includes(e.type) || !shown(e)) continue;
     const words = [e.id, e.name, e.placeholder, e.getAttribute('aria-label') || '', e.autocomplete,
       ...[...(e.labels || [])].map(l => l.innerText)].join(' ');
     // Sign-up has a "verifyEmail" box, so anything about email or passwords is never the code.
-    if (/verif|code|one-time/i.test(words) && !/e-?mail|password/i.test(words)) { e.setAttribute('data-t2c-code', String(n++)); }
+    if ((verifyPage || /verif|code|one-time/i.test(words)) && !/e-?mail|password/i.test(words)) { e.setAttribute('data-t2c-code', String(n++)); }
   }
   return n;
 }"""
@@ -466,7 +540,7 @@ def _enter_code(run_id: str, page, code: str) -> None:
     while time.monotonic() < deadline:
         page.wait_for_timeout(250)
         screen = _screen(page)
-        error = _visible_error(page) if screen == "code" else ""
+        error = (_visible_error(page) or _form_error(page, '[id$="-error"]')) if screen == "code" else ""
         if screen not in ("code", "loading") or error:
             break
     if screen == "loading":
@@ -552,6 +626,23 @@ _ERROR_JS = """() => {
   }
   return '';
 }"""
+
+
+def _form_error(page, selector: str) -> str:
+    """UC's message under a sign-up or sign-in field. Read even when hidden: a refused form may reload closed."""
+    try:
+        return page.evaluate(
+            """(selector) => {
+              for (const e of document.querySelectorAll(selector)) {
+                const text = (e.textContent || '').trim();
+                if (text) return text.slice(0, 200);
+              }
+              return '';
+            }""",
+            selector,
+        )
+    except Exception:  # noqa: BLE001 — page navigating
+        return ""
 
 
 def _visible_error(page) -> str:
@@ -751,7 +842,7 @@ class _PersonalInsight:
             uc_sections.go_to(self.page, questions["url"], questions["name"])
             return
 
-        uc_sections.wait_until_settled(self.page)
+        uc_sections.wait_until_settled(self.page, quiet_ms=200)
         # The student switched questions: UC still has an answer to one they no longer chose. UC only
         # takes four, so delete those first. Only with a full set of four chosen, so answers the
         # student is still writing straight on UC are never touched.
@@ -792,12 +883,11 @@ class _PersonalInsight:
             return
         replacing = bool(uc_sections.piq_box_text(self.page).strip())
         _set(self.run_id, "filling", f"{'Updating' if replacing else 'Typing'} your answer to {q['title']}…")
-        if replacing and not uc_sections.clear_piq_answer(self.page):
-            self._report("skipped", f"{q['title']} (couldn't clear the answer already on UC; please update it yourself)")
+        if not uc_sections.replace_piq_answer(self.page, q["text"]):
+            self._report("skipped", f"{q['title']} (couldn't enter the answer; please update it yourself)")
             self.pending.remove(q)
             uc_sections.cancel_piq_answer(self.page)
             return
-        uc_sections.type_piq_answer(self.page, q["text"])
         if uc_sections.save_piq_answer(self.page):
             self._report("entered", f"{q['title']} (updated)" if replacing else q["title"])
             self.pending.remove(q)
@@ -843,7 +933,7 @@ def _debug_dump(page, name: str) -> None:
         os.makedirs(folder, exist_ok=True)
         path = os.path.join(folder, f"{time.strftime('%Y%m%d-%H%M%S')}-{name}.html")
         with open(path, "w", encoding="utf-8") as f:
-            f.write(page.content())
+            f.write(redact.redact(page.content()))
         print(f"[uc_account] saved page for debugging: {path}")
     except Exception as exc:  # noqa: BLE001 — debugging aid only
-        print(f"[uc_account] couldn't save debug page: {exc}")
+        print(redact.redact(f"[uc_account] couldn't save debug page: {exc}"))

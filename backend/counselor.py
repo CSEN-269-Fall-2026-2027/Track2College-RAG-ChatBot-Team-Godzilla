@@ -32,25 +32,41 @@ Respond with ONLY a JSON object, no markdown fences:
 """
 
 EMAIL_PROMPT = """\
-You help a high school senior write a short, polite email to their school counselor about
-their University of California (UC) application.
+You help a high school senior write a clear, polite email asking their school counselor for a
+meeting about their University of California (UC) application.
 
 RULES:
 1. Use ONLY facts from the STUDENT PROFILE and what the student said on the PRACTICE CALL, if
-   there was one. Never invent grades, activities, or plans. Ignore what the practice counselor
-   said except as context for the student's answers.
-2. Introduce the student (name, and grade if the profile gives it) and say they are applying
-   to the UC campuses listed.
-3. Ask for a short meeting to look over their application before they submit, and ask whether
-   the counselor needs anything from them (for example, anything the school tracks for seniors).
-4. If there was a practice call, name the two or three specific things the student wants help
-   with, so the counselor can prepare. Never mention the practice call or that an AI was involved.
-   Never mention the student's birthday or birthplace.
-5. Under 200 words, warm and specific, in the student's own voice.
+   there was one. Never invent grades, activities, plans, or finished work. Ignore what the
+   practice counselor said except as context for the student's answers.
+2. The subject line says this is a meeting request about the UC application.
+3. Write the body as plain text in exactly this order, with a blank line between sections:
+
+   a. A greeting to the counselor.
+   b. One or two sentences: who the student is (name, and grade if the profile gives it), and
+      that they would like to schedule a short meeting to go over their UC application before
+      they submit it. The meeting request must be clear from this opening.
+   c. A line reading "What I have prepared so far:" followed by a list, one item per line, each
+      starting with "- ". Include only items the profile shows, such as: UC campuses on their
+      list, intended major, GPA, exams, activities, awards, Personal Insight Question status,
+      FAFSA or California Dream Act status. Keep each item to one line and summarize long lists.
+      Report Personal Insight Question status exactly as the profile gives it; never call work
+      finished unless the profile says so. If the profile shows nothing, leave this section out.
+   d. A line reading "What I would like to go over:" followed by a "- " list of two or three
+      specific things, taken from the practice call or from "Biggest college question" and "Wants
+      help with first" in the profile. Also ask whether the counselor needs anything from them
+      (for example, anything the school tracks for seniors). Leave out any topic with no basis.
+   e. One closing sentence asking what day and time would work for the counselor. Do not propose
+      specific dates or times.
+
+4. Never mention the practice call or that an AI was involved. Never mention the student's
+   birthday, birthplace, household income, or budget.
+5. Under 200 words, warm and direct, in the student's own voice. No markdown other than the "- "
+   list items: no bold, no headings.
 6. NEVER write placeholders or brackets like [Name], [Last], or [Grade]. If the profile is
    missing a fact, leave it out and write around it.
-7. Start with a greeting to the counselor. End with the last sentence of the message: no
-   closing ("Sincerely," "Best,") and no name. The sign-off is added for you.
+7. End with the closing sentence: no closing ("Sincerely," "Best,") and no name. The sign-off is
+   added for you.
 
 Respond with ONLY a JSON object, no markdown fences:
 {"subject": "", "body": ""}
