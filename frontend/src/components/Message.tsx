@@ -15,10 +15,22 @@ function describeSource(url: string) {
   }
 }
 
+/** Ready-made questions longer than this show collapsed to a few lines with "See more". */
+const PRESET_PREVIEW_CHARS = 140;
+
 export const UserMessage = memo(function UserMessage({ message }: { message: Message }) {
+  const long = !!message.preset && message.content.length > PRESET_PREVIEW_CHARS;
+  const [expanded, setExpanded] = useState(false);
   return (
     <div className="row row-user">
-      <div className="bubble bubble-user">{message.content}</div>
+      <div className={`bubble bubble-user${long && !expanded ? " is-clamped" : ""}`}>
+        <span className="bubble-text">{message.content}</span>
+        {long && (
+          <button type="button" className="bubble-more" onClick={() => setExpanded((e) => !e)} aria-expanded={expanded}>
+            {expanded ? "See less" : "See more"}
+          </button>
+        )}
+      </div>
     </div>
   );
 });

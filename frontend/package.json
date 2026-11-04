@@ -12,6 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@elevenlabs/react": "^1.20.2",
     "@supabase/supabase-js": "^2.117.3",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
@@ -23,5 +24,8 @@
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
     "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PIQ_PROMPTS } from "./journey/logic";
 import { getStore } from "./data";
+import { OTHER_MAJOR, toMajorChoice } from "./constants";
 import type { Activity, ActivityCategory, Profile, TargetCollege, Transcript } from "./types";
 
 export function emptyOnboarding(): Profile["onboarding"] {
@@ -46,7 +47,7 @@ export function emptyProfile(firstName = "", lastName = ""): Profile {
       testPlan: "",
       coursework: "",
     },
-    goals: { majors: [], careers: "", whyCollege: "" },
+    goals: { majors: [], intendedMajor: "", careers: "", whyCollege: "" },
     activities: [],
     awards: [],
     colleges: [],
@@ -67,8 +68,19 @@ export function emptyProfile(firstName = "", lastName = ""): Profile {
   };
 }
 
+/**
+ * The saved intended major, or for older profiles the one implied by their per-campus majors
+ * (the first one set) or their onboarding interests, mapped onto the major choices.
+ */
+function intendedMajorOf(stored: Partial<Profile>): string {
+  if (stored.goals?.intendedMajor !== undefined) return toMajorChoice(stored.goals.intendedMajor);
+  const campusMajor = (stored.colleges ?? []).map((c) => toMajorChoice(c.major)).find(Boolean);
+  if (campusMajor) return campusMajor;
+  return (stored.goals?.majors ?? []).map(toMajorChoice).find((m) => m && m !== OTHER_MAJOR) ?? "";
+}
+
 /** Merge stored data over defaults so profiles saved by older versions gain new fields. */
-function hydrate(stored: Partial<Profile> | null, fallback: Profile): Profile {
+export function hydrate(stored: Partial<Profile> | null, fallback: Profile): Profile {
   if (!stored) return fallback;
   const academics = { ...fallback.academics, ...stored.academics };
   if (!("exams" in (stored.academics ?? {})) && stored.academics?.apIbCourses) {
@@ -80,14 +92,23 @@ function hydrate(stored: Partial<Profile> | null, fallback: Profile): Profile {
     ...stored,
     basics: { ...fallback.basics, ...stored.basics },
     academics,
-    goals: { ...fallback.goals, ...stored.goals },
-    preferences: { ...fallback.preferences, ...stored.preferences },
+    goals: { ...fallback.goals, ...stored.goals, intendedMajor: intendedMajorOf(stored) },
+    preferences: {
+      ...fallback.preferences,
+      ...stored.preferences,
+      // The retired Apply page kept its own "FAFSA done" flag; fold it into the one story mode,
+      // the journey map, and the chatbot all read.
+      ...(stored.ucJourney?.agent?.fafsaDoneAt ? { fafsa: "done" as const } : {}),
+    },
     activities: (stored.activities ?? fallback.activities).map((a) => emptyActivity({ ...a, id: a.id })),
     awards: stored.awards ?? fallback.awards,
     colleges: stored.colleges ?? fallback.colleges,
     checklistDone: { ...fallback.checklistDone, ...stored.checklistDone },
     onboarding: { ...fallback.onboarding, ...stored.onboarding },
-    ucJourney: stored.ucJourney ?? fallback.ucJourney,
+    // Once folded in, drop the old flag so a later "not done yet" answer isn't flipped back on reload.
+    ucJourney: stored.ucJourney?.agent?.fafsaDoneAt
+      ? { ...stored.ucJourney, agent: { ...stored.ucJourney.agent, fafsaDoneAt: undefined } }
+      : (stored.ucJourney ?? fallback.ucJourney),
     piqWork: stored.piqWork ?? fallback.piqWork,
   };
 }
@@ -97,14 +118,18 @@ function hydrate(stored: Partial<Profile> | null, fallback: Profile): Profile {
 // ---------------------------------------------------------------------------
 
 export const PROFILE_SECTIONS = [
-  { id: "basics", title: "About you", blurb: "Name, grade, school, and location" },
-  { id: "academics", title: "Academic history", blurb: "Courses, grades, and exams" },
-  { id: "campuses", title: "UC campuses & majors", blurb: "Campuses and intended majors" },
-  { id: "finances", title: "Cost & support", blurb: "Optional budget and aid context" },
+  { id: "basics", title: "About you" },
+  { id: "academics", title: "Academic history" },
+  { id: "campuses", title: "UC campuses" },
+  { id: "finances", title: "Cost & support" },
 ] as const;
 
-/** Dedicated workspace route — not part of profile completeness. */
-export const PROFILE_WORKSPACES = [{ id: "activities", title: "Activities & awards", blurb: "UC activities list workspace" }] as const;
+/** Dedicated workspace routes — not part of profile completeness. Essays and the course plan used to be "Materials". */
+export const PROFILE_WORKSPACES = [
+  { id: "activities", title: "Activities & awards" },
+  { id: "essays", title: "Personal insight essays" },
+  { id: "majors", title: "Major selection" },
+] as const;
 
 export type SectionId = (typeof PROFILE_SECTIONS)[number]["id"];
 export type ProfileRouteId = SectionId | (typeof PROFILE_WORKSPACES)[number]["id"];
@@ -212,6 +237,10 @@ export function profileSummary(p: Profile): string {
   add("Reported unweighted GPA", a.gpaUnweighted);
   add("Reported weighted GPA", a.gpaWeighted);
   add("AP/IB or English-proficiency exams", a.exams);
+  add(
+    "Intended major (the same at every UC campus)",
+    g.intendedMajor === OTHER_MAJOR ? "Other (not one of the ten largest UC majors)" : g.intendedMajor || "not chosen yet",
+  );
   add("General major interests", g.majors.join(", "));
   if (p.onboarding?.exploringMajors) lines.push("Majors: still exploring");
   if (p.activities.length) {
@@ -232,10 +261,7 @@ export function profileSummary(p: Profile): string {
   }
   if (p.colleges.length) {
     lines.push(
-      "UC campus list: " +
-        p.colleges
-          .map((c) => [c.name, c.major && `major ${c.major}`, c.deadline && `supplemental/deadline note ${c.deadline}`, `status ${c.status}`].filter(Boolean).join(" "))
-          .join("; "),
+      "UC campus list: " + p.colleges.map((c) => `${c.name} (status ${c.status})`).join("; "),
     );
   }
   add("Needs financial aid", f.needsAid);
@@ -291,6 +317,8 @@ interface ProviderProps {
 
 export function ProfileProvider({ userId, name, fallback, children }: ProviderProps) {
   const [initial, setInitial] = useState<Profile | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -298,11 +326,22 @@ export function ProfileProvider({ userId, name, fallback, children }: ProviderPr
     const defaults = emptyProfile(first, rest.join(" "));
     (async () => {
       const store = await getStore();
+      // A failed read retries, and never falls back to a blank profile: auto-save would then
+      // overwrite the student's saved one. Only a successful read that finds no row is a new student.
       let stored: Profile | null = null;
-      try {
-        stored = await store.profiles.get(userId);
-      } catch {
-        stored = null;
+      for (let tries = 0; ; tries++) {
+        try {
+          stored = await store.profiles.get(userId);
+          break;
+        } catch (error) {
+          if (cancelled) return;
+          if (tries >= 2) {
+            console.error("[profile] Couldn't load the saved profile:", error);
+            setLoadFailed(true);
+            return;
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 800 * (tries + 1)));
+        }
       }
       const profile = hydrate(stored, defaults);
       // First sign-in: create the row in Supabase so profile data is cloud-backed immediately.
@@ -321,8 +360,24 @@ export function ProfileProvider({ userId, name, fallback, children }: ProviderPr
     return () => {
       cancelled = true;
     };
-  }, [userId, name]);
+  }, [userId, name, attempt]);
 
+  if (loadFailed) {
+    return (
+      <div className="profile-load-error" role="alert">
+        <p>We couldn't load your profile. Check your connection and try again.</p>
+        <button
+          className="btn-primary"
+          onClick={() => {
+            setLoadFailed(false);
+            setAttempt((n) => n + 1);
+          }}
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
   if (!initial) return <>{fallback}</>;
   return (
     <LoadedProfileProvider userId={userId} initial={initial}>

@@ -23,7 +23,7 @@ export function Composer({ busy, onSend, onStop, focusKey, placeholder }: Compos
   }, [value]);
 
   useEffect(() => {
-    if (window.matchMedia("(pointer: fine)").matches) ref.current?.focus();
+    if (window.matchMedia("(pointer: fine)").matches) ref.current?.focus({ preventScroll: true });
   }, [focusKey]);
 
   const submit = () => {
@@ -70,9 +70,6 @@ export function Composer({ busy, onSend, onStop, focusKey, placeholder }: Compos
           </button>
         )}
       </form>
-      <p className="disclaimer">
-        Track2College can make mistakes. Confirm deadlines and requirements with your counselor or the college.
-      </p>
     </div>
   );
 }

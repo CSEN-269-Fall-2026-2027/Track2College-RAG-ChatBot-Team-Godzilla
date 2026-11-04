@@ -1,5 +1,5 @@
 import type { GameState } from "../game/progress";
-import type { Account, Conversation, CoursePlan, Profile, ProfileAnalysis, Transcript } from "../types";
+import type { Account, Conversation, CoursePlan, PersonalInfo, Profile, ProfileAnalysis, Transcript } from "../types";
 
 export interface Session {
   account: Account;
@@ -47,6 +47,11 @@ export interface DataStore {
     list(userId: string): Promise<CoursePlan[]>;
     save(userId: string, plan: CoursePlan): Promise<void>;
     remove(userId: string, id: string): Promise<void>;
+  };
+  /** Birthday and birthplace, kept apart from the profile. */
+  personalInfo: {
+    get(userId: string): Promise<PersonalInfo | null>;
+    save(userId: string, info: PersonalInfo): Promise<void>;
   };
   /** Story-mode progress (XP, achievements, mentor settings). */
   game: {

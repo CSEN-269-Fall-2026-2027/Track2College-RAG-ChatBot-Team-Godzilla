@@ -3,9 +3,9 @@ import { checkHealth } from "./api";
 import { AnalysisProvider } from "./analysis";
 import { AuthProvider, useAuth } from "./auth";
 import { ProfileProvider, useProfile } from "./profile";
+import { PiqDraftsProvider } from "./journey/usePiqDrafts";
 import { navigate, useLocation, type Route } from "./router";
 import { AuthPage } from "./pages/AuthPage";
-import { Materials } from "./pages/Materials";
 import { ProfilePage } from "./pages/ProfilePage";
 import { Advisor } from "./pages/Advisor";
 import { PlanningProvider } from "./planning";
@@ -25,7 +25,6 @@ export interface Handoff {
 }
 
 const TITLES: Record<Route, string> = {
-  materials: "Materials",
   profile: "Profile",
   advisor: "Advisor",
   map: "UC Journey Map",
@@ -119,7 +118,6 @@ function GatedApp({
       <main className="page">
         <AppTopbar route={route} health={health} theme={theme} onToggleTheme={toggleTheme} />
         {route === "map" && <JourneyMap userId={userId} onBack={() => navigate(lastRoute.current)} />}
-        {route === "materials" && <Materials tab={param} onAsk={askAdvisor} />}
         {route === "profile" && <ProfilePage section={param} onAsk={askAdvisor} />}
         <Advisor userId={userId} visible={route === "advisor"} onHealth={setHealth} handoff={handoff} />
       </main>
@@ -140,7 +138,9 @@ function Shell() {
       <AnalysisProvider userId={account.id}>
         <PlanningProvider userId={account.id}>
           <GameProvider userId={account.id}>
-            <GatedApp userId={account.id} theme={theme} toggleTheme={toggleTheme} health={health} setHealth={setHealth} />
+            <PiqDraftsProvider>
+              <GatedApp userId={account.id} theme={theme} toggleTheme={toggleTheme} health={health} setHealth={setHealth} />
+            </PiqDraftsProvider>
           </GameProvider>
         </PlanningProvider>
       </AnalysisProvider>

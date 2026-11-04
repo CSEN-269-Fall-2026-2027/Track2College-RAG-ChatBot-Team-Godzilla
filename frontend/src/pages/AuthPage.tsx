@@ -42,7 +42,7 @@ export function AuthPage({ theme, onToggleTheme }: { theme: Theme; onToggleTheme
       } else {
         await signIn(email, password);
       }
-      window.location.hash = mode === "signup" ? "/profile" : "/materials";
+      window.location.hash = mode === "signup" ? "/profile" : "/advisor";
     } catch (err) {
       setError(err instanceof AuthError ? err.message : "Something went wrong. Please try again.");
       setSubmitting(false);

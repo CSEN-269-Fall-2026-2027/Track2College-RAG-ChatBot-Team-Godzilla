@@ -1,6 +1,6 @@
 import { createClient, type Session as SupabaseSession } from "@supabase/supabase-js";
 import type { GameState } from "../game/progress";
-import type { Conversation, CoursePlan, Profile, ProfileAnalysis, Transcript } from "../types";
+import type { Conversation, CoursePlan, PersonalInfo, Profile, ProfileAnalysis, Transcript } from "../types";
 import { AuthError, type DataStore, type Session } from "./store";
 
 /** Generated schema types live in `./database.types` for reference / future typed queries. */
@@ -13,6 +13,7 @@ const TABLES = {
   transcripts: "transcripts",
   coursePlans: "course_plans",
   game: "game_progress",
+  personalInfo: "personal_info",
 } as const;
 const TRANSCRIPT_BUCKET = "transcripts";
 
@@ -65,6 +66,8 @@ export function createSupabaseStore(url: string, anonKey: string): DataStore {
   const profiles = singleton<Profile>(TABLES.profiles);
   const analyses = singleton<ProfileAnalysis>(TABLES.analyses);
   const game = singleton<Partial<GameState>>(TABLES.game);
+  const personalInfo = singleton<PersonalInfo>(TABLES.personalInfo);
+  // Every chat is kept as a record of what the student asked; the app never loads old ones back.
   const conversations = collection<Conversation>(TABLES.conversations);
   const transcripts = collection<Transcript>(TABLES.transcripts);
   const coursePlans = collection<CoursePlan>(TABLES.coursePlans);
@@ -107,6 +110,7 @@ export function createSupabaseStore(url: string, anonKey: string): DataStore {
     profiles,
     analyses,
     game,
+    personalInfo,
     async resetAllData(userId, email, password) {
       // Re-authenticate first so a stolen session alone can't wipe everything.
       const { error: authError } = await client.auth.signInWithPassword({ email: email.trim(), password });
@@ -144,7 +148,7 @@ export function createSupabaseStore(url: string, anonKey: string): DataStore {
           testPlan: "",
           coursework: "",
         },
-        goals: { majors: [], careers: "", whyCollege: "" },
+        goals: { majors: [], intendedMajor: "", careers: "", whyCollege: "" },
         activities: [],
         awards: [],
         colleges: [],

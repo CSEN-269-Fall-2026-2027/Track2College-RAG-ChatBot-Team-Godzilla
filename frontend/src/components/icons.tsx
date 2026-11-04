@@ -136,6 +136,35 @@ export const MailIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const MicIcon = ({ off, ...p }: IconProps & { off?: boolean }) => (
+  <Icon {...p}>
+    <rect x="9" y="3.5" width="6" height="11" rx="3" />
+    <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5" />
+    {off && <path d="M4 4l16 16" />}
+  </Icon>
+);
+
+export const VideoIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="6.5" width="12.5" height="11" rx="2.5" />
+    <path d="M15.5 10.5l5-3v9l-5-3z" />
+  </Icon>
+);
+
+/** Phone handset tipped down: leave the call. */
+export const PhoneOffIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3.2 13.6c4.9-4.4 12.7-4.4 17.6 0l-1.9 2.6a1.2 1.2 0 0 1-1.5.4l-2.6-1.2a1.2 1.2 0 0 1-.7-1.1v-1.7a10 10 0 0 0-4.2 0v1.7c0 .5-.3.9-.7 1.1l-2.6 1.2a1.2 1.2 0 0 1-1.5-.4z" />
+  </Icon>
+);
+
+export const TranscriptIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="4.5" y="3.5" width="15" height="17" rx="2.5" />
+    <path d="M8 8.5h8M8 12h8M8 15.5h5" />
+  </Icon>
+);
+
 export const LockIcon = (p: IconProps) => (
   <Icon {...p}>
     <rect x="5.5" y="11" width="13" height="9.5" rx="2" />

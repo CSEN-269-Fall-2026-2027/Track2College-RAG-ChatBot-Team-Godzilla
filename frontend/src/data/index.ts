@@ -7,7 +7,7 @@ const rawKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.t
 
 if (!rawUrl || !rawKey) {
   throw new Error(
-    "Supabase is required. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in frontend/.env.local (see ../supabase/README.md).",
+    "Supabase is required. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env at the project root (see supabase/README.md).",
   );
 }
 

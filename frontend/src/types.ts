@@ -13,6 +13,8 @@ export interface Message {
   mentorId?: string;
   responseTimeMs?: number;
   error?: boolean;
+  /** Sent by a ready-made button (not typed): long ones show collapsed with "See more". */
+  preset?: boolean;
   createdAt: number;
 }
 
@@ -113,8 +115,13 @@ export interface Profile {
     coursework: string;
   };
   goals: {
-    /** General major interests for advising; campus-specific majors live on colleges[].major. */
+    /** General major interests for advising (from onboarding). */
     majors: string[];
+    /**
+     * The one major the student applies for at every UC campus: one of UC_MAJORS, "Other", or ""
+     * (not chosen yet). Replaces the old per-campus colleges[].major.
+     */
+    intendedMajor: string;
     /** @deprecated Not required for UC prep; preserved if previously saved. */
     careers: string;
     /** @deprecated Not required for UC prep; preserved if previously saved. */
@@ -172,6 +179,78 @@ export interface UcJourneyState {
   submittedAt: number | null;
   /** Post-submission follow-up ticks. */
   followUps: Record<string, boolean>;
+  /** Story activity questions (ACTIVITY_QUESTIONS id) → how many, the entry it created, and the optional details reply. */
+  activitySurvey?: Record<string, ActivitySurveyAnswer>;
+  /** Student said they're done with (or skipping) activities on the Profile page. */
+  activitiesReviewed?: boolean;
+  /** Apply: what the agent has done for the student after story mode. */
+  agent?: AgentState;
+}
+
+/** Birthday and birthplace from the voice counselor call. Stored on its own, never in the Profile. */
+export interface PersonalInfo {
+  /** YYYY-MM-DD */
+  birthDate?: string;
+  birthCountry?: string;
+  birthCity?: string;
+}
+
+export interface CallLine {
+  role: "student" | "counselor";
+  text: string;
+}
+
+/** How Sage helps on story mode's Review & Apply step. */
+export type ReviewMode = "counselor" | "assistant";
+
+/** What Penny helps with on story mode's Financial Aid step. */
+export type AidMode = "fafsa" | "scholarships";
+
+/** A story step's mode, sent with the chat so the guide's prompt follows it. */
+export type StoryMode = ReviewMode | AidMode;
+
+export interface AgentState {
+  /** Story mode's Review & Apply step: Counselor or Application assistant (switchable any time). */
+  reviewMode?: ReviewMode;
+  /** Story mode's Financial Aid step: FAFSA or Scholarships (switchable any time). */
+  aidMode?: AidMode;
+  /** Which counselor the "Talk to a counselor" task shows: the AI voice call or the student's own school counselor. */
+  counselorMode?: "virtual" | "school";
+  /** Counselor the student confirmed. */
+  counselor?: { name: string; email: string; title: string; serves: string; sourceUrl: string; confirmedAt: number };
+  /** Email to the counselor: drafted here, sent by the student from Gmail. */
+  counselorEmail?: { subject: string; body: string; openedAt?: number; sentAt?: number };
+  /** Last voice call with the practice counselor; the email is drafted from it. */
+  counselorCall?: { endedAt: number; lines: CallLine[] };
+  /** Student marked the FAFSA / CA Dream Act Application submitted. */
+  fafsaDoneAt?: number;
+  /** Student marked their UC Statement of Intent to Register submitted. */
+  sirDoneAt?: number;
+  /** UC application login. Saved so the student can see it again and so we can sign them in. */
+  ucAccount?: {
+    email: string;
+    password: string;
+    generatedAt: number;
+    /** UC accepted the sign-up form. */
+    createdAt?: number;
+    /** The verification code went through (or a sign-in got past it). */
+    verifiedAt?: number;
+    /** Application level and start term were filled in on UC. */
+    setupAt?: number;
+    /** UC's "About you" category was completed. */
+    aboutAt?: number;
+    /** The personal insight answers were entered on UC. */
+    piqAt?: number;
+    signedInAt?: number;
+  };
+}
+
+export interface ActivitySurveyAnswer {
+  /** 0 = "No". */
+  count: number;
+  activityId?: string;
+  /** Undefined until the details question is answered; "" when submitted empty. */
+  details?: string;
 }
 
 export interface OnboardingState {
