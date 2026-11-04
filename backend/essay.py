@@ -19,6 +19,9 @@ RULES:
 4. Never claim the essay is ready to submit unchanged; frame drafts as starting points.
 5. When mode is "ideas", return 3–5 distinct topic angles. When mode is "draft", write one essay
    of roughly 450–650 words that answers the prompt, plus a short title.
+6. In the essay and its title, NEVER use a hyphen (-), an em dash, an en dash, or other special characters:
+   write "first generation" and "part time", or reword the sentence. Use only plain English letters, numbers,
+   spaces and these marks: . , ! ? ' ; : ( ). No curly quotes, symbols, emoji or accented letters.
 
 Respond with ONLY a JSON object, no markdown fences:
 {

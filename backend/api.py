@@ -6,7 +6,7 @@ import os
 import time
 import uuid
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
@@ -24,6 +24,8 @@ from course_plan import build_course_plan
 from essay import generate_essay
 from piq import generate_piqs
 import uc_account
+from auth import Student, current_student
+from fastapi import Header
 from counselor import draft_counselor_email, find_counselors
 
 app = FastAPI(
@@ -43,6 +45,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# The UC assistant's routes also need an up-to-date page and can be paused during a rollout.
+UC_CLIENT_VERSION = 2
+
+
+def uc_student(
+    student: Student = Depends(current_student),
+    x_t2c_client: Optional[str] = Header(default=None),
+) -> Student:
+    """The signed-in student, for UC assistant routes only.
+
+    UC_ASSISTANT_PAUSED=1 turns the assistant off for everyone (503) during a rollout. Pages from
+    before this version don't send X-T2C-Client, so they get 426 and must refresh.
+    """
+    if os.getenv("UC_ASSISTANT_PAUSED", "").strip() == "1":
+        raise HTTPException(status_code=503, detail="The UC assistant is paused for a quick update. Refresh this page in a few minutes.")
+    try:
+        version = int(x_t2c_client or 0)
+    except ValueError:
+        version = 0
+    if version < UC_CLIENT_VERSION:
+        raise HTTPException(status_code=426, detail="This page is out of date. Refresh it to keep using the UC assistant.")
+    return student
+
 
 MAX_CONVERSATION_TURNS = 4
 _session_lock = Lock()
@@ -323,6 +349,11 @@ def _get_or_create_session_id(session_id: Optional[str]) -> str:
     return str(uuid.uuid4())
 
 
+def _session_key(student: Student, session_id: str) -> str:
+    """Chat memory is kept per student, so one student can't read or clear another's."""
+    return f"{student.id}:{session_id}"
+
+
 def _get_session_memory(session_id: str) -> Deque[Dict[str, str]]:
     with _session_lock:
         if session_id not in _session_store:
@@ -341,13 +372,13 @@ async def health() -> HealthResponse:
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
+async def chat(request: ChatRequest, student: Student = Depends(current_student)) -> ChatResponse:
     query_text = request.query.strip()
     if not query_text:
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
     session_id = _get_or_create_session_id(request.session_id)
-    session_memory = _get_session_memory(session_id)
+    session_memory = _get_session_memory(_session_key(student, session_id))
     memory_snapshot = list(session_memory)
     start_time = time.perf_counter()
 
@@ -389,10 +420,10 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
 
 @app.delete("/chat/{session_id}")
-async def clear_session(session_id: str):
+async def clear_session(session_id: str, student: Student = Depends(current_student)):
     with _session_lock:
-        existed = session_id in _session_store
-        _session_store.pop(session_id, None)
+        existed = _session_key(student, session_id) in _session_store
+        _session_store.pop(_session_key(student, session_id), None)
     return {
         "session_id": session_id,
         "cleared": existed,
@@ -400,7 +431,7 @@ async def clear_session(session_id: str):
 
 
 @app.post("/profile/analysis", response_model=ProfileAnalysisResponse)
-def profile_analysis(request: ProfileAnalysisRequest) -> ProfileAnalysisResponse:
+def profile_analysis(request: ProfileAnalysisRequest, student: Student = Depends(current_student)) -> ProfileAnalysisResponse:
     if not request.profile_summary.strip() and not request.colleges:
         raise HTTPException(status_code=400, detail="Add some profile details or colleges before running an analysis.")
     try:
@@ -413,7 +444,7 @@ def profile_analysis(request: ProfileAnalysisRequest) -> ProfileAnalysisResponse
 
 
 @app.post("/transcript/analyze", response_model=TranscriptResponse)
-def transcript_analyze(request: TranscriptRequest) -> TranscriptResponse:
+def transcript_analyze(request: TranscriptRequest, student: Student = Depends(current_student)) -> TranscriptResponse:
     try:
         result = analyze_transcript(request.file_name, request.mime_type, request.content_base64)
     except TranscriptError as error:
@@ -426,7 +457,7 @@ def transcript_analyze(request: TranscriptRequest) -> TranscriptResponse:
 
 
 @app.post("/plan/courses", response_model=CoursePlanResponse)
-def plan_courses(request: CoursePlanRequest) -> CoursePlanResponse:
+def plan_courses(request: CoursePlanRequest, student: Student = Depends(current_student)) -> CoursePlanResponse:
     try:
         result = build_course_plan(
             request.college.strip(),
@@ -443,7 +474,7 @@ def plan_courses(request: CoursePlanRequest) -> CoursePlanResponse:
 
 
 @app.post("/essay/generate", response_model=EssayResponse)
-def essay_generate(request: EssayRequest) -> EssayResponse:
+def essay_generate(request: EssayRequest, student: Student = Depends(current_student)) -> EssayResponse:
     if not request.prompt.strip():
         raise HTTPException(status_code=400, detail="Paste an essay prompt first.")
     mode = "ideas" if request.mode.strip().lower() == "ideas" else "draft"
@@ -457,7 +488,7 @@ def essay_generate(request: EssayRequest) -> EssayResponse:
 
 
 @app.post("/essay/piqs", response_model=PiqResponse)
-def essay_piqs(request: PiqRequest) -> PiqResponse:
+def essay_piqs(request: PiqRequest, student: Student = Depends(current_student)) -> PiqResponse:
     """Drafts the student's chosen UC Personal Insight Questions (max 350 words each) with Groq."""
     try:
         essays = generate_piqs(
@@ -476,7 +507,7 @@ def essay_piqs(request: PiqRequest) -> PiqResponse:
 
 
 @app.post("/agent/counselor/find", response_model=CounselorFindResponse)
-def agent_counselor_find(request: CounselorFindRequest) -> CounselorFindResponse:
+def agent_counselor_find(request: CounselorFindRequest, student: Student = Depends(current_student)) -> CounselorFindResponse:
     """Searches the web for the counselors at the student's high school."""
     try:
         counselors = find_counselors(request.high_school, request.city, request.state, request.last_name)
@@ -488,7 +519,7 @@ def agent_counselor_find(request: CounselorFindRequest) -> CounselorFindResponse
 
 
 @app.post("/agent/counselor/email", response_model=CounselorEmailResponse)
-def agent_counselor_email(request: CounselorEmailRequest) -> CounselorEmailResponse:
+def agent_counselor_email(request: CounselorEmailRequest, student: Student = Depends(current_student)) -> CounselorEmailResponse:
     """Drafts the student's email to their counselor; the student sends it themselves."""
     try:
         result = draft_counselor_email(request.counselor_name, request.student_name, request.profile_summary, request.call_transcript)
@@ -501,8 +532,8 @@ def agent_counselor_email(request: CounselorEmailRequest) -> CounselorEmailRespo
 
 
 @app.post("/agent/uc-account/start", response_model=UcAccountStartResponse)
-def agent_uc_account_start(request: UcAccountStartRequest) -> UcAccountStartResponse:
-    """Opens the UC application in a visible browser window and signs in or fills in sign-up."""
+def agent_uc_account_start(request: UcAccountStartRequest, student: Student = Depends(uc_student)) -> UcAccountStartResponse:
+    """Opens the UC application in a browser window and signs in or fills in sign-up."""
     try:
         facts = {k: v[:200] for k, v in list(request.facts.items())[:40] if isinstance(v, str)}
         run_id = uc_account.start(
@@ -514,6 +545,7 @@ def agent_uc_account_start(request: UcAccountStartRequest) -> UcAccountStartResp
             request.verified,
             [q.model_dump() for q in request.piqs],
             request.browser,
+            owner=student.id,
         )
     except uc_account.UcAccountError as error:
         raise HTTPException(status_code=400, detail=str(error))
@@ -521,8 +553,8 @@ def agent_uc_account_start(request: UcAccountStartRequest) -> UcAccountStartResp
 
 
 @app.get("/agent/uc-account/status/{run_id}", response_model=UcAccountStatusResponse)
-def agent_uc_account_status(run_id: str) -> UcAccountStatusResponse:
-    run = uc_account.status(run_id)
+def agent_uc_account_status(run_id: str, student: Student = Depends(uc_student)) -> UcAccountStatusResponse:
+    run = uc_account.status(run_id, student.id)
     if not run:
         raise HTTPException(status_code=404, detail="That UC window session wasn't found. Start again.")
     return UcAccountStatusResponse(**run)
@@ -537,7 +569,7 @@ class CounselorCallProblemRequest(BaseModel):
 
 
 @app.post("/agent/counselor/voice", response_model=CounselorVoiceResponse)
-def agent_counselor_voice() -> CounselorVoiceResponse:
+def agent_counselor_voice(student: Student = Depends(current_student)) -> CounselorVoiceResponse:
     """Starts a voice call with the ElevenLabs practice counselor; the key stays on the server."""
     try:
         from voice import counselor_session_token
@@ -549,7 +581,7 @@ def agent_counselor_voice() -> CounselorVoiceResponse:
 
 
 @app.post("/agent/counselor/voice/problem")
-def agent_counselor_voice_problem(request: CounselorCallProblemRequest) -> dict:
+def agent_counselor_voice_problem(request: CounselorCallProblemRequest, student: Student = Depends(current_student)) -> dict:
     """Why a counselor call ended before Jordan spoke (e.g. out of credits), or null."""
     try:
         from voice import counselor_call_problem
@@ -572,9 +604,9 @@ def close_leftover_cloud_browsers() -> None:
 
 
 @app.get("/agent/uc-account/active")
-def agent_uc_account_active() -> dict:
-    """The UC window that's open right now, if any, so a reopened popup can show and stop it."""
-    found = uc_account.active()
+def agent_uc_account_active(student: Student = Depends(uc_student)) -> dict:
+    """This student's UC window that's open right now, if any, so a reopened popup can show and stop it."""
+    found = uc_account.active(student.id)
     if not found:
         return {"run_id": None, "run": None}
     run_id, run = found
@@ -582,33 +614,34 @@ def agent_uc_account_active() -> dict:
 
 
 @app.post("/agent/uc-account/close-cloud")
-def agent_uc_account_close_cloud() -> dict:
-    """Ends the open run (if any) and closes every cloud browser of this app that nothing is using."""
-    found = uc_account.active()
+def agent_uc_account_close_cloud(student: Student = Depends(uc_student)) -> dict:
+    """Ends this student's open run (if any) and closes cloud browsers of this app that no run is using.
+    Other students' open sessions are always kept."""
+    found = uc_account.active(student.id)
     if found:
-        uc_account.cancel(found[0])
+        uc_account.cancel(found[0], student.id)
     import cloud_browser
 
     # The stopped run releases its own session too; releasing it twice is harmless.
-    closed = cloud_browser.release_leftovers()
+    closed = cloud_browser.release_leftovers(keep=uc_account.open_sessions(excluding_owner=student.id))
     return {"ok": True, "stopped_run": bool(found), "closed_sessions": closed}
 
 
 @app.post("/agent/uc-account/cancel/{run_id}")
-def agent_uc_account_cancel(run_id: str) -> dict:
+def agent_uc_account_cancel(run_id: str, student: Student = Depends(uc_student)) -> dict:
     """Stops a run; in cloud mode its Browserbase session is released."""
     try:
-        uc_account.cancel(run_id)
+        uc_account.cancel(run_id, student.id)
     except uc_account.UcAccountError as error:
         raise HTTPException(status_code=404, detail=str(error))
     return {"ok": True}
 
 
 @app.post("/agent/uc-account/code/{run_id}")
-def agent_uc_account_code(run_id: str, request: UcAccountCodeRequest) -> dict:
+def agent_uc_account_code(run_id: str, request: UcAccountCodeRequest, student: Student = Depends(uc_student)) -> dict:
     """Types the student's UC verification code into the open UC window."""
     try:
-        uc_account.submit_code(run_id, request.code)
+        uc_account.submit_code(run_id, student.id, request.code)
     except uc_account.UcAccountError as error:
         raise HTTPException(status_code=400, detail=str(error))
     return {"ok": True}

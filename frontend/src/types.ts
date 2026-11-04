@@ -226,10 +226,11 @@ export interface AgentState {
   fafsaDoneAt?: number;
   /** Student marked their UC Statement of Intent to Register submitted. */
   sirDoneAt?: number;
-  /** UC application login. Saved so the student can see it again and so we can sign them in. */
+  /** UC application login. Saved only once UC has accepted it (a new account or a sign-in). */
   ucAccount?: {
     email: string;
-    password: string;
+    /** Missing on records saved while passwords were kept elsewhere; the UC task fills it in. */
+    password?: string;
     generatedAt: number;
     /** UC accepted the sign-up form. */
     createdAt?: number;

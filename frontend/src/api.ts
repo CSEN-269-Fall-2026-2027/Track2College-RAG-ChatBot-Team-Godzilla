@@ -27,9 +27,21 @@ export class ApiError extends Error {
   }
 }
 
-async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+/**
+ * This page's version. The server refuses UC assistant requests from older pages (no header) with 426,
+ * so a tab left open across an update must refresh before it can use the assistant again.
+ */
+export const CLIENT_VERSION = "2";
+
+/** The signed-in student's session (every route except /health requires it), plus this page's version. */
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "X-T2C-Client": CLIENT_VERSION };
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  return headers;
+}
+
+async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  const headers: Record<string, string> = { ...authHeaders(), "Content-Type": "application/json" };
 
   let response: Response;
   try {
@@ -312,7 +324,7 @@ export async function cancelUcAccount(runId: string): Promise<void> {
 /** The UC window that's open right now (e.g. from before the popup was closed), or null. */
 export async function activeUcRun(): Promise<{ runId: string; run: UcRun } | null> {
   try {
-    const response = await fetch(`${API_BASE}/agent/uc-account/active`);
+    const response = await fetch(`${API_BASE}/agent/uc-account/active`, { headers: authHeaders() });
     if (!response.ok) return null;
     const data = (await response.json()) as { run_id: string | null; run: UcRun | null };
     return data.run_id && data.run ? { runId: data.run_id, run: data.run } : null;
@@ -331,7 +343,7 @@ export async function submitUcCode(runId: string, code: string): Promise<void> {
   await post(`/agent/uc-account/code/${encodeURIComponent(runId)}`, { code });
 }
 
-/** Opens the UC application in a browser window on this computer and signs in or fills in sign-up. */
+/** Opens the UC application in a browser window and signs in or fills in sign-up. */
 export async function startUcAccount(
   email: string,
   password: string,
@@ -359,7 +371,7 @@ export async function startUcAccount(
 export async function ucAccountStatus(runId: string, signal?: AbortSignal): Promise<UcRun> {
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}/agent/uc-account/status/${encodeURIComponent(runId)}`, { signal });
+    response = await fetch(`${API_BASE}/agent/uc-account/status/${encodeURIComponent(runId)}`, { headers: authHeaders(), signal });
   } catch (error) {
     if (signal?.aborted) throw error;
     throw new ApiError(`Couldn't reach the Track2College server at ${API_BASE}.`, true);
@@ -370,7 +382,7 @@ export async function ucAccountStatus(runId: string, signal?: AbortSignal): Prom
 
 export async function clearSession(sessionId: string): Promise<void> {
   try {
-    await fetch(`${API_BASE}/chat/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+    await fetch(`${API_BASE}/chat/${encodeURIComponent(sessionId)}`, { method: "DELETE", headers: authHeaders() });
   } catch {
     // Server-side memory is ephemeral; failing to clear it is harmless.
   }

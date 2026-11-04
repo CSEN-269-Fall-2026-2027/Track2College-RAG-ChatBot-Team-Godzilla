@@ -4,7 +4,7 @@ import type { UcBrowser } from "../../api";
 import { agentOf, callLogMessage, setAgent } from "../../agent/logic";
 import { mentorById, REVIEW_GUIDES, type Mentor } from "../../game/characters";
 import type { ReviewTool } from "../../game/openers";
-import { SchoolCounselor, UcAccountTask, UcCredentials, VirtualCounselor } from "../../agent/tasks";
+import { SchoolCounselor, UcAccountTask, UcLogin, VirtualCounselor, type UcLoginDraft } from "../../agent/tasks";
 import { useProfile } from "../../profile";
 import type { AgentState, ReviewMode } from "../../types";
 import { XIcon } from "../icons";
@@ -79,7 +79,6 @@ export function ReviewPersonaPicker({
 
 interface ToolCopy {
   title: string;
-  subtitle: string;
   guide: "counselor" | "assistant";
   /** What happens, shown beside the tool. */
   steps: string[];
@@ -89,14 +88,12 @@ interface ToolCopy {
 const TOOL_COPY: Record<ReviewTool, ToolCopy> = {
   email: {
     title: "Email your school counselor",
-    subtitle: "We find your counselor, then write the email with you.",
     guide: "counselor",
     steps: ["Find your counselor on your school's website", "Review and edit the draft", "Open it in Gmail and click Send"],
     note: "Nothing is sent until you click Send in Gmail.",
   },
   call: {
     title: "Meet with your virtual counselor",
-    subtitle: "A video call with Jordan, an AI counselor who already knows your profile.",
     guide: "counselor",
     steps: [
       "Jordan checks in on how your application is going",
@@ -107,13 +104,8 @@ const TOOL_COPY: Record<ReviewTool, ToolCopy> = {
   },
   apply: {
     title: "Your UC application",
-    subtitle: "We open the official UC application on this computer and fill in what we know.",
     guide: "assistant",
-    steps: [
-      "Create your UC account, or sign in to it",
-      "Enter the code UC emails you",
-      "We fill in About you and your Personal Insight answers",
-    ],
+    steps: ["Create your UC account, or sign in to it", "We fill out your application"],
     note: "",
   },
 };
@@ -195,7 +187,10 @@ export function ReviewToolDialog({ tool, onClose, onCallLog }: { tool: ReviewToo
   const [browser, setBrowser] = useState<UcBrowser>("cloud");
   const [running, setRunning] = useState(false);
   const onBusyChange = useCallback((busy: boolean) => setRunning(busy), []);
-  const subtitle = tool === "apply" && browser === "cloud" ? copy.subtitle.replace("on this computer", "in a cloud browser") : copy.subtitle;
+  // The login typed in the side panel. It's only saved to the profile once UC accepts it.
+  const [ucLogin, setUcLogin] = useState<UcLoginDraft | null>(() =>
+    agent.ucAccount ? { email: agent.ucAccount.email, password: agent.ucAccount.password ?? "" } : null,
+  );
 
   // Focus moves into the pop-up and returns to the chat button that opened it.
   useEffect(() => {
@@ -257,16 +252,8 @@ export function ReviewToolDialog({ tool, onClose, onCallLog }: { tool: ReviewToo
       <div ref={dialogRef} className={`tool-dialog tool-dialog-${tool}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <header className="tool-dialog-head">
           <div className="tool-dialog-heading">
-            {/* Only the email pop-up shows its guide here: the call shows Jordan in the call card, and the
-                application pop-up already has the assistant in its sidebar. */}
-            {tool === "email" && (
-              <span className="tool-dialog-avatar" aria-hidden="true">
-                <img src={`/mentors/${copy.guide}.png`} alt="" />
-              </span>
-            )}
             <span>
               <h2 id={titleId}>{copy.title}</h2>
-              <p>{subtitle}</p>
             </span>
           </div>
           <div className="tool-dialog-actions">
@@ -290,7 +277,7 @@ export function ReviewToolDialog({ tool, onClose, onCallLog }: { tool: ReviewToo
                 ))}
               </ol>
               {tool === "apply" ? (
-                agent.ucAccount && <UcCredentials email={agent.ucAccount.email} password={agent.ucAccount.password} />
+                <UcLogin agent={agent} change={change} locked={running} login={ucLogin} onLogin={setUcLogin} />
               ) : (
                 <p className="tool-dialog-note">{copy.note}</p>
               )}
@@ -319,7 +306,7 @@ export function ReviewToolDialog({ tool, onClose, onCallLog }: { tool: ReviewToo
                 />
               )}
               {tool === "apply" && (
-                <UcAccountTask agent={agent} change={change} browser={browser} onBusyChange={onBusyChange} onRunBrowser={setBrowser} />
+                <UcAccountTask agent={agent} change={change} login={ucLogin} browser={browser} onBusyChange={onBusyChange} onRunBrowser={setBrowser} />
               )}
             </div>
           </div>

@@ -419,7 +419,12 @@ function LoadedProfileProvider({ userId, initial, children }: { userId: string; 
   }, [persist]);
 
   const update = useCallback((change: (draft: Profile) => Profile) => {
-    setProfile((prev) => ({ ...change(prev), updatedAt: Date.now() }));
+    // A change that changes nothing isn't saved: saving writes the whole profile, which could
+    // overwrite newer work from another tab.
+    setProfile((prev) => {
+      const next = change(prev);
+      return next === prev ? prev : { ...next, updatedAt: Date.now() };
+    });
   }, []);
 
   const value = useMemo(() => ({ profile, update, saveState }), [profile, update, saveState]);

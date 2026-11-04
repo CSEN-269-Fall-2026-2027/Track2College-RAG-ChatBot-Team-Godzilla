@@ -175,7 +175,7 @@ COUNSELOR_CONFIG = {
         },
     },
     "tts": {"voice_id": "EXAVITQu4vr4xnSDxMaL", "model_id": "eleven_v4_turbo"},
-    "turn": {"turn_eagerness": "patient"},
+    "turn": {"turn_eagerness": "patient", "turn_timeout": 20},
     "conversation": {"max_duration_seconds": 900},
 }
 

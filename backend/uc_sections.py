@@ -12,6 +12,8 @@ from __future__ import annotations
 import re
 import time
 
+import redact
+
 CATEGORIES = [
     "About you",
     "Campuses & majors",
@@ -269,7 +271,7 @@ def save_and_continue(page) -> bool:
 
 def log(message: str) -> None:
     """One line per decision in the backend console, so a stuck run shows what it saw and did."""
-    print(f"[uc] {message}")
+    print(redact.redact(f"[uc] {message}"))
 
 
 def click_text(page, name: str) -> bool:
@@ -485,6 +487,19 @@ def piq_answered(page, number: int) -> bool:
 def open_piq_answer(page, number: int) -> bool:
     """Clicks question N's Answer button (or Edit, when UC already has an answer); True once the answer page shows."""
     code = f"{number + 1:02d}"
+    # One round trip for the usual case. Clicked after this call returns, because it navigates.
+    clicked = page.evaluate(
+        """(ids) => {
+          for (const id of ids) {
+            const b = document.getElementById(id);
+            if (b && b.getClientRects().length) { setTimeout(() => b.click()); return true; }
+          }
+          return false;
+        }""",
+        [f"answer_{code}", f"edit_{code}"],
+    )
+    if clicked:
+        return _piq_answer_opened(page, number)
     box = _piq_box(page, number)
     button = None
     for candidate in (page.locator(f"#answer_{code}"), page.locator(f"#edit_{code}"), box.locator(".answer-btn"), box.locator(".edit-btn")):
@@ -495,6 +510,10 @@ def open_piq_answer(page, number: int) -> bool:
         log(f"no Answer or Edit button for question {number}")
         return False
     button.first.click()
+    return _piq_answer_opened(page, number)
+
+
+def _piq_answer_opened(page, number: int) -> bool:
     try:
         page.wait_for_selector("#answerBox", state="visible", timeout=10_000)
     except Exception:  # noqa: BLE001
@@ -566,7 +585,7 @@ def continue_from_piq_questions(page) -> bool:
 
 def on_piq_answer_page(page) -> bool:
     try:
-        return page.locator("#answerBox").count() > 0 and page.locator("#answerBox").first.is_visible()
+        return page.evaluate("() => { const b = document.getElementById('answerBox'); return !!b && b.getClientRects().length > 0; }")
     except Exception:  # noqa: BLE001
         return False
 
@@ -615,18 +634,52 @@ def type_piq_answer(page, text: str) -> None:
     page.evaluate("t => { const f = document.getElementById('answerText'); if (f) f.value = t; }", "\n\n".join(paragraphs))
 
 
+def replace_piq_answer(page, text: str) -> bool:
+    """Puts `text` in the answer box in one trip to the browser, which matters in cloud mode; True if it landed.
+
+    Uses the browser's own editing commands, so the box ends up as if typed. Falls back to real keystrokes.
+    """
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]
+    wanted = " ".join(" ".join(paragraphs).split())
+    try:
+        got = page.evaluate(_REPLACE_ANSWER_JS, paragraphs)
+    except Exception:  # noqa: BLE001 — try the slow way
+        got = ""
+    if " ".join((got or "").split()) == wanted:
+        return True
+    log("couldn't fill the answer box in one step; typing it instead")
+    if piq_box_text(page).strip() and not clear_piq_answer(page):
+        return False
+    type_piq_answer(page, text)
+    return " ".join(piq_box_text(page).split()) == wanted
+
+
+_REPLACE_ANSWER_JS = """(paragraphs) => {
+  const box = document.getElementById('answerBox');
+  box.focus();
+  document.execCommand('selectAll');
+  document.execCommand('delete');
+  paragraphs.forEach((text, i) => {
+    if (i) { document.execCommand('insertParagraph'); document.execCommand('insertParagraph'); }
+    document.execCommand('insertText', false, text);
+  });
+  // UC refreshes its word counter on keyup (which also rewrites the hidden field, so that goes after).
+  box.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+  const field = document.getElementById('answerText');
+  if (field) field.value = paragraphs.join('\\n\\n');
+  return box.innerText;
+}"""
+
+
 def save_piq_answer(page) -> bool:
     """Clicks Save & continue on an answer page; True once UC leaves the answer page."""
-    button = page.locator("#save-btn")
-    if not (button.count() and button.first.is_visible()):
-        log("no Save & continue on the answer page")
+    try:
+        page.click("#save-btn", timeout=5_000)
+        page.wait_for_selector("#answerBox", state="hidden", timeout=10_000)
+    except Exception:  # noqa: BLE001 — no button, or UC stayed on the page (e.g. it refused the answer)
+        log("UC stayed on the answer page after Save & continue")
         return False
-    button.first.click()
-    for _ in range(40):
-        page.wait_for_timeout(250)
-        if not on_piq_answer_page(page):
-            return True
-    return False
+    return True
 
 
 def cancel_piq_answer(page) -> None:

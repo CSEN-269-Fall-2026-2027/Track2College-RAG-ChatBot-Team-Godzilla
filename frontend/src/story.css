@@ -1331,24 +1331,6 @@
   min-width: 0;
 }
 
-.tool-dialog-avatar {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 14px;
-  background: var(--accent-soft);
-  overflow: hidden;
-}
-
-.tool-dialog-avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  image-rendering: pixelated;
-}
-
 .tool-dialog-heading h2 {
   margin: 0;
   font-size: 20px;
@@ -1781,10 +1763,6 @@
   background: var(--success-soft);
 }
 
-.cloud-browser-detail.is-bad {
-  background: var(--danger-soft);
-}
-
 .cloud-browser-screen {
   position: relative;
   aspect-ratio: 4 / 3;
@@ -1799,6 +1777,59 @@
   height: 100%;
   border: 0;
   background: #fff;
+}
+
+.cloud-browser-popup-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.cloud-browser-popup {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 380px;
+  margin: auto;
+  padding: 24px;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25);
+}
+
+.cloud-browser-popup h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.cloud-browser-popup p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.cloud-browser-popup p.form-error {
+  color: var(--danger);
+}
+
+.cloud-browser-popup input {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 16px;
 }
 
 .cloud-browser-empty {
@@ -1903,13 +1934,144 @@
   font-weight: 700;
 }
 
+/* Local tab, no UC account yet: rolls along the bottom of the panel, then waits offscreen.
+   Crossing takes 28s of the 33s loop. */
+.tool-dialog-apply .tool-dialog-main {
+  position: relative;
+}
+
+.uc-tumbleweed-track {
+  position: absolute;
+  inset: auto 0 20px;
+  height: 128px;
+  overflow: hidden;
+  pointer-events: none;
+  container-type: inline-size;
+}
+
+.uc-tumbleweed {
+  display: block;
+  width: 128px;
+  height: 128px;
+  transform: translateX(-128px);
+  animation: uc-tumbleweed-roll 33s linear infinite;
+}
+
+@keyframes uc-tumbleweed-roll {
+  0% {
+    transform: translateX(-128px) rotate(0deg);
+  }
+  84.848%,
+  100% {
+    transform: translateX(100cqw) rotate(1080deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .uc-tumbleweed-track {
+    display: none;
+  }
+}
+
+/* Fixed rows keep the computer in place, above center, whatever appears under it. */
+.tool-dialog-apply .uc-local-step {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto minmax(0, 2fr);
+  justify-items: center;
+  gap: 0;
+}
+
+.uc-local-computer {
+  grid-row: 2;
+  display: block;
+  width: 320px;
+  max-width: 80%;
+  height: auto;
+}
+
+.uc-local-below {
+  grid-row: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  padding-top: 20px;
+}
+
+.uc-local-below .uc-run {
+  justify-content: center;
+  max-width: 560px;
+  text-align: center;
+}
+
+.uc-local-below .form-error {
+  width: min(100%, 460px);
+  text-align: center;
+}
+
+/* Floats over the panel: it's too tall to fit under the button without moving things. */
+.uc-local-below .uc-code {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  width: min(90%, 520px);
+  background: var(--bg-elevated);
+  box-shadow: 0 16px 40px -12px rgba(20, 50, 90, 0.35);
+  transform: translate(-50%, -50%);
+}
+
 .agent-actions:has(.uc-run-big) {
   flex-wrap: wrap;
+}
+
+.tool-dialog-main .agent-actions:has(.uc-run-big) {
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tool-dialog-main .agent-actions:has(.uc-run-big) .agent-diy {
+  position: absolute;
+  right: 24px;
+  bottom: 20px;
+  margin: 0;
+}
+
+.tool-dialog-main .uc-run-big {
+  width: auto;
+  min-height: 44px;
+  padding-inline: 24px;
+  border-radius: 12px;
+  font-size: 15px;
 }
 
 .tool-dialog-aside .uc-creds {
   margin-top: 4px;
   background: var(--bg-elevated);
+}
+
+.uc-login-choice,
+.uc-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.uc-start-over {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.uc-login-form .uc-cred-secret input {
+  flex: 1;
+  min-width: 0;
 }
 
 .tool-dialog-aside .uc-cred {
@@ -2081,6 +2243,12 @@
     flex: none;
     width: 225px;
     height: clamp(150px, 30dvh, 255px);
+  }
+
+  /* Sits near the bottom of the sidebar, away from the steps. */
+  .tool-dialog-apply .uc-login-choice {
+    margin-top: auto;
+    margin-bottom: 56px;
   }
 }
 
