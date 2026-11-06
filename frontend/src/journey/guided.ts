@@ -319,9 +319,9 @@ function turnsFor(
     if (!ucs.length) {
       out.push({
         id: "pick-uc",
-        speaker: "sage",
+        speaker: "theo",
         prompt: hi(
-          "profile done! Next, choose your UC campuses. One application covers all nine — check every campus you'll apply to, then hit Submit.",
+          "profile done! Next, choose your UC campuses. One application covers all nine — check every campus you'll apply to, then hit Submit. Not sure yet? Ask me what any of them is like.",
         ),
         choices: [],
         campusPicker: true,

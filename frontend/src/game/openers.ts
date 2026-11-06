@@ -1,3 +1,4 @@
+import { COLLEGE_NAMES } from "../colleges";
 import { PIQ_PROMPTS, journeyOf } from "../journey/logic";
 import type { AidMode, Profile, ReviewMode, StoryMode } from "../types";
 import type { Mentor } from "./characters";
@@ -98,6 +99,22 @@ export function openerFor(mentor: Mentor, profile: Profile, name: string, mode?:
     return {
       text: `${hi} You've picked ${list}. Which one should we work on writing today?`,
       actions: chosen.map((q) => ({ kind: "ask", label: `Write: ${q.title}`, prompt: draftPrompt(q.prompt) })),
+    };
+  }
+
+  if (mentor.id === "theo") {
+    const chosen = profile.colleges.map((c) => c.name).filter((n) => COLLEGE_NAMES.includes(n));
+    const campusButtons: OpenerAction[] = COLLEGE_NAMES.map((n) => ({ kind: "ask", label: n, prompt: `What's special about ${n}? What sets it apart from the other UCs?` }));
+    if (chosen.length > 1) {
+      const list = `${chosen.slice(0, -1).join(", ")} and ${chosen[chosen.length - 1]}`;
+      return {
+        text: `${hi} You've got ${list} on your list. Want me to compare them, or tell you about another campus?`,
+        actions: [{ kind: "ask", label: "Compare my campuses", prompt: `Compare ${list}. How do they feel different, and what is each known for?` }, ...campusButtons],
+      };
+    }
+    return {
+      text: `${hi} I'm Theo, and I've walked all nine UC campuses. Want the quick tour, or is there one you're curious about?`,
+      actions: [{ kind: "ask", label: "Tell me about each UC", prompt: "Tell me a little about each UC campus." }, ...campusButtons],
     };
   }
 

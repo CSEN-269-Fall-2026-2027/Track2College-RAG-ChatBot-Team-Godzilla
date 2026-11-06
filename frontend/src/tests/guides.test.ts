@@ -14,7 +14,8 @@ describe("stage guides", () => {
   });
 
   it("selects the planet a different guide owns", () => {
-    expect(stageFor("penny", "review")).toBe("ucs");
+    expect(stageFor("penny", "review")).toBe("aid");
+    expect(stageFor("theo", "review")).toBe("ucs");
     expect(stageFor("milo", "profile")).toBe("activities");
     expect(stageFor("quill", "ucs")).toBe("essays");
     expect(stageFor("sage", "essays")).toBe("profile");

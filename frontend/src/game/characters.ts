@@ -12,7 +12,7 @@ export interface Palette {
 
 export interface Mentor {
   /** Also the backend persona id (backend/persona.py). */
-  id: "sage" | "penny" | "quill" | "milo" | "counselor" | "assistant";
+  id: "sage" | "theo" | "penny" | "quill" | "milo" | "counselor" | "assistant";
   name: string;
   title: string;
   specialty: string;
@@ -42,6 +42,23 @@ export const MENTORS: Mentor[] = [
       { title: "A–G requirements", prompt: "What are the A–G course requirements for UC campuses?" },
       { title: "My major", prompt: "Do I need to pick a major when I apply to a UC?" },
       { title: "Help me figure it out", prompt: "I'm not sure where to start with UC applications. What should I focus on first?" },
+    ],
+  },
+  {
+    id: "theo",
+    name: "Theo",
+    title: "Campus Guide",
+    specialty: "What each UC campus is like and which ones fit you",
+    species: "human",
+    palette: { body: "#6e2a3a", belly: "#f6e8d0", accent: "#6e2a3a", dark: "#3a2420" },
+    scene: "campus",
+    voice: 350,
+    greeting: (name) => `Hey${name ? ` ${name}` : ""}! I've walked all nine UC campuses. Which one are you curious about?`,
+    suggestions: [
+      { title: "Meet all nine", prompt: "Tell me a little about each UC campus." },
+      { title: "What's special", prompt: "What's special about each UC compared to the others?" },
+      { title: "Find my fit", prompt: "Based on my profile, which UC campuses might fit me, and why?" },
+      { title: "Compare two", prompt: "How do UCLA and UC Berkeley feel different as places to go to school?" },
     ],
   },
   {
@@ -139,6 +156,9 @@ export function mentorById(id: string | null | undefined): Mentor {
 
 const FINANCE = /\b(fafsa|financial aid|scholarship|grant|loan|tuition|cost|afford|money|pay|price|cal grant|dream act|work[- ]study|net price)\b/i;
 const ESSAY = /\b(essay|personal statement|piq|insight question|prompt|recommendation|letter|write|writing|story)\b/i;
+const CAMPUS = /\b(ucla|ucsd|ucsb|ucsc|uci|ucr|berkeley|davis|irvine|merced|riverside|san diego|santa barbara|santa cruz|campus|campuses|which ucs?)\b/i;
+/** Application logistics stay with Sage even when a campus is named. */
+const APPLICATION = /\b(deadlines?|requirements?|gpa|a[-–]g|submit|fill(ing)? (in|out)|application)\b/i;
 const MAJOR = /\b(major|majors|undeclared|impacted|minor|what (should|to) (i )?study|career path)\b/i;
 
 /** Background for a conversation, based on what the student is asking about. */
@@ -154,6 +174,7 @@ export function specialistFor(question: string): Mentor["id"] {
   if (FINANCE.test(question)) return "penny";
   if (ESSAY.test(question)) return "quill";
   if (MAJOR.test(question)) return "milo";
+  if (CAMPUS.test(question) && !APPLICATION.test(question)) return "theo";
   return "sage";
 }
 

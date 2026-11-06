@@ -6,12 +6,13 @@ import { computeJourney, type CheckpointId } from "./logic";
 
 /**
  * Each guide owns a level of the UC journey. Story mode's chat is with the guide of the level
- * the student is on: Sage for Review & Apply, Penny for Financial Aid at the end.
+ * the student is on: Theo for choosing campuses, Sage for Review & Apply, Penny for Financial Aid
+ * at the end.
  * Basic Info has no guide of its own; Sage, the general admissions guide, covers it.
  */
 export const STAGE_GUIDE: Record<CheckpointId, Mentor["id"]> = {
   profile: "sage",
-  ucs: "penny",
+  ucs: "theo",
   activities: "milo",
   essays: "quill",
   review: "sage",

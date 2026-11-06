@@ -76,6 +76,10 @@ describe("mentors", () => {
     expect(specialistFor("How long should my personal statement be?")).toBe("quill");
     expect(specialistFor("What GPA does UCLA want?")).toBe("sage");
     expect(specialistFor("Is computer science an impacted major?")).toBe("milo");
+    expect(specialistFor("What's special about UC Santa Cruz?")).toBe("theo");
+    expect(specialistFor("Which UCs should I apply to?")).toBe("theo");
+    expect(specialistFor("What's the UC Davis application deadline?")).toBe("sage");
+    expect(specialistFor("What is UC Davis tuition?")).toBe("penny");
     expect(sceneFor("scholarship deadlines", mentorById("sage"))).toBe("office");
     expect(sceneFor(undefined, mentorById("quill"))).toBe("library");
   });
