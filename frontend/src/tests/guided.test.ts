@@ -116,7 +116,7 @@ describe("nextGuidedTurn", () => {
     const skipped = new Set(["gpa", "exams"]);
     const next = nextGuidedTurn(p, sections, "Maya", skipped);
     expect(next.checkpointId).toBe("ucs");
-    expect(next.speaker).toBe("sage");
+    expect(next.speaker).toBe("theo");
   });
 
   it("hands each chapter to the guide who owns it", () => {

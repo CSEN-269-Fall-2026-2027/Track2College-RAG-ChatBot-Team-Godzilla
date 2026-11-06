@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { COLLEGE_NAMES } from "../colleges";
 import { MENTORS, REVIEW_GUIDES, mentorById } from "../game/characters";
 import { callLogMessage } from "../agent/logic";
 import { aidModeLine, financesUnknown, openerFor, reviewModeLine } from "../game/openers";
@@ -20,6 +21,20 @@ describe("guide openers", () => {
     expect(opener.text).toContain("Leadership and Significant challenge");
     expect(opener.actions.map((a) => a.label)).toEqual(["Write: Leadership", "Write: Significant challenge"]);
     expect(opener.actions.every((a) => a.kind === "ask")).toBe(true);
+  });
+
+  it("Theo offers the tour and a button for every campus", () => {
+    const opener = openerFor(mentorById("theo"), blankProfile(), "Maya");
+    expect(opener.text).toContain("all nine");
+    expect(opener.actions.map((a) => a.label)).toEqual(["Tell me about each UC", ...COLLEGE_NAMES]);
+  });
+
+  it("Theo offers to compare the campuses already chosen", () => {
+    const profile = blankProfile();
+    profile.colleges = ["UCLA", "UC Davis"].map((name, i) => ({ id: String(i), name, status: "researching", plan: "UC", deadline: "", notes: "", major: "" }));
+    const opener = openerFor(mentorById("theo"), profile, "");
+    expect(opener.text).toContain("UCLA and UC Davis");
+    expect(opener.actions[0].label).toBe("Compare my campuses");
   });
 
   it("Penny prompts a finance walkthrough only when the profile shows nothing", () => {

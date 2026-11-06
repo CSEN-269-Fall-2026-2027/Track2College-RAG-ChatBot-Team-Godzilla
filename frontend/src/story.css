@@ -154,6 +154,7 @@
   background: var(--accent);
 }
 
+.story-mentor-dot[data-mentor="theo"] { background: #6e2a3a; }
 .story-mentor-dot[data-mentor="penny"] { background: #1f9d55; }
 .story-mentor-dot[data-mentor="quill"] { background: #5b6b8f; }
 .story-mentor-dot[data-mentor="milo"] { background: #1f6b4f; }

@@ -89,7 +89,7 @@ class ChatRequest(BaseModel):
     persona: Optional[str] = Field(
         None,
         max_length=32,
-        description="Optional Story-mode mentor id (sage, penny, quill, milo) that sets the answer's voice.",
+        description="Optional Story-mode mentor id (sage, theo, penny, quill, milo) that sets the answer's voice.",
     )
     mode: Optional[str] = Field(
         None,

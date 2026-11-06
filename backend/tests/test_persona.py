@@ -20,6 +20,15 @@ class PersonaTests(unittest.TestCase):
         self.assertIn("financial aid", persona_prompt("penny"))
         self.assertNotIn("{focus}", persona_prompt("sage"))
 
+    def test_theo_knows_all_nine_campuses(self) -> None:
+        self.assertEqual(normalize_persona(" Theo "), "theo")
+        prompt = persona_prompt("theo")
+        for campus in ("UC Berkeley", "UCLA", "UC San Diego", "UC Davis", "UC Irvine",
+                       "UC Santa Barbara", "UC Santa Cruz", "UC Riverside", "UC Merced"):
+            self.assertIn(f"- {campus}:", prompt)
+        self.assertIn("Application Assistant", prompt)
+        self.assertIn("Penny", prompt)
+
     def test_review_modes_set_the_task(self) -> None:
         self.assertEqual(mode_prompt(None), "")
         self.assertEqual(mode_prompt("pirate"), "")

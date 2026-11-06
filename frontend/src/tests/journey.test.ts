@@ -163,7 +163,7 @@ describe("journey planet map", () => {
 });
 
 describe("guides on the journey", () => {
-  it("gives every stop a person to talk to: Sage first and at Review & Apply, Penny for aid at the end", () => {
-    expect(STAGE_GUIDE).toEqual({ profile: "sage", ucs: "penny", activities: "milo", essays: "quill", review: "sage", aid: "penny" });
+  it("gives every stop a person to talk to: Sage first and at Review & Apply, Theo for campuses, Penny for aid at the end", () => {
+    expect(STAGE_GUIDE).toEqual({ profile: "sage", ucs: "theo", activities: "milo", essays: "quill", review: "sage", aid: "penny" });
   });
 });
