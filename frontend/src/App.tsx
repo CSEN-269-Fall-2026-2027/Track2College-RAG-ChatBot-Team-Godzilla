@@ -1,6 +1,6 @@
+import type { Mentor } from "./game/characters";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { checkHealth } from "./api";
-import { AnalysisProvider } from "./analysis";
 import { AuthProvider, useAuth } from "./auth";
 import { ProfileProvider, useProfile } from "./profile";
 import { PiqDraftsProvider } from "./journey/usePiqDrafts";
@@ -19,7 +19,15 @@ import { isOnboardingComplete } from "./onboarding/logic";
 export type Theme = "light" | "dark";
 export type Health = "checking" | "online" | "offline";
 
-export interface Handoff {
+/** How a question handed to the advisor is sent. */
+export interface AskOptions {
+  /** What the chat shows, when the model gets more than the student should see. */
+  display?: string;
+  /** The guide to ask, instead of whoever covers the question. */
+  mentorId?: Mentor["id"];
+}
+
+export interface Handoff extends AskOptions {
   id: string;
   text: string;
 }
@@ -91,8 +99,8 @@ function GatedApp({
   const lastRoute = useRef<Route>("advisor");
   if (route !== "map") lastRoute.current = route;
 
-  const askAdvisor = useCallback((text: string) => {
-    setHandoff({ id: crypto.randomUUID(), text });
+  const askAdvisor = useCallback((text: string, options?: AskOptions) => {
+    setHandoff({ id: crypto.randomUUID(), text, ...options });
     window.location.hash = "/advisor";
   }, []);
 
@@ -135,15 +143,13 @@ function Shell() {
 
   return (
     <ProfileProvider key={account.id} userId={account.id} name={account.name} fallback={<LoadingScreen />}>
-      <AnalysisProvider userId={account.id}>
-        <PlanningProvider userId={account.id}>
-          <GameProvider userId={account.id}>
-            <PiqDraftsProvider>
-              <GatedApp userId={account.id} theme={theme} toggleTheme={toggleTheme} health={health} setHealth={setHealth} />
-            </PiqDraftsProvider>
-          </GameProvider>
-        </PlanningProvider>
-      </AnalysisProvider>
+      <PlanningProvider userId={account.id}>
+        <GameProvider userId={account.id}>
+          <PiqDraftsProvider>
+            <GatedApp userId={account.id} theme={theme} toggleTheme={toggleTheme} health={health} setHealth={setHealth} />
+          </PiqDraftsProvider>
+        </GameProvider>
+      </PlanningProvider>
     </ProfileProvider>
   );
 }

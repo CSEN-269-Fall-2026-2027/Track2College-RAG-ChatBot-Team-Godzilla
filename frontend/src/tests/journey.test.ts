@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { computeJourney, emptyJourney, setPiqStatus, toggleCampus, togglePiq } from "../journey/logic";
 import { STAGE_GUIDE } from "../journey/guides";
 import { GRID, mapLayout, planetPixels, routeLegs } from "../journey/planets";
-import type { Profile } from "../types";
+import type { Profile, UcJourneyState } from "../types";
 import { blankProfile } from "./fixtures";
 
 const fullBasics = { basics: 1, academics: 0, campuses: 0, finances: 0 };
@@ -62,23 +62,81 @@ describe("UC journey progress", () => {
     expect(computeJourney(chosen, fullBasics, true).checkpoints[1].tasks[1].detail).toBe("Mathematics at every campus");
   });
 
+  it("lists each essay on its own line in See tasks", () => {
+    let j = emptyJourney();
+    for (const q of ["leadership", "creativity", "talent", "community"]) j = togglePiq(j, q);
+    j = setPiqStatus(j, "creativity", "ready");
+    const essays = computeJourney({ ...blankProfile(), ucJourney: j }, fullBasics, true).checkpoints[3];
+    expect(essays.tasks.map((t) => t.label).slice(1)).toEqual([
+      "Essay 1 (Leadership): Not done",
+      "Essay 2 (Creativity): Done",
+      "Essay 3 (Talent or skill): Not done",
+      "Essay 4 (Community): Not done",
+    ]);
+    const none = computeJourney(blankProfile(), fullBasics, true).checkpoints[3];
+    expect(none.tasks[1]).toMatchObject({ label: "Essay 1: Not done", done: false });
+  });
+
+  it("lists virtual counselor, email counselor, UC account and applying for Review & Apply", () => {
+    const doneCall = {
+      endedAt: 1,
+      lines: [
+        { role: "student" as const, text: "I'm good" },
+        {
+          role: "counselor" as const,
+          text: "Thanks so much for talking with me today! When you're ready, you can go ahead with your UC application.",
+        },
+      ],
+    };
+    const review = (agent: UcJourneyState["agent"], submittedAt: number | null = null) =>
+      computeJourney({ ...blankProfile(), ucJourney: { ...emptyJourney(), agent, submittedAt } }, fullBasics, true).checkpoints[4];
+    expect(review({}).tasks.map((t) => [t.label, t.done])).toEqual([
+      ["Met with the virtual counselor", false],
+      ["Emailed your counselor", false],
+      ["Created your UC account", false],
+      ["Applied to the UCs", false],
+    ]);
+    // First check-in answer alone doesn't finish the virtual counselor task.
+    expect(review({ counselorCall: { endedAt: 1, lines: [{ role: "student", text: "I'm good" }] } }).tasks[0].done).toBe(false);
+    expect(review({ counselorCall: doneCall }).tasks[0].done).toBe(true);
+    expect(review({ counselorEmail: { subject: "", body: "", sentAt: 1 } }).tasks[1].done).toBe(true);
+    expect(review({ counselorEmail: { subject: "", body: "" } }).tasks[1].done).toBe(false);
+    // Account needs a saved password that UC accepted.
+    expect(review({ ucAccount: { email: "a@b.c", generatedAt: 1, verifiedAt: 2 } }).tasks[2].done).toBe(false);
+    expect(review({ ucAccount: { email: "a@b.c", password: "x", generatedAt: 1, verifiedAt: 2 } }).tasks[2].done).toBe(true);
+    // Applied once the agent finishes PIQs (committed on tool close), or the student marks submission by hand.
+    expect(review({ ucAccount: { email: "a@b.c", password: "x", generatedAt: 1, piqAt: 3 } }).tasks[3].done).toBe(true);
+    expect(review({}, 5).tasks[3].done).toBe(true);
+    expect(review({}, 5).complete).toBe(false);
+  });
+
   it("flags activity descriptions over the 350-character limit", () => {
     const p = readyProfile();
     p.activities[0].description = "x".repeat(351);
     expect(computeJourney(p, fullBasics, true).checkpoints[2].complete).toBe(false);
   });
 
-  it("allows only four PIQs and reports ready count", () => {
+  it("allows only four PIQs and reports how many are done", () => {
     let j = emptyJourney();
     for (const q of ["leadership", "creativity", "talent", "community", "subject"]) j = togglePiq(j, q);
     expect(Object.keys(j.piqs)).toHaveLength(4);
     j = setPiqStatus(setPiqStatus(j, "leadership", "ready"), "talent", "ready");
     const essays = computeJourney({ ...blankProfile(), ucJourney: j }, fullBasics, true).checkpoints[3];
-    expect(essays.summary).toBe("2 of 4 ready");
+    expect(essays.summary).toBe("2 of 4 done");
     expect(essays.complete).toBe(false);
   });
 
-  it("never marks Review & Apply complete from the checklist alone", () => {
+  it("finishes Review & Apply once counselor, UC account, and apply are done", () => {
+    const doneCall = {
+      endedAt: 1,
+      lines: [
+        { role: "student" as const, text: "I'm good" },
+        {
+          role: "counselor" as const,
+          text: "Thanks so much for talking with me today! When you're ready, you can go ahead with your UC application.",
+        },
+      ],
+    };
     const p = readyProfile();
     p.ucJourney = { ...p.ucJourney!, checks: { supplements: true, fees: true } };
     const before = computeJourney(p, fullBasics, true);
@@ -86,17 +144,41 @@ describe("UC journey progress", () => {
     expect(before.current).toBe(4);
     expect(before.checkpoints[4].complete).toBe(false);
 
-    p.ucJourney = { ...p.ucJourney, submittedAt: Date.now() };
+    p.ucJourney = {
+      ...p.ucJourney,
+      agent: {
+        counselorCall: doneCall,
+        counselorEmail: { subject: "Hi", body: "Hello", sentAt: 1 },
+        ucAccount: { email: "a@b.c", password: "x", generatedAt: 1, verifiedAt: 2, signedInAt: 2, piqAt: 3 },
+      },
+    };
     const after = computeJourney(p, fullBasics, true);
+    expect(after.checkpoints[4].complete).toBe(true);
     expect(after.completeCount).toBe(5);
-    // Financial Aid is still open after submitting.
+    // Financial Aid is still open after applying.
     expect(after.finished).toBe(false);
     expect(after.checkpoints[after.current].id).toBe("aid");
   });
 
   it("finishes Financial Aid once the student answers the aid question and files", () => {
     const p = readyProfile();
-    p.ucJourney = { ...p.ucJourney!, submittedAt: Date.now() };
+    p.ucJourney = {
+      ...p.ucJourney!,
+      agent: {
+        counselorCall: {
+          endedAt: 1,
+          lines: [
+            { role: "student", text: "I'm good" },
+            {
+              role: "counselor",
+              text: "Thanks so much for talking with me today! When you're ready, you can go ahead with your UC application.",
+            },
+          ],
+        },
+        counselorEmail: { subject: "Hi", body: "Hello", sentAt: 1 },
+        ucAccount: { email: "a@b.c", password: "x", generatedAt: 1, verifiedAt: 2, piqAt: 3 },
+      },
+    };
     p.preferences = { ...p.preferences, needsAid: "yes", fafsa: "in-progress" };
     const aid = (q: typeof p) => computeJourney(q, fullBasics, true).checkpoints.find((c) => c.id === "aid")!;
     expect(aid(p).complete).toBe(false);

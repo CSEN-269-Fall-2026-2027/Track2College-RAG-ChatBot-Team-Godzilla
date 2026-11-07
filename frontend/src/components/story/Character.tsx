@@ -13,7 +13,7 @@ interface CharacterProps {
 /** Pixel portrait assets (public/mentors). */
 const PIXEL_SRC: Partial<Record<Mentor["id"], string>> = {
   sage: "/mentors/sage.png?v=5",
-  theo: "/mentors/theo.png",
+  theo: "/mentors/theo.png?v=2",
   penny: "/mentors/penny.png",
   quill: "/mentors/quill.png",
   milo: "/mentors/milo.png",

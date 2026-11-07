@@ -3,6 +3,8 @@
  * existing ElevenLabs session is doing; none of them start, steer or end the conversation.
  */
 
+import type { CallLine } from "../types";
+
 export type CallPhase = "idle" | "connecting" | "live" | "ended" | "error";
 
 export interface PhaseInput {
@@ -105,4 +107,15 @@ export function isWrapUpLine(text: string): boolean {
     /thanks so much for talking with me today/i.test(text) &&
     (/go ahead with your uc application/i.test(text) || /come back any time you have more questions/i.test(text))
   );
+}
+
+/**
+ * True once Jordan finished a full check-in (said a wrap-up goodbye) and the student spoke.
+ * Answering only the first "how are you doing" and hanging up does not count.
+ */
+export function virtualCounselorDone(call?: { lines: CallLine[] } | null): boolean {
+  if (!call?.lines.length) return false;
+  const studentSpoke = call.lines.some((l) => l.role === "student");
+  const finished = call.lines.some((l) => l.role === "counselor" && isWrapUpLine(l.text));
+  return studentSpoke && finished;
 }

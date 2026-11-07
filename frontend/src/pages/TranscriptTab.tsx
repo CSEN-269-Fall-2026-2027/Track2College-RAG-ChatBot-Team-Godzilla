@@ -107,9 +107,10 @@ function Dropzone({ compact }: { compact?: boolean }) {
  * `before` is extra closed sections from the profile page, shown right under the upload.
  */
 export function TranscriptTab({ onAsk, before }: { onAsk: (text: string) => void; before?: ReactNode }) {
-  const { transcripts, updateTranscript, removeTranscript, uploadError, uploading, ensureManualTranscript } = usePlanning();
+  const { transcripts, updateTranscript, removeTranscript, uploadError, saveError, uploading, ensureManualTranscript } = usePlanning();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const transcript = transcripts.find((t) => t.id === selectedId) ?? transcripts[0];
+  const notice = uploadError || saveError;
 
   if (!transcript) {
     return (
@@ -123,6 +124,11 @@ export function TranscriptTab({ onAsk, before }: { onAsk: (text: string) => void
             Add courses manually instead
           </button>
         </section>
+        {(notice || uploading) && (
+          <div className={notice ? "error-card" : "notice"}>
+            {notice ? <p>{notice}</p> : <span className="shimmer">Reading {uploading}…</span>}
+          </div>
+        )}
         {before}
       </>
     );
@@ -130,9 +136,9 @@ export function TranscriptTab({ onAsk, before }: { onAsk: (text: string) => void
 
   return (
     <>
-      {(uploadError || uploading) && (
-        <div className={uploadError ? "error-card" : "notice"}>
-          {uploadError ? <p>{uploadError}</p> : <span className="shimmer">Reading {uploading}…</span>}
+      {(notice || uploading) && (
+        <div className={notice ? "error-card" : "notice"}>
+          {notice ? <p>{notice}</p> : <span className="shimmer">Reading {uploading}…</span>}
         </div>
       )}
       <TranscriptView

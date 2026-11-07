@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import threading
 import time
 from collections import deque
@@ -19,7 +20,7 @@ import requests
 from dotenv import load_dotenv
 
 from followup_refs import resolve_followup_query as _resolve_followup_query
-from persona import extract_mood, mode_prompt, normalize_persona, persona_prompt
+from persona import extract_mood, mode_prompt, needs_campus_notes, normalize_persona, number_suggested_essays, persona_prompt
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -33,11 +34,15 @@ if not GROQ_API_KEY:
 # Advisor questions that need current facts get a web search; everything else skips it
 # to save tokens (search results add a lot to the prompt).
 _FACT_QUESTION = re.compile(
-    r"\b(deadlines?|due|dates?|when|open|close|fees?|cost|tuition|price|waiver|"
-    r"requirements?|required|gpa|sat|act|acceptance|admit|rate|scholarships?|"
-    r"fafsa|dream act|cal grant|aid|transfer|tag|policy|policies|202\d)\b",
+    r"\b(deadlines?|due dates?|fees?|tuition|waivers?|requirements?|gpa|acceptance rates?|admit rates?|"
+    r"scholarships?|fafsa|dream act|cal grant|tag|polic(?:y|ies)|202\d)\b",
     re.IGNORECASE,
 )
+# These guides answer from their own notes and the student's answers, so they never need a web search.
+_NO_SEARCH = ("milo", "quill", "theo")
+_MILO_MAX_TOKENS = 300
+_CHAT_MAX_TOKENS = 800
+_MAX_SEARCH_QUERY = 500
 # browser_search answers carry citation marks like 【1†L19-L27】.
 _CITATION = re.compile(r"【[^】]*】")
 
@@ -65,6 +70,23 @@ def _retry_after(response) -> float:
             pass
     match = _RETRY_AFTER_TEXT.search(response.text)
     return (int(match.group(1) or 0) * 60 + float(match.group(2))) if match else 10.0
+
+
+# Tokens used since this server started, per feature, so we can see what costs the most.
+_usage_totals: dict[str, int] = {}
+
+
+def _log_usage(usage: dict) -> None:
+    frame = sys._getframe(2)
+    while frame.f_back and frame.f_globals.get("__name__") == __name__ and frame.f_code.co_name != "generate_answer":
+        frame = frame.f_back
+    feature = "chat" if frame.f_code.co_name == "generate_answer" else str(frame.f_globals.get("__name__"))
+    total = int(usage.get("total_tokens") or 0)
+    _usage_totals[feature] = _usage_totals.get(feature, 0) + total
+    print(
+        f"[Groq usage] {feature}: {usage.get('prompt_tokens', 0)} in + {usage.get('completion_tokens', 0)} out = {total} "
+        f"(since start: {feature} {_usage_totals[feature]}, all {sum(_usage_totals.values())})"
+    )
 
 
 def _call_groq(
@@ -123,6 +145,7 @@ def _call_groq(
         _last_failure.kind = "rate_limit" if status == 429 else "auth" if status in (401, 403) else "error"
         return ""
 
+    _log_usage(data.get("usage") or {})
     try:
         return _CITATION.sub("", data["choices"][0]["message"]["content"] or "").strip()
     except Exception:
@@ -183,7 +206,11 @@ def generate_answer(
             "submission, Intent to Register, upcoming dates). Use it to answer \"what's done / what's next\" "
             "questions, and never say something happened that it doesn't show."
         )
-    system += persona_prompt(persona)
+    recent = conversation_history[-1] if conversation_history else {}
+    system += persona_prompt(
+        persona,
+        campus_notes=persona != "theo" or needs_campus_notes([query, recent.get("user") or "", recent.get("bot") or ""]),
+    )
     system += mode_prompt(mode)
 
     messages: list[dict] = [{"role": "system", "content": system}]
@@ -196,12 +223,23 @@ def generate_answer(
             messages.append({"role": "assistant", "content": bot})
     messages.append({"role": "user", "content": query})
 
-    search = [{"type": "browser_search"}] if _FACT_QUESTION.search(query) else None
-    completion = _call_groq(messages, max_tokens=1200, tools=search)
+    # A long message is the student's own writing (an essay to review), not a question to look up.
+    search = (
+        [{"type": "browser_search"}]
+        if persona not in _NO_SEARCH and len(query) <= _MAX_SEARCH_QUERY and _FACT_QUESTION.search(query)
+        else None
+    )
+    completion = _call_groq(
+        messages,
+        max_tokens=_MILO_MAX_TOKENS if persona == "milo" else _CHAT_MAX_TOKENS,
+        tools=search,
+        reasoning_effort="low",
+    )
     if not completion:
         return "Answer:\nI'm having trouble reaching the advisor right now. Please try again in a moment."
 
     mood, body = extract_mood(completion)
+    body = number_suggested_essays(query, body) if persona == "quill" else body
     response = f"Answer:\n{body.strip()}"
     if mood:
         response = f"Mood: {mood}\n{response}"

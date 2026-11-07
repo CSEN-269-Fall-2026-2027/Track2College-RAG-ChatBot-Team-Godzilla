@@ -16,35 +16,11 @@ import { Character } from "./Character";
  */
 export function ReviewPersonaPicker({
   onModeChange,
-  only,
-  onBack,
 }: {
   onModeChange: (mode: ReviewMode) => void;
-  /** Another planet's guide is in the chat: show just that person, plus a way back. */
-  only?: Mentor;
-  onBack?: () => void;
 }) {
   const { profile, update } = useProfile();
   const mode: ReviewMode = agentOf(profile).reviewMode ?? "counselor";
-
-  if (only) {
-    return (
-      <div className="review-personas">
-        <p className="guided-question">Who do you want to chat with?</p>
-        <div className="review-persona-list is-single">
-          <div className="review-persona on is-only" aria-label={`Chatting with ${only.name}`}>
-            <strong className="review-persona-name">{only.name}</strong>
-            <Character mentor={only} mood="happy" size={220} className="review-persona-art" />
-          </div>
-        </div>
-        {onBack && (
-          <button type="button" className="review-persona-back" onClick={onBack}>
-            Back to Counselor or Application assistant
-          </button>
-        )}
-      </div>
-    );
-  }
 
   const pick = (next: ReviewMode) => {
     if (next === mode) return;
@@ -77,6 +53,24 @@ export function ReviewPersonaPicker({
   );
 }
 
+/** Another stop's guide is in the chat: shows just that person, plus a way back to the current step. */
+export function GuideSpotlight({ guide, backLabel, onBack }: { guide: Mentor; backLabel: string; onBack: () => void }) {
+  return (
+    <div className="review-personas">
+      <p className="guided-question">Who do you want to chat with?</p>
+      <div className="review-persona-list is-single">
+        <div className="review-persona on is-only" aria-label={`Chatting with ${guide.name}`}>
+          <strong className="review-persona-name">{guide.name}</strong>
+          <Character mentor={guide} mood="happy" size={220} className="review-persona-art" />
+        </div>
+      </div>
+      <button type="button" className="review-persona-back" onClick={onBack}>
+        {backLabel}
+      </button>
+    </div>
+  );
+}
+
 interface ToolCopy {
   title: string;
   guide: "counselor" | "assistant";
@@ -96,9 +90,8 @@ const TOOL_COPY: Record<ReviewTool, ToolCopy> = {
     title: "Meet with your virtual counselor",
     guide: "counselor",
     steps: [
-      "Jordan checks in on how your application is going",
-      "Asks when you'd start at UC, your birthday, and where you were born",
-      "Talks through financial aid and the fee waiver",
+      "Answer any general questions you have",
+      "Apply to the UCs",
     ],
     note: "",
   },
@@ -111,8 +104,8 @@ const TOOL_COPY: Record<ReviewTool, ToolCopy> = {
 };
 
 const BROWSERS: { id: UcBrowser; label: string }[] = [
-  { id: "local", label: "Local" },
   { id: "cloud", label: "Cloud" },
+  { id: "local", label: "Local" },
 ];
 
 /**
@@ -183,6 +176,9 @@ export function ReviewToolDialog({ tool, onClose, onCallLog }: { tool: ReviewToo
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  // Application Assistant: stop the UC browser and commit "Applied" before the dialog actually leaves.
+  const applyDismissRef = useRef<(() => Promise<void>) | null>(null);
+  const [closing, setClosing] = useState(false);
   // Application Assistant only: where the next autofill run's browser starts.
   const [browser, setBrowser] = useState<UcBrowser>("cloud");
   const [running, setRunning] = useState(false);
@@ -191,6 +187,16 @@ export function ReviewToolDialog({ tool, onClose, onCallLog }: { tool: ReviewToo
   const [ucLogin, setUcLogin] = useState<UcLoginDraft | null>(() =>
     agent.ucAccount ? { email: agent.ucAccount.email, password: agent.ucAccount.password ?? "" } : null,
   );
+
+  const dismiss = useCallback(async () => {
+    if (closing) return;
+    setClosing(true);
+    try {
+      if (tool === "apply" && applyDismissRef.current) await applyDismissRef.current();
+    } finally {
+      onCloseRef.current();
+    }
+  }, [closing, tool]);
 
   // Focus moves into the pop-up and returns to the chat button that opened it.
   useEffect(() => {
@@ -218,7 +224,7 @@ export function ReviewToolDialog({ tool, onClose, onCallLog }: { tool: ReviewToo
       if (!dialog || callOpen()) return;
       if (event.key === "Escape") {
         event.preventDefault();
-        onCloseRef.current();
+        void dismiss();
         return;
       }
       if (event.key !== "Tab") return;
@@ -240,13 +246,13 @@ export function ReviewToolDialog({ tool, onClose, onCallLog }: { tool: ReviewToo
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [dismiss]);
 
   return createPortal(
     <div
       className="tool-dialog-backdrop"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !callOpen()) onClose();
+        if (event.target === event.currentTarget && !callOpen()) void dismiss();
       }}
     >
       <div ref={dialogRef} className={`tool-dialog tool-dialog-${tool}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
@@ -257,8 +263,8 @@ export function ReviewToolDialog({ tool, onClose, onCallLog }: { tool: ReviewToo
             </span>
           </div>
           <div className="tool-dialog-actions">
-            {tool === "apply" && <BrowserSwitch value={browser} onChange={setBrowser} locked={running} />}
-            <button type="button" className="tool-dialog-close" onClick={onClose} aria-label="Close">
+            {tool === "apply" && <BrowserSwitch value={browser} onChange={setBrowser} locked={running || closing} />}
+            <button type="button" className="tool-dialog-close" onClick={() => void dismiss()} disabled={closing} aria-label="Close">
               <XIcon width={20} height={20} />
             </button>
           </div>
@@ -277,7 +283,7 @@ export function ReviewToolDialog({ tool, onClose, onCallLog }: { tool: ReviewToo
                 ))}
               </ol>
               {tool === "apply" ? (
-                <UcLogin agent={agent} change={change} locked={running} login={ucLogin} onLogin={setUcLogin} />
+                <UcLogin agent={agent} change={change} locked={running || closing} login={ucLogin} onLogin={setUcLogin} />
               ) : (
                 <p className="tool-dialog-note">{copy.note}</p>
               )}
@@ -295,7 +301,8 @@ export function ReviewToolDialog({ tool, onClose, onCallLog }: { tool: ReviewToo
                   onCallEnd={(lines) => onCallLog(callLogMessage(lines))}
                   details={
                     <>
-                      <ol className="tool-dialog-steps" aria-label="What happens">
+                      <p className="tool-dialog-from">Jordan can help you:</p>
+                      <ol className="tool-dialog-steps" aria-label="What Jordan can help with">
                         {copy.steps.map((step) => (
                           <li key={step}>{step}</li>
                         ))}
@@ -306,7 +313,17 @@ export function ReviewToolDialog({ tool, onClose, onCallLog }: { tool: ReviewToo
                 />
               )}
               {tool === "apply" && (
-                <UcAccountTask agent={agent} change={change} login={ucLogin} browser={browser} onBusyChange={onBusyChange} onRunBrowser={setBrowser} />
+                <UcAccountTask
+                  agent={agent}
+                  change={change}
+                  login={ucLogin}
+                  browser={browser}
+                  onBusyChange={onBusyChange}
+                  onRunBrowser={setBrowser}
+                  onRegisterClose={(fn) => {
+                    applyDismissRef.current = fn;
+                  }}
+                />
               )}
             </div>
           </div>

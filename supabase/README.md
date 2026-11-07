@@ -34,3 +34,7 @@ notify pgrst, 'reload schema';
 The `personal_info` table stores birthday and birthplace from voice calls.
 If it was missing during a call, apply the schema and repeat the call to save
 those answers.
+
+The `transcripts` storage bucket must allow `text/markdown` (and
+`application/octet-stream`) so `.md` uploads match the Academic history UI.
+Re-running `schema.sql` updates an existing bucket's `allowed_mime_types`.

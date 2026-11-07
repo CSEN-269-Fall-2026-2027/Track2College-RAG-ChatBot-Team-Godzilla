@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useProfile } from "../profile";
 import type { Message } from "../types";
 import { AssistantMessage, ThinkingMessage, UserMessage } from "./Message";
 import { ArrowUpIcon } from "./icons";
@@ -12,11 +13,14 @@ interface ChatViewProps {
   freshId: string | null;
   onFollowup: (question: string) => void;
   onRetry: () => void;
+  onSaveEssay?: (message: Message) => void;
+  onFillInProfile?: (message: Message) => void;
 }
 
 const STICK_THRESHOLD = 96;
 
-export function ChatView({ intro, messages, pending, busy, freshId, onFollowup, onRetry }: ChatViewProps) {
+export function ChatView({ intro, messages, pending, busy, freshId, onFollowup, onRetry, onSaveEssay, onFillInProfile }: ChatViewProps) {
+  const major = useProfile().profile.goals.intendedMajor;
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -67,6 +71,11 @@ export function ChatView({ intro, messages, pending, busy, freshId, onFollowup, 
               key={message.id}
               message={message}
               animate={message.id === freshId}
+              question={messages[index - 1]?.sentAs ?? messages[index - 1]?.content ?? ""}
+              onSaveEssay={onSaveEssay}
+              onFillInProfile={onFillInProfile}
+              latest={index === messages.length - 1}
+              major={major}
               busy={busy}
               onFollowup={onFollowup}
               onRetry={index === messages.length - 1 ? onRetry : noop}

@@ -13,7 +13,7 @@ import {
   withoutAudioTags,
 } from "../agent/logic";
 import { ucFacts, shuffled } from "../journey/facts";
-import { storyComplete } from "../journey/guided";
+import { reviewVisitKind, storyComplete } from "../journey/guided";
 import { emptyJourney, setPiqStatus, toggleCampus, togglePiq } from "../journey/logic";
 import type { Profile, UcJourneyState } from "../types";
 import { blankProfile } from "./fixtures";
@@ -52,10 +52,19 @@ describe("Apply", () => {
     expect(storyComplete(storyDoneProfile(), fullBasics)).toBe(true);
   });
 
-  it("lists the counselor call, the UC account, then FAFSA and Intent to Register", () => {
+  it("lets you reopen both Apply personas only from Financial Aid after earlier steps are done", () => {
+    expect(reviewVisitKind("essays", false)).toBe("locked");
+    expect(reviewVisitKind("essays", true)).toBe("locked");
+    expect(reviewVisitKind("aid", false)).toBe("locked");
+    expect(reviewVisitKind("aid", true)).toBe("revisit");
+    expect(reviewVisitKind("review", true)).toBe("locked");
+  });
+
+  it("lists the counselor call, email, UC account, then FAFSA and Intent to Register", () => {
     const tasks = agentTasks(storyDoneProfile());
     expect(tasks.map((t) => [t.id, t.done, !!t.comingSoon])).toEqual([
-      ["counselor", false, false],
+      ["virtualCounselor", false, false],
+      ["emailCounselor", false, false],
       ["ucAccount", false, false],
       ["fafsa", false, false],
       ["sir", false, false],
@@ -71,19 +80,39 @@ describe("Apply", () => {
     ).toEqual(["fafsa", "sir"]);
   });
 
-  it("counts talking to a counselor done after a virtual call or an email to the school counselor", () => {
+  it("counts virtual counselor and email counselor as separate tasks", () => {
     const base = storyDoneProfile();
-    const counselorStep = (p: Profile) => agentTasks(p).find((t) => t.id === "counselor")!.done;
-    expect(counselorStep(base)).toBe(false);
-    const emailed = setAgent(base, (a) => ({
+    const virtual = (p: Profile) => agentTasks(p).find((t) => t.id === "virtualCounselor")!.done;
+    const emailed = (p: Profile) => agentTasks(p).find((t) => t.id === "emailCounselor")!.done;
+    expect(virtual(base)).toBe(false);
+    expect(emailed(base)).toBe(false);
+    const draft = setAgent(base, (a) => ({
       ...a,
       counselorMode: "school",
       counselor: { name: "Ms. Lee", email: "lee@school.org", title: "", serves: "", sourceUrl: "", confirmedAt: 1 },
       counselorEmail: { subject: "Hi", body: "Hello", openedAt: 2 },
     }));
-    expect(counselorStep(emailed)).toBe(false); // opened in Gmail but not sent yet
-    expect(counselorStep(setAgent(emailed, (a) => ({ ...a, counselorEmail: { ...a.counselorEmail!, sentAt: 3 } })))).toBe(true);
-    expect(counselorStep(setAgent(base, (a) => ({ ...a, counselorCall: { endedAt: 1, lines: [] } })))).toBe(true);
+    expect(emailed(draft)).toBe(false); // opened in Gmail but not sent yet
+    expect(emailed(setAgent(draft, (a) => ({ ...a, counselorEmail: { ...a.counselorEmail!, sentAt: 3 } })))).toBe(true);
+    // First greeting alone isn't a full meeting.
+    expect(virtual(setAgent(base, (a) => ({ ...a, counselorCall: { endedAt: 1, lines: [{ role: "student", text: "Hi" }] } })))).toBe(false);
+    expect(
+      virtual(
+        setAgent(base, (a) => ({
+          ...a,
+          counselorCall: {
+            endedAt: 1,
+            lines: [
+              { role: "student", text: "I'm good" },
+              {
+                role: "counselor",
+                text: "Thanks so much for talking with me today! When you're ready, you can go ahead with your UC application.",
+              },
+            ],
+          },
+        })),
+      ),
+    ).toBe(true);
   });
 
   it("asks UC fun facts with exactly one true answer and three distinct false ones", () => {
@@ -99,10 +128,11 @@ describe("Apply", () => {
     expect(shuffled([1, 2, 3, 4]).sort()).toEqual([1, 2, 3, 4]);
   });
 
-  it("cleans Jordan's lines: no leading comma, years as digits", () => {
+  it("cleans Jordan's lines: no leading comma or bang, years as digits", () => {
     expect(cleanTranscriptLine(", Got it! Fall two thousand twenty seven?")).toBe("Got it! Fall 2027?");
     expect(cleanTranscriptLine("[happy] , Great.")).toBe("Great.");
     expect(cleanTranscriptLine("Great. , And your birthday?")).toBe("Great. And your birthday?");
+    expect(cleanTranscriptLine("! So, your birth date is June seventeenth, 2003.")).toBe("So, your birth date is June seventeenth, 2003.");
     expect(cleanTranscriptLine("Fall two thousand and twenty-seven, or Spring twenty twenty-seven?")).toBe("Fall 2027, or Spring 2027?");
     expect(cleanTranscriptLine("Born in two thousand eight?")).toBe("Born in 2008?");
     expect(cleanTranscriptLine("You have twenty two days left.")).toBe("You have twenty two days left.");
@@ -113,10 +143,24 @@ describe("Apply", () => {
     expect(withoutAudioTags("No tags here.")).toBe("No tags here.");
   });
 
-  it("counts talking to a counselor done once the student has had a call", () => {
+  it("counts the virtual counselor done only after a full call wrap-up", () => {
     let p = storyDoneProfile();
-    expect(agentTasks(p)[0]).toMatchObject({ title: "Talk to a counselor", done: false });
+    expect(agentTasks(p)[0]).toMatchObject({ title: "Meet with the virtual counselor", done: false });
     p = setAgent(p, (a) => ({ ...a, counselorCall: { endedAt: 1, lines: [{ role: "student", text: "Hi Jordan" }] } }));
+    expect(agentTasks(p)[0].done).toBe(false);
+    p = setAgent(p, (a) => ({
+      ...a,
+      counselorCall: {
+        endedAt: 1,
+        lines: [
+          { role: "student", text: "Hi Jordan" },
+          {
+            role: "counselor",
+            text: "Thanks so much for talking with me today! When you're ready, you can go ahead with your UC application.",
+          },
+        ],
+      },
+    }));
     expect(agentTasks(p)[0].done).toBe(true);
     // Agent state lives beside the rest of the journey without disturbing it.
     expect(Object.keys(p.ucJourney!.piqs)).toHaveLength(4);
@@ -191,6 +235,11 @@ describe("Apply", () => {
       expect(withUcRunProgress(b, { ...inside, piq: true }, login, 3)).toBe(b);
     });
 
+    it("records a working login even after status leaves signed_in for filling", () => {
+      const a = withUcRunProgress({}, { ...inside, status: "filling" }, login, 1);
+      expect(a.ucAccount).toMatchObject({ email: login.email, password: login.password, verifiedAt: 1, signedInAt: 1 });
+    });
+
     it("saves a login only once UC accepts it", () => {
       expect(withUcRunProgress({}, quiet, login, 1)).toEqual({});
       expect(withUcRunProgress({}, inside, login, 1).ucAccount).toMatchObject(login);
@@ -207,7 +256,7 @@ describe("Apply", () => {
   it("checks off the UC application once the account is created and verified", () => {
     const base = { email: "me@example.com", password: "Tq7#mVx2!pLr9Kd4", generatedAt: 1 };
     const step = (ucAccount?: typeof base & { createdAt?: number; verifiedAt?: number; signedInAt?: number }) =>
-      agentTasks(setAgent(storyDoneProfile(), (a) => ({ ...a, ucAccount })))[1];
+      agentTasks(setAgent(storyDoneProfile(), (a) => ({ ...a, ucAccount }))).find((t) => t.id === "ucAccount")!;
     expect(step().title).toBe("UC application");
     expect(step().done).toBe(false);
     expect(step(base).done).toBe(false);

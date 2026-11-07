@@ -143,9 +143,10 @@ RULES:
 2. Use ONLY facts from the STUDENT ANSWERS, STUDENT ACTIVITIES and STUDENT PROFILE. Never invent people,
    events, awards, numbers, hardships, or outcomes. If a detail is missing, write around it instead of making it up.
    Pick the activities, roles and details that best fit this PIQ; don't list everything.
-3. If the student's information is thin, empty, or unrelated to the PIQ, still write a complete response,
-   but keep it deliberately general: describe the student's values, habits and goals in broad terms with
-   no specific names, events or numbers, so the student can fill in their own details later.
+3. If the student's information is thin, empty, or unrelated to the PIQ, still write a complete, good response
+   at full length, but keep it general: reflect on why their major, subjects or interests matter to them, how they
+   think, what they value, and what they hope to do. Reach the length through reflection, never through invented
+   stories. No class, club, project, app, website, tutoring, job, person, age, grade, or event they didn't mention.
 4. Write in the student's own first-person voice: plain, specific, reflective, and honest — like a
    thoughtful 17-year-old, not a brochure. No clichés, no quotes, no title, no headings.
 5. Show, then reflect: describe what happened and what the student did, then what they learned or how
@@ -155,6 +156,10 @@ RULES:
 8. UC's application rejects special characters. NEVER use a hyphen (-), an em dash, or an en dash, even in
    compound words: write "first generation" and "part time", or reword the sentence. Use only plain English
    letters, numbers, spaces and these marks: . , ! ? ' ; : ( ). No curly quotes, symbols, emoji or accented letters.
+9. Activities can't carry every essay. Never mention anything listed under ALREADY USED, even in passing. If nothing else in their activities fits, build the essay on their intended major, favorite
+   subjects, interests, or general background instead. Those may repeat across essays. Rule 2 still applies:
+   say why the subject interests them and where they hope it leads, in general terms. Never make up a class,
+   project, program they built, or moment they didn't tell you about.
 """
 
 _DASHES = "\u2010\u2011\u2012\u2013\u2014\u2015\u2212"
@@ -193,8 +198,9 @@ def _trim_to_limit(text: str, limit: int = WORD_LIMIT) -> str:
     """Last resort: cut at the last full sentence that fits within the limit."""
     if word_count(text) <= limit:
         return text
-    words = text.split(" ")
-    clipped = " ".join(words[:limit])
+    # Whitespace of any kind separates words, so paragraph breaks don't let extra words through.
+    last = list(re.finditer(r"\S+", text))[limit - 1]
+    clipped = text[: last.end()]
     end = max(clipped.rfind(". "), clipped.rfind("! "), clipped.rfind("? "), clipped.rfind(".\n"))
     return clipped[: end + 1].strip() if end > len(clipped) // 2 else clipped.rstrip(",;: ") + "."
 
@@ -225,8 +231,50 @@ def _failure_message() -> str:
     return "Groq didn't return a draft. Please try again."
 
 
-def draft_piq(piq_id: str, answers: list[dict], profile_summary: str, activities: str = "", regenerate: bool = False) -> dict:
+# Details the model tends to make up to fill out an essay. Fine when the student said them.
+_COMMON_INVENTIONS = (
+    "middle school", "elementary school", "tutor", "tutoring", "tutored", "app", "website", "hackathon", "robot", "robotics",
+    "club", "competition", "science fair", "internship", "summer camp", "startup", "calculator", "mentor", "my dad", "my father",
+    "my mom", "my mother", "my sister", "my brother", "my grandmother", "my grandfather", "my teacher", "my coach",
+)
+
+
+def _invented(essay: str, facts: str) -> list[str]:
+    def said(term: str) -> bool:
+        # "I tutor math" covers "tutoring", and "Robotics" covers "robot".
+        stem = next((w for w in ("tutor", "robot") if term.startswith(w)), None)
+        return bool(re.search(rf"\b{stem}" if stem else rf"\b{re.escape(term)}\b", facts))
+
+    return [term for term in _mentions(essay, list(_COMMON_INVENTIONS)) if not said(term)]
+
+
+def _drop_sentences(essay: str, terms: list[str]) -> str:
+    """Last resort: anything still breaking the rules comes out, even if the essay runs shorter."""
+    if not terms:
+        return essay
+    pattern = re.compile("|".join(rf"\b{re.escape(t)}\b" for t in terms), re.IGNORECASE)
+    paragraphs = []
+    for paragraph in essay.split("\n"):
+        kept = [s for s in re.split(r"(?<=[.!?])\s+", paragraph) if not pattern.search(s)]
+        paragraphs.append(" ".join(kept))
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(paragraphs)).strip()
+
+
+def _mentions(essay: str, used: list[str]) -> list[str]:
+    lowered = essay.lower()
+    return [name for name in used if re.search(rf"\b{re.escape(name.lower())}\b", lowered)]
+
+
+def draft_piq(
+    piq_id: str,
+    answers: list[dict],
+    profile_summary: str,
+    activities: str = "",
+    regenerate: bool = False,
+    used_activities: list[str] | None = None,
+) -> dict:
     piq = PIQS[piq_id]
+    used = used_activities or []
     details = "\n".join(
         f"Q: {a.get('question', '').strip()}\nA: {a.get('answer', '').strip()}" for a in answers if a.get("answer", "").strip()
     )
@@ -242,11 +290,26 @@ def draft_piq(piq_id: str, answers: list[dict], profile_summary: str, activities
         f"=== STUDENT ANSWERS for this PIQ ===\n{details or '(none)'}\n\n"
         f"=== STUDENT ACTIVITIES ===\n{activities.strip() or '(none listed)'}\n\n"
         f"=== STUDENT PROFILE ===\n{profile_summary.strip() or '(empty)'}\n\n"
+        + (f"=== ALREADY USED in the student's other essays (do not mention these) ===\n{', '.join(used)}\n\n" if used else "")
+        + 
         f"Write the response now ({MIN_WORDS}–{WORD_LIMIT} words).{fresh}"
     )
     essay = _ask(message)
     if not essay:
         raise RuntimeError(_failure_message())
+
+    # These rules matter enough to spend one more call when the model breaks them.
+    facts = f"{details} {activities} {profile_summary}".lower()
+    banned = _mentions(essay, used) + _invented(essay, facts)
+    if banned:
+        revised = _ask(
+            f"{message}\n\n=== Previous draft ===\n{essay}\n\n"
+            f"This draft mentions {', '.join(banned)}, which is either already used in another essay or something the "
+            "student never said. Rewrite it without them, at full length, using only what the student told you, "
+            "or general reflection on their major, subjects, and interests."
+        )
+        if revised:
+            essay = revised
 
     # Enforce UC's limit: one rewrite if it's off, then a hard sentence-boundary trim as a backstop.
     count = word_count(essay)
@@ -259,6 +322,7 @@ def draft_piq(piq_id: str, answers: list[dict], profile_summary: str, activities
         )
         if revised:
             essay = revised
+    essay = _drop_sentences(essay, _mentions(essay, used) + _invented(essay, facts))
     essay = _trim_to_limit(essay)
 
     return {"id": piq_id, "question": piq["question"], "essay": essay, "word_count": word_count(essay)}
@@ -278,7 +342,8 @@ def generate_piqs(items: list[dict], profile_summary: str, activities: str = "",
                 time.sleep(BATCH_PAUSE_S)
             batch = items[start : start + BATCH_SIZE]
             futures = [
-                pool.submit(draft_piq, i["id"], i.get("answers") or [], profile_summary, activities, regenerate) for i in batch
+                pool.submit(draft_piq, i["id"], i.get("answers") or [], profile_summary, activities, regenerate, i.get("used_activities") or [])
+                for i in batch
             ]
             drafts += [f.result() for f in futures]
     return drafts

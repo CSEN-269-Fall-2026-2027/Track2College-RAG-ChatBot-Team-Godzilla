@@ -1,5 +1,6 @@
 import { useRef, useState, type DragEvent } from "react";
 import { CheckIcon, UploadIcon } from "../components/icons";
+import { MAJOR_CHOICES } from "../constants";
 import { TRANSCRIPT_TYPES, usePlanning } from "../planning";
 import { useProfile } from "../profile";
 import type { Profile } from "../types";
@@ -9,7 +10,6 @@ import {
   DISTANCE_CHIPS,
   GRADE_OPTIONS,
   HELP_CHIPS,
-  MAJOR_CHIPS,
   PRIORITY_CHIPS,
   REGION_CHIPS,
   SIZE_CHIPS,
@@ -151,8 +151,7 @@ export function QuestionFields({ questionId, profile, onChange }: Props) {
           </label>
           <label className="ob-field">
             <span className="visually-hidden">Scale</span>
-            <select value={profile.onboarding.gpaScale} onChange={(e) => setOb({ gpaScale: e.target.value })}>
-              <option value="">Scale (optional)</option>
+            <select value={profile.onboarding.gpaScale || "4.0"} onChange={(e) => setOb({ gpaScale: e.target.value })}>
               <option value="4.0">4.0</option>
               <option value="5.0">5.0 weighted</option>
               <option value="100">100-point</option>
@@ -184,23 +183,16 @@ export function QuestionFields({ questionId, profile, onChange }: Props) {
       return (
         <div className="ob-stack">
           <Chips
-            options={MAJOR_CHIPS}
-            selected={profile.goals.majors}
-            onToggle={(v) => {
-              if (v === "Undecided") {
-                onChange({
-                  ...profile,
-                  goals: { ...profile.goals, majors: ["Undecided"] },
-                  onboarding: { ...profile.onboarding, exploringMajors: true },
-                });
-                return;
-              }
+            options={MAJOR_CHOICES}
+            selected={[profile.goals.intendedMajor]}
+            multi={false}
+            onToggle={(v) =>
               onChange({
                 ...profile,
-                goals: { ...profile.goals, majors: toggleList(profile.goals.majors.filter((m) => m !== "Undecided"), v) },
+                goals: { ...profile.goals, intendedMajor: v },
                 onboarding: { ...profile.onboarding, exploringMajors: false },
-              });
-            }}
+              })
+            }
           />
           <button
             type="button"
@@ -209,6 +201,7 @@ export function QuestionFields({ questionId, profile, onChange }: Props) {
             onClick={() =>
               onChange({
                 ...profile,
+                goals: { ...profile.goals, intendedMajor: "" },
                 onboarding: { ...profile.onboarding, exploringMajors: !profile.onboarding.exploringMajors },
               })
             }
@@ -410,7 +403,7 @@ export function SummaryList({ profile, onJump }: { profile: Profile; onJump: (ch
       label: "Academic history",
       value: [transcripts[0] && `Transcript: ${transcripts[0].fileName}`, profile.basics.highSchool, profile.academics.gpaUnweighted && `GPA ${profile.academics.gpaUnweighted}`].filter(Boolean).join(", ") || "Skipped — add it later",
     },
-    { i: 2, label: "Interests", value: profile.onboarding.exploringMajors ? "Still exploring" : profile.goals.majors.join(", ") || profile.onboarding.subjects.join(", ") || "—" },
+    { i: 2, label: "Interests", value: profile.onboarding.exploringMajors ? "Still exploring" : profile.goals.intendedMajor || profile.onboarding.subjects.join(", ") || "—" },
   ];
 
   return (

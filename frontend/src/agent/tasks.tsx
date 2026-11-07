@@ -83,8 +83,9 @@ export function VirtualCounselor({
         change((a) => ({ ...a, counselorCall: { endedAt: Date.now(), lines } }));
         onCallEnd?.(lines);
       }}
-      onPersonalInfo={(info) => {
-        if (account) void savePersonalInfo(account.id, info);
+      onPersonalInfo={async (info) => {
+        if (!account) return;
+        await savePersonalInfo(account.id, info);
       }}
     />
   );
@@ -92,13 +93,9 @@ export function VirtualCounselor({
 
 /** Merges the birthday / birthplace Jordan heard into the student's personal_info row (not the profile). */
 async function savePersonalInfo(userId: string, info: PersonalInfo) {
-  try {
-    const store = await getStore();
-    const saved = (await store.personalInfo.get(userId)) ?? {};
-    await store.personalInfo.save(userId, { ...saved, ...info });
-  } catch (error) {
-    console.error("[voice] Couldn't save personal info:", error);
-  }
+  const store = await getStore();
+  const saved = (await store.personalInfo.get(userId)) ?? {};
+  await store.personalInfo.save(userId, { ...saved, ...info });
 }
 
 /** Finds the student's school counselor online, then drafts an email they send from Gmail. */
@@ -382,6 +379,7 @@ export function UcAccountTask({
   browser = "cloud",
   onBusyChange,
   onRunBrowser,
+  onRegisterClose,
 }: TaskProps & {
   /** The login from the side panel (UcLogin). */
   login: UcLoginDraft | null;
@@ -391,6 +389,11 @@ export function UcAccountTask({
   browser?: UcBrowser;
   /** Tells the popup when a run starts and ends, so the switch locks while one is going. */
   onBusyChange?: (busy: boolean) => void;
+  /**
+   * Registers a closer for the popup ✕: stops any open UC/browser session and only then records
+   * "Applied" (piqAt), so story mode doesn't jump to Financial Aid until the student dismisses this.
+   */
+  onRegisterClose?: (close: () => Promise<void>) => void;
 }) {
   const { account } = useAuth();
   const { profile } = useProfile();
@@ -402,6 +405,8 @@ export function UcAccountTask({
   const runId = useRef<string | null>(null);
   const changeRef = useRef(change);
   changeRef.current = change;
+  // PIQs finished this visit: hold off writing piqAt until the popup ✕ so Review & Apply doesn't advance early.
+  const pendingPiq = useRef(false);
   // Reopening the popup: reconnect to a UC window that's still open (it may be using cloud time).
   const onRunBrowserRef = useRef(onRunBrowser);
   onRunBrowserRef.current = onRunBrowser;
@@ -410,12 +415,18 @@ export function UcAccountTask({
     if (!found) return false;
     runId.current = found.runId;
     setRun(found.run);
+    if (found.run.piq) pendingPiq.current = true;
     if (found.run.browser) onRunBrowserRef.current?.(found.run.browser);
     return true;
   }, []);
   useEffect(() => {
     void reconnect();
   }, [reconnect]);
+
+  // A prior Local/Cloud finish in this popup still needs ✕ to commit Applied.
+  useEffect(() => {
+    if (agent.pendingApply) pendingPiq.current = true;
+  }, [agent.pendingApply]);
 
   // Follow the UC window until it closes, recording what happened there.
   useEffect(() => {
@@ -427,7 +438,14 @@ export function UcAccountTask({
         const next = await ucAccountStatus(id, controller.signal);
         if (runId.current !== id) return;
         setRun(next);
-        changeRef.current((a) => withUcRunProgress(a, next, runLogin, Date.now()));
+        if (next.piq) pendingPiq.current = true;
+        // Defer piqAt until the popup closes — other milestones (login, about) still save now.
+        // pendingApply on the agent survives Local → Cloud so ✕ still commits Applied.
+        changeRef.current((a) => {
+          const progressed = withUcRunProgress(a, { ...next, piq: false }, runLogin, Date.now());
+          if (!next.piq || progressed.ucAccount?.piqAt) return progressed;
+          return progressed.pendingApply ? progressed : { ...progressed, pendingApply: true };
+        });
       } catch (e) {
         if (!controller.signal.aborted) {
           setError(message(e));
@@ -549,6 +567,59 @@ export function UcAccountTask({
     }
   };
 
+  // Popup ✕ / Escape / backdrop: stop the browser, then commit Applied so story can move on.
+  const dismissTool = useCallback(async () => {
+    const id = runId.current;
+    if (id) {
+      try {
+        await cancelUcAccount(id);
+      } catch {
+        // Already gone is fine.
+      }
+    }
+    if (browser === "cloud") {
+      try {
+        await closeCloudBrowsers();
+      } catch {
+        // Leftover cloud cleanup is best-effort.
+      }
+    }
+    const sawFinish = pendingPiq.current || !!run?.piq || !!run?.finished;
+    runId.current = null;
+    pendingPiq.current = false;
+    setRun((r) => (r ? { ...r, open: false } : r));
+    const now = Date.now();
+    const creds = runLogin;
+    changeRef.current((a) => {
+      // pendingApply covers Local → Cloud / remount when the in-memory ref was reset.
+      if (!sawFinish && !a.pendingApply) return a;
+      if (a.ucAccount?.piqAt) {
+        if (!a.pendingApply) return a;
+        const { pendingApply: _pending, ...rest } = a;
+        return rest;
+      }
+      const uc =
+        a.ucAccount ?? (creds ? { email: creds.email, password: creds.password, generatedAt: now } : null);
+      const { pendingApply: _pending, ...rest } = a;
+      if (!uc) return rest;
+      return {
+        ...rest,
+        ucAccount: {
+          ...uc,
+          ...(creds ? { email: creds.email, password: creds.password || uc.password } : {}),
+          // A finished apply run means the login worked — keep Created your UC account checked.
+          verifiedAt: uc.verifiedAt ?? now,
+          signedInAt: uc.signedInAt ?? now,
+          piqAt: now,
+        },
+      };
+    });
+  }, [browser, run?.piq, run?.finished]);
+
+  useEffect(() => {
+    onRegisterClose?.(dismissTool);
+  }, [dismissTool, onRegisterClose]);
+
   const errorBox = error && (
     <p className="form-error" role="alert">
       {error}
@@ -603,11 +674,6 @@ export function UcAccountTask({
     return (
       <div className={`agent-step${browser === "local" ? " uc-local-step" : ""}`}>
         {localComputer}
-        {browser === "local" && (
-          <div className="uc-tumbleweed-track" aria-hidden="true">
-            <img className="uc-tumbleweed" src="/tumbleweed.png" alt="" />
-          </div>
-        )}
         {browser === "local" ? <div className="uc-local-below">{errorBox}</div> : errorBox}
         {cloudPanel}
       </div>
@@ -720,7 +786,7 @@ export function PreparedInfo() {
           </dd>
         </div>
       </dl>
-      <p className="field-hint">Your birthday and birthplace come from your counselor call, if you had one.</p>
+      <p className="field-hint">Your birthday and birthplace come from your counselor call — edit them in Profile → Counselor interview.</p>
     </section>
   );
 }
@@ -832,7 +898,11 @@ function CloudBrowserPanel({
     screen = (
       <div className="cloud-browser-empty">
         <strong>{run.finished ? "Ready for review" : "The cloud session ended"}</strong>
-        <span>{run.finished ? "Review everything on UC's site and submit it yourself." : run.detail}</span>
+        <span>
+          {run.finished
+            ? run.detail || "Review everything on UC's site and submit it yourself."
+            : run.detail}
+        </span>
         {onRetry && (
           <button type="button" className="btn-ghost" onClick={onRetry}>
             <RetryIcon width={15} height={15} /> Start again
@@ -887,7 +957,7 @@ function CloudBrowserPanel({
             </>
           ) : run.finished ? (
             <>
-              <strong>Ready for review.</strong> The assistant filled in everything it could. Look it over on UC's site and submit it yourself.
+              <strong>Ready for review.</strong> {run.detail || "The assistant filled in everything it could. Look it over on UC's site and submit it yourself."}
             </>
           ) : (
             run.detail

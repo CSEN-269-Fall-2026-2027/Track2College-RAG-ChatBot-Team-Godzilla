@@ -1,5 +1,5 @@
 import type { GameState } from "../game/progress";
-import type { Account, Conversation, CoursePlan, PersonalInfo, Profile, ProfileAnalysis, Transcript } from "../types";
+import type { Account, Conversation, PersonalInfo, Profile, Transcript } from "../types";
 
 export interface Session {
   account: Account;
@@ -33,20 +33,11 @@ export interface DataStore {
     save(userId: string, conversation: Conversation): Promise<void>;
     remove(userId: string, id: string): Promise<void>;
   };
-  analyses: {
-    get(userId: string): Promise<ProfileAnalysis | null>;
-    save(userId: string, analysis: ProfileAnalysis): Promise<void>;
-  };
   transcripts: {
     list(userId: string): Promise<Transcript[]>;
     /** Persists the record; when a file is given, the original upload is stored too (if supported). */
     save(userId: string, transcript: Transcript, file?: File): Promise<Transcript>;
     remove(userId: string, transcript: Transcript): Promise<void>;
-  };
-  coursePlans: {
-    list(userId: string): Promise<CoursePlan[]>;
-    save(userId: string, plan: CoursePlan): Promise<void>;
-    remove(userId: string, id: string): Promise<void>;
   };
   /** Birthday and birthplace, kept apart from the profile. */
   personalInfo: {

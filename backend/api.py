@@ -23,6 +23,7 @@ from transcript import TranscriptError, analyze_transcript
 from course_plan import build_course_plan
 from essay import generate_essay
 from piq import generate_piqs
+from activities import extract_activities
 import uc_account
 from auth import Student, current_student
 from fastapi import Header
@@ -218,6 +219,22 @@ class EssayResponse(BaseModel):
     tips: List[str]
 
 
+class ActivityExtractRequest(BaseModel):
+    notes: str = Field(..., min_length=1, max_length=10000)
+    section: str = Field(..., max_length=20)
+
+
+class ActivityItem(BaseModel):
+    name: str
+    role: str
+    description: str
+    level: str = ""
+
+
+class ActivityExtractResponse(BaseModel):
+    activities: List[ActivityItem]
+
+
 class PiqAnswer(BaseModel):
     question: str = Field("", max_length=500)
     answer: str = Field("", max_length=3000)
@@ -226,6 +243,7 @@ class PiqAnswer(BaseModel):
 class PiqItem(BaseModel):
     id: str = Field(..., max_length=40)
     answers: List[PiqAnswer] = Field(default_factory=list, max_length=8)
+    used_activities: List[str] = Field(default_factory=list, max_length=60)
 
 
 class PiqRequest(BaseModel):
@@ -504,6 +522,19 @@ def essay_piqs(request: PiqRequest, student: Student = Depends(current_student))
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"PIQ generation failed: {error}")
     return PiqResponse(essays=essays)
+
+
+@app.post("/activities/extract", response_model=ActivityExtractResponse)
+def activities_extract(request: ActivityExtractRequest, student: Student = Depends(current_student)) -> ActivityExtractResponse:
+    """Turns what the student told Milo into rows for their activities list."""
+    try:
+        return ActivityExtractResponse(activities=extract_activities(request.notes, request.section))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error))
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Saving activities failed: {error}")
 
 
 @app.post("/agent/counselor/find", response_model=CounselorFindResponse)

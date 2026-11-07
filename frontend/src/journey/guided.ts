@@ -1,25 +1,26 @@
 import { agentOf, setAgent, sirDeadlineDate } from "../agent/logic";
 import { MAJOR_CHOICES } from "../constants";
 import type { Mentor } from "../game/characters";
-import type { GradeLevel, Profile } from "../types";
+import type { ActivitySectionId, Award, GradeLevel, Profile } from "../types";
 import {
   ACTIVITY_DESC_LIMIT,
+  ACTIVITY_SECTIONS,
   AFTER_APPLY,
-  ACTIVITY_QUESTIONS,
+  activitiesStatus,
+  activitySection,
+  activitySectionAnswered,
   computeJourney,
   isUc,
   journeyOf,
+  withActivitySection,
   PIQ_PROMPTS,
   PIQ_REQUIRED,
-  PIQ_WORD_LIMIT,
-  REVIEW_MANUAL,
-  setPiqStatus,
   toggleCampus,
   togglePiq,
   type Checkpoint,
   type CheckpointId,
 } from "./logic";
-import { canGeneratePiq, chosenPiqs, needsPersonalInfo, PERSONAL_ANSWER, PERSONAL_PIQS, personalAnswered, piqWorkOf, setPiqAnswer } from "./piqs";
+import { ADD_INFO_LABEL, chosenPiqs, essayDone, essayNeedsFollowUp } from "./piqs";
 
 /** Rough unweighted GPA choices (4.0 scale). */
 export const GPA_RANGES = [
@@ -39,26 +40,33 @@ export type GuidedEffect =
   | { type: "setGoals"; patch: Partial<Profile["goals"]> }
   /** Financial-aid answers (Profile → Cost & support). */
   | { type: "setPreferences"; patch: Partial<Profile["preferences"]> }
-  /** Answer to a direct activity question; count > 0 adds the entry. */
-  | { type: "answerActivity"; questionId: string; count: number }
-  /** Optional extra details for a "yes" answer ("" = submitted empty). */
-  | { type: "activityDetails"; questionId: string; value: string }
+  /** How many of this section's things the student wants to report (3 means 3 or more). */
+  | { type: "setActivityCount"; section: ActivitySectionId; count: number }
+  /** Saves what the student told Milo and adds it to their list; the view builds it from the chat (see finishActivities). */
+  | { type: "saveActivitySection"; section: ActivitySectionId; notes: string; items: ActivityItem[] }
+  /** The student is done telling Milo about this section. */
+  | { type: "finishActivities"; section: ActivitySectionId }
+  /** 3 or more: the student fills these in on the Profile page, so this question is finished. */
+  | { type: "fillInProfile"; section: ActivitySectionId }
   | { type: "toggleCampus"; campus: string }
   /** Replace the UC campus list with these names (checkbox picker submit). */
   | { type: "setCampuses"; campuses: string[] }
   | { type: "togglePiq"; piqId: string }
   /** Replace chosen PIQs with exactly these ids (checkbox picker; expect four). */
   | { type: "setPiqs"; piqIds: string[] }
-  | { type: "setPiqReady"; piqId: string }
   | { type: "toggleCheck"; checkId: string }
   | { type: "markSubmitted" }
   /** UC Statement of Intent to Register: submitted on UC's site, recorded here (true) or undone (false). */
   | { type: "setSirDone"; done: boolean }
   | { type: "applyText"; field: TextField; value: string }
-  | { type: "setPiqAnswer"; piqId: string; questionId: string; value: string }
+  /** Sets an essay aside: Quill moves on to the next one. */
+  | { type: "skipPiq"; piqId: string }
+  /** Brings set-aside essays back. */
+  | { type: "unskipPiqs" }
   /** Draft these PIQs with Groq (one as soon as its follow-ups are done); results land in Profile → Essays. */
   | { type: "generatePiqs"; piqIds: string[] }
-  | { type: "openEssays" }
+  /** Opens this essay in Profile → Essays, ready for the student to paste in their own. */
+  | { type: "pasteEssay"; piqId: string }
   /** Hand off to a guide in the chat with a starter question. */
   | { type: "ask"; mentorId: Mentor["id"]; prompt: string }
   /** Put the cursor in the chat box so the student can ask their own question. */
@@ -66,19 +74,30 @@ export type GuidedEffect =
   /** Bring back everything deferred this session. */
   | { type: "resume" };
 
+/** One row for the activities list, read out of the student's chat with Milo. */
+export interface ActivityItem {
+  name: string;
+  role: string;
+  description: string;
+  /** Honors and awards only. */
+  level?: string;
+}
+
 export type TextField =
   | "firstName"
   | "highSchool"
   | "graduationYear"
   | "gpaUnweighted"
-  | "exams"
-  | "activityDetails"
-  | "piqAnswer";
+  | "exams";
 
 export interface GuidedChoice {
   id: string;
   label: string;
   effect: GuidedEffect;
+  /** Sets this option apart from the answers around it. */
+  highlight?: boolean;
+  /** The student's current answer, which stays on screen so they can change it. */
+  selected?: boolean;
 }
 
 export interface GuidedTurn {
@@ -97,14 +116,14 @@ export interface GuidedTurn {
     placeholder: string;
     field: TextField;
     submitLabel: string;
-    /** For "piqAnswer": which PIQ the personal information is for. */
-    piqId?: string;
-    /** PIQ answer key, or ACTIVITY_QUESTIONS id for "activityDetails". */
-    questionId?: string;
     multiline?: boolean;
     /** Submitting an empty box is a valid answer. */
     allowEmpty?: boolean;
   };
+  /** Give each choice a whole row of its own. */
+  stackedChoices?: boolean;
+  /** A small note under the choices. */
+  note?: string;
   /** Show all UC campuses as checkboxes; submit fires setCampuses. */
   campusPicker?: boolean;
   /** Show all 8 PIQs as checkboxes; submit fires setPiqs with exactly 4. */
@@ -115,13 +134,6 @@ export interface GuidedTurn {
 /** Effect for a typed reply to this turn. */
 export function inputEffect(turn: GuidedTurn, value: string): GuidedEffect | null {
   const input = turn.input;
-  if (input?.field === "activityDetails" && input.questionId) {
-    return { type: "activityDetails", questionId: input.questionId, value: value.trim() };
-  }
-  // Personal PIQ info: anything goes to the draft, even an empty box.
-  if (input?.field === "piqAnswer" && input.piqId && input.questionId) {
-    return { type: "setPiqAnswer", piqId: input.piqId, questionId: input.questionId, value: value.trim() };
-  }
   if (!input || !value.trim()) return null;
   return { type: "applyText", field: input.field, value };
 }
@@ -145,6 +157,15 @@ export const academicStarted = (profile: Profile) =>
 export function storyComplete(profile: Profile, sections: Record<string, number>) {
   const { checkpoints } = computeJourney(profile, sections, academicStarted(profile));
   return checkpoints.filter((c) => !AFTER_APPLY.includes(c.id)).every((c) => c.complete);
+}
+
+/**
+ * Opening the Review & Apply planet from another stop:
+ * - `revisit`: on Financial Aid after Apply is unlocked — show Counselor and Application assistant
+ * - `locked`: earlier steps still open — Application Assistant stays unavailable
+ */
+export function reviewVisitKind(currentStage: CheckpointId, applyUnlocked: boolean): "revisit" | "locked" {
+  return applyUnlocked && currentStage === "aid" ? "revisit" : "locked";
 }
 const DEFER = { type: "noop" } as const;
 
@@ -197,11 +218,27 @@ export function nextGuidedTurn(
   ].filter((c) => !c.complete);
 
   for (const cp of order) {
-    const turn = turnsFor(cp, profile, sections, hi).find((t) => !skipIds.has(t.id));
-    if (turn) {
-      // Review & Apply's count is the checklist of earlier steps, so it gets just its name.
-      const chapter = cp.id === "review" ? cp.short : `${cp.short} · ${cp.done}/${cp.total} done`;
-      return { ...turn, checkpointId: cp.id, chapter, finished: false };
+    const turns = turnsFor(cp, profile, sections, hi, skipIds).filter((t) => !skipIds.has(t.id));
+    if (turns.length) {
+      const chapter = `${cp.short} · ${turns.length} question${turns.length === 1 ? "" : "s"} left`;
+      return { ...turns[0], checkpointId: cp.id, chapter, finished: false };
+    }
+    // Review is finished by the counselor / application tools, not chat turns. If Applied is
+    // checked but Counselor or UC account isn't, don't skip ahead to Financial Aid — that left
+    // "questions left" on Aid while the map and chat stayed on Review.
+    if (cp.id === "review") {
+      const left = cp.tasks.filter((t) => !t.done).length;
+      return {
+        id: "review-tools",
+        checkpointId: "review",
+        speaker: "sage",
+        chapter: `${cp.short} · ${left} task${left === 1 ? "" : "s"} left`,
+        prompt: hi(
+          "finish Review & Apply with the tools on the right — meet your virtual counselor, email your school counselor, and run the Application assistant until you've applied. The map moves on once those are checked off.",
+        ),
+        choices: [{ id: "manual", label: "Ask a guide a question instead", effect: { type: "focusChat" } }],
+        finished: false,
+      };
     }
   }
 
@@ -226,6 +263,7 @@ function turnsFor(
   profile: Profile,
   sections: Record<string, number>,
   hi: (s: string) => string,
+  skipIds: ReadonlySet<string>,
 ): Draft[] {
   const out: Draft[] = [];
   const { basics: b, academics: a } = profile;
@@ -299,7 +337,8 @@ function turnsFor(
           input: { placeholder: "Or type your exact GPA…", field: "gpaUnweighted", submitLabel: "Save GPA" },
         });
       }
-      if (!filled(a.exams)) {
+      // A GPA alone starts academic history, so exams only come up when the GPA is put off.
+      if (!filled(a.exams) && skipIds.has("gpa")) {
         out.push({
           id: "exams",
           speaker: "sage",
@@ -320,62 +359,54 @@ function turnsFor(
       out.push({
         id: "pick-uc",
         speaker: "theo",
-        prompt: hi(
-          "profile done! Next, choose your UC campuses. One application covers all nine — check every campus you'll apply to, then hit Submit. Not sure yet? Ask me what any of them is like.",
-        ),
+        prompt: hi("please choose the UCs you want to apply to."),
         choices: [],
         campusPicker: true,
       });
     }
-    if (ucs.length && !profile.goals.intendedMajor) {
+    // Onboarding usually sets the major already. It's the same one at every campus, so it's asked once.
+    if (!profile.goals.intendedMajor) {
       out.push({
         id: "major",
-        speaker: "milo",
-        prompt: hi("what do you want to study? Pick one major. It's the one you'll apply for at every UC campus."),
+        speaker: "theo",
+        prompt: hi("please select your major."),
         choices: [
           ...MAJOR_CHOICES.map((m) => ({ id: `major-${m}`, label: m, effect: { type: "setGoals" as const, patch: { intendedMajor: m } } })),
           {
             id: "ask",
             label: "Help me pick a major",
-            effect: { type: "ask", mentorId: "milo", prompt: "Help me choose a major to apply for at my UC campuses. Which majors fit my interests, and are any impacted?" },
+            highlight: true,
+            effect: { type: "ask", mentorId: "theo", prompt: "Can you help me pick a major?" },
           },
         ],
       });
     }
   }
 
-  if (cp.id === "activities") {
-    const survey = journeyOf(profile).activitySurvey ?? {};
-    ACTIVITY_QUESTIONS.forEach((q, i) => {
-      const answer = survey[q.id];
-      if (!answer) {
-        const answerWith = (count: number) => ({ type: "answerActivity" as const, questionId: q.id, count });
-        out.push({
-          id: `activity-${q.id}`,
-          speaker: "sage",
-          prompt: hi(i === 0 ? `time for your activities — I'll ask a few quick questions. First: ${q.question}` : q.question),
-          choices: q.counted
-            ? [
-                { id: "no", label: "No", effect: answerWith(0) },
-                { id: "1", label: "Yes — 1", effect: answerWith(1) },
-                { id: "2", label: "Yes — 2", effect: answerWith(2) },
-                { id: "3", label: "Yes — 3 or more", effect: answerWith(3) },
-              ]
-            : [
-                { id: "yes", label: "Yes", effect: answerWith(1) },
-                { id: "no", label: "No", effect: answerWith(0) },
-              ],
-        });
-      } else if (answer.count > 0 && answer.details === undefined) {
-        out.push({
-          id: `activity-details-${q.id}`,
-          speaker: "sage",
-          prompt: hi(`nice! Any details to add about ${q.name.toLowerCase()}? ${q.details} Or leave it blank and hit Submit.`),
-          choices: [],
-          input: { placeholder: "Optional details…", field: "activityDetails", submitLabel: "Submit", questionId: q.id, multiline: true, allowEmpty: true },
-        });
-      }
-    });
+  if (cp.id === "activities" && !activitiesStatus(profile).answered) {
+    const journey = journeyOf(profile);
+    for (const section of ACTIVITY_SECTIONS.filter((s) => !activitySectionAnswered(profile, s.id))) {
+      const { count } = activitySection(journey, section.id);
+      const saveWhat = section.id === "job" ? (count === 1 ? "job" : "jobs") : section.id === "awards" ? "honors and awards" : section.id;
+      out.push({
+        id: section.turnId,
+        speaker: "milo",
+        prompt: hi(!count ? section.question : count >= 3 ? `${section.question} Add them in your profile.` : `${section.question} Answer Milo's questions in the chat, then hit Done.`),
+        stackedChoices: true,
+        choices: [
+          ...[0, 1, 2, 3].map((n) => ({
+            id: `count-${n}`,
+            label: n === 3 ? "3+" : String(n),
+            selected: count === n,
+            effect: { type: "setActivityCount" as const, section: section.id, count: n },
+          })),
+          ...(count && count >= 3
+            ? [{ id: "profile", label: "Go to Activities & awards", highlight: true, effect: { type: "fillInProfile" as const, section: section.id } }]
+            : []),
+          ...(count && count < 3 ? [{ id: "done", label: `Done — save my ${saveWhat}`, highlight: true, effect: { type: "finishActivities" as const, section: section.id } }] : []),
+        ],
+      });
+    }
   }
 
   if (cp.id === "essays") {
@@ -385,101 +416,48 @@ function turnsFor(
       out.push({
         id: "pick-piq",
         speaker: "quill",
-        prompt: hi(
-          `Time for essays! UC asks for 4 of 8 Personal Insight Questions (${PIQ_WORD_LIMIT} words each). Check the four you like best and hit Submit — I'll write the drafts for you from your activities and profile.`,
-        ),
+        prompt: hi("please choose 4 essay topics."),
         choices: [],
         piqPicker: true,
       });
     }
 
-    // Personal-life PIQs need one answer the activities list can't give; everything else drafts on its own.
-    for (const piqId of chosenPiqs(profile)) {
-      const meta = PIQ_PROMPTS.find((p) => p.id === piqId);
-      if (!meta || !needsPersonalInfo(piqId) || personalAnswered(profile, piqId)) continue;
-      out.push({
-        id: `piq-personal-${piqId}`,
-        speaker: "quill",
-        prompt: hi(`“${meta.title}” is about your personal life, so I can't pull it from your activities. UC asks: “${meta.prompt}” ${PERSONAL_PIQS[piqId]} Whatever you write — even nothing — I'll turn into a draft.`),
-        choices: [],
-        input: { placeholder: "Anything you want Quill to know…", field: "piqAnswer", submitLabel: "Submit", piqId, questionId: PERSONAL_ANSWER, multiline: true, allowEmpty: true },
-      });
-    }
-
-    // Drafts start automatically once activities are done; this turn shows progress and allows a retry.
-    for (const piqId of chosenPiqs(profile)) {
-      const meta = PIQ_PROMPTS.find((p) => p.id === piqId);
-      if (!meta || piqWorkOf(profile, piqId).draft || !canGeneratePiq(profile, piqId)) continue;
+    // One essay at a time, in order. Once one is filled out, the next comes up. Skipped essays wait.
+    const skipped = j.skippedPiqs ?? [];
+    chosenPiqs(profile).forEach((piqId, i) => {
+      const meta = PIQ_PROMPTS.find((q) => q.id === piqId);
+      if (!meta || essayDone(profile, piqId) || skipped.includes(piqId)) return;
       out.push({
         id: `generate-${piqId}`,
         speaker: "quill",
-        prompt: hi(`I'm writing your “${meta.title}” essay from your activities and profile — no questions needed. It'll show up in Profile → Essays in a few seconds.`),
+        prompt: hi(`essay ${i + 1} of ${PIQ_REQUIRED}: ${meta.title}. Want me to write it?`),
+        ...(essayNeedsFollowUp(profile, piqId) ? { note: `*Essay generation would improve with more information. Please select "${ADD_INFO_LABEL}" in the chat.` } : {}),
         choices: [
-          { id: "generate", label: `Write my “${meta.title}” essay now`, effect: { type: "generatePiqs", piqIds: [piqId] } },
-          { id: "later", label: "Keep going", effect: DEFER },
+          { id: "generate", label: "Generate my essay", highlight: true, effect: { type: "generatePiqs", piqIds: [piqId] } },
+          { id: "paste", label: "I already wrote my essay", effect: { type: "pasteEssay", piqId } },
+          { id: "skip", label: "Skip this essay for now", effect: { type: "skipPiq", piqId } },
         ],
       });
-    }
-
-    for (const [piqId, status] of Object.entries(j.piqs)) {
-      if (status === "ready") continue;
-      const draft = piqWorkOf(profile, piqId).draft;
-      if (!draft) continue;
-      const meta = PIQ_PROMPTS.find((q) => q.id === piqId);
-      const title = meta?.title ?? "PIQ";
-      out.push({
-        id: `piq-ready-${piqId}`,
-        speaker: "quill",
-        prompt: hi(
-          `your “${title}” draft is in Profile → Essays (${draft.words}/${PIQ_WORD_LIMIT} words). Read it, change anything that doesn't sound like you, then mark it ready.`,
-        ),
-        choices: [
-          { id: "open", label: "Open my essays", effect: { type: "openEssays" } },
-          { id: "ready", label: "It's finished — mark it ready", effect: { type: "setPiqReady", piqId } },
-          { id: "regen", label: "Regenerate a fresh draft", effect: { type: "generatePiqs", piqIds: [piqId] } },
-          {
-            id: "revise",
-            label: "Help me revise it",
-            effect: {
-              type: "ask",
-              mentorId: "quill",
-              prompt: `Help me revise my UC PIQ response for "${meta?.prompt ?? title}" so it sounds more like me and stays under ${PIQ_WORD_LIMIT} words:\n\n${draft.text}`,
-            },
-          },
-          { id: "later", label: "Come back later", effect: DEFER },
-        ],
-      });
-    }
+    });
   }
 
   if (cp.id === "review") {
+    // Counselor + Application assistant drive this stop (see ReviewPersonaPicker). Guided only
+    // offers a manual "I submitted" fallback when the assistant hasn't finished PIQs yet.
     const j = journeyOf(profile);
-    for (const m of REVIEW_MANUAL) {
-      if (j.checks[m.id]) continue;
-      const fee = m.id === "fees";
+    const applied = !!j.agent?.ucAccount?.piqAt || j.submittedAt !== null;
+    if (!applied) {
       out.push({
-        id: `check-${m.id}`,
-        speaker: fee ? "penny" : "sage",
-        prompt: hi(`almost there! ${m.detail} Have you taken care of this?`),
+        id: "submit",
+        speaker: "sage",
+        prompt: hi("the last step happens on the official UC site, apply.universityofcalifornia.edu. Once you've submitted there, record it here."),
         choices: [
-          { id: "yes", label: "Yes — mark it done", effect: { type: "toggleCheck", checkId: m.id } },
-          fee
-            ? { id: "ask", label: "Do I qualify for a fee waiver?", effect: { type: "ask", mentorId: "penny", prompt: "How do UC application fee waivers work, and how do I know if I qualify?" } }
-            : { id: "ask", label: "Check my major's extra steps", effect: { type: "ask", mentorId: "milo", prompt: "Do any of my UC campuses or majors need supplemental steps like portfolios, auditions, or extra questions?" } },
-          { id: "later", label: "Not yet", effect: DEFER },
+          { id: "submitted", label: "I submitted — mark it!", effect: { type: "markSubmitted" } },
+          { id: "how", label: "Walk me through submitting", effect: { type: "ask", mentorId: "sage", prompt: "Walk me through the final steps to submit my UC application, and what to double-check before I do." } },
+          { id: "later", label: "Not submitted yet", effect: DEFER },
         ],
       });
     }
-    out.push({
-      id: "submit",
-      speaker: "sage",
-      prompt: hi("the last step happens on the official UC site, apply.universityofcalifornia.edu. Once you've submitted there, record it here."),
-      choices: [
-        { id: "submitted", label: "I submitted — mark it!", effect: { type: "markSubmitted" } },
-        { id: "how", label: "Walk me through submitting", effect: { type: "ask", mentorId: "sage", prompt: "Walk me through the final steps to submit my UC application, and what to double-check before I do." } },
-        { id: "later", label: "Not submitted yet", effect: DEFER },
-      ],
-    });
   }
 
   if (cp.id === "aid") {
@@ -534,33 +512,22 @@ export function applyGuidedEffect(profile: Profile, effect: GuidedEffect, newId:
       return { ...profile, goals: { ...profile.goals, ...effect.patch } };
     case "setPreferences":
       return { ...profile, preferences: { ...profile.preferences, ...effect.patch } };
-    case "answerActivity": {
-      const q = ACTIVITY_QUESTIONS.find((x) => x.id === effect.questionId);
-      if (!q) return profile;
-      const cur = journeyOf(profile);
-      const activity =
-        effect.count > 0
-          ? { id: newId(), name: effect.count > 1 ? `${q.name} (${effect.count}${effect.count >= 3 ? "+" : ""})` : q.name, role: "", hoursPerWeek: "", weeksPerYear: "", years: "", description: "", category: q.category }
-          : null;
+    case "setActivityCount":
+      // A new number restarts the chat, so anything saved from the last one goes with it.
+      return { ...profile, ucJourney: withActivitySection(journeyOf(profile), effect.section, { count: effect.count }) };
+    case "saveActivitySection": {
+      const journey = journeyOf(profile);
+      const { count } = activitySection(journey, effect.section);
       return {
         ...profile,
-        activities: activity ? [...profile.activities, activity] : profile.activities,
-        ucJourney: { ...cur, activitySurvey: { ...cur.activitySurvey, [q.id]: { count: effect.count, activityId: activity?.id } } },
+        ...(effect.section === "awards"
+          ? { awards: mergeAwards(profile.awards, effect.items, newId) }
+          : { activities: mergeActivities(profile.activities, effect.section, effect.items, newId) }),
+        ucJourney: withActivitySection(journey, effect.section, { count, notes: effect.notes }),
       };
     }
-    case "activityDetails": {
-      const cur = journeyOf(profile);
-      const answer = cur.activitySurvey?.[effect.questionId];
-      if (!answer) return profile;
-      const details = effect.value.trim();
-      return {
-        ...profile,
-        activities: details
-          ? profile.activities.map((a) => (a.id === answer.activityId ? { ...a, description: details.slice(0, ACTIVITY_DESC_LIMIT) } : a))
-          : profile.activities,
-        ucJourney: { ...cur, activitySurvey: { ...cur.activitySurvey, [effect.questionId]: { ...answer, details } } },
-      };
-    }
+    case "fillInProfile":
+      return applyGuidedEffect(profile, { type: "saveActivitySection", section: effect.section, notes: "", items: [] }, newId);
     case "toggleCampus":
       return toggleCampus(profile, effect.campus, newId);
     case "setCampuses": {
@@ -583,8 +550,6 @@ export function applyGuidedEffect(profile: Profile, effect: GuidedEffect, newId:
       for (const id of ids) piqs[id] = prev[id] ?? "not-started";
       return { ...profile, ucJourney: { ...journeyOf(profile), piqs } };
     }
-    case "setPiqReady":
-      return { ...profile, ucJourney: setPiqStatus(journeyOf(profile), effect.piqId, "ready") };
     case "toggleCheck": {
       const cur = journeyOf(profile);
       const checks = { ...cur.checks };
@@ -596,8 +561,12 @@ export function applyGuidedEffect(profile: Profile, effect: GuidedEffect, newId:
       return { ...profile, ucJourney: { ...journeyOf(profile), submittedAt: Date.now() } };
     case "setSirDone":
       return setAgent(profile, (a) => ({ ...a, sirDoneAt: effect.done ? Date.now() : undefined }));
-    case "setPiqAnswer":
-      return setPiqAnswer(profile, effect.piqId, effect.questionId, effect.value);
+    case "skipPiq": {
+      const cur = journeyOf(profile);
+      return { ...profile, ucJourney: { ...cur, skippedPiqs: [...(cur.skippedPiqs ?? []), effect.piqId] } };
+    }
+    case "unskipPiqs":
+      return { ...profile, ucJourney: { ...journeyOf(profile), skippedPiqs: [] } };
     case "applyText": {
       const v = effect.value.trim();
       if (!v) return profile;
@@ -612,15 +581,39 @@ export function applyGuidedEffect(profile: Profile, effect: GuidedEffect, newId:
           return applyGuidedEffect(profile, { type: "setAcademics", patch: { gpaUnweighted: v } }, newId);
         case "exams":
           return applyGuidedEffect(profile, { type: "setAcademics", patch: { exams: v } }, newId);
-        case "activityDetails":
-        case "piqAnswer":
-          return profile;
       }
       return profile;
     }
     default:
       return profile;
   }
+}
+
+/** Adds what Milo heard to the list. Telling Milo about the same thing again updates its row instead of adding another. */
+function mergeActivities(list: Profile["activities"], section: ActivitySectionId, items: ActivityItem[], newId: () => string): Profile["activities"] {
+  const category = ACTIVITY_SECTIONS.find((s) => s.id === section)!.category;
+  const key = (name: string) => name.trim().toLowerCase();
+  return items.reduce((acts, item) => {
+    const description = item.description.slice(0, ACTIVITY_DESC_LIMIT);
+    const same = acts.find((a) => a.category === category && key(a.name) === key(item.name));
+    if (same) {
+      return acts.map((a) => (a === same ? { ...a, role: item.role || a.role, description: description || a.description } : a));
+    }
+    return [...acts, { id: newId(), name: item.name, role: item.role, hoursPerWeek: "", weeksPerYear: "", years: "", description, category }];
+  }, list);
+}
+
+const AWARD_LEVELS: Award["level"][] = ["school", "regional", "state", "national", "international"];
+
+/** Adds what Milo heard to the honors and awards list, updating an award already there. */
+function mergeAwards(list: Award[], items: ActivityItem[], newId: () => string): Award[] {
+  const key = (title: string) => title.trim().toLowerCase();
+  return items.reduce((awards, item) => {
+    const level = AWARD_LEVELS.find((l) => l === item.level) ?? "";
+    const same = awards.find((a) => key(a.title) === key(item.name));
+    if (same) return awards.map((a) => (a === same ? { ...a, level: level || a.level } : a));
+    return [...awards, { id: newId(), title: item.name, level }];
+  }, list);
 }
 
 /** Short confirmation shown after a reply changes the profile. */
@@ -631,10 +624,11 @@ export function savedLabel(effect: GuidedEffect): string | null {
     case "focusChat":
     case "resume":
     case "generatePiqs":
-    case "openEssays":
+    case "pasteEssay":
       return null;
-    case "setPiqAnswer":
-      return effect.value ? "Saved — Quill is writing your essay" : "Got it — Quill will keep that essay general";
+    case "skipPiq":
+    case "unskipPiqs":
+      return null;
     case "toggleCampus":
       return `Updated your campuses: ${effect.campus}`;
     case "setCampuses":
@@ -645,18 +639,19 @@ export function savedLabel(effect: GuidedEffect): string | null {
       return "Updated your PIQ choices";
     case "setPiqs":
       return effect.piqIds.length === PIQ_REQUIRED ? `Saved your 4 PIQ choices` : null;
-    case "setPiqReady":
-      return "Marked that PIQ ready";
     case "toggleCheck":
       return "Checked off on your review list";
     case "markSubmitted":
       return "Recorded your UC submission";
     case "setSirDone":
       return effect.done ? "Recorded your Intent to Register" : "Marked Intent to Register not done";
-    case "answerActivity":
-      return effect.count > 0 ? "Added to your activities list" : null;
-    case "activityDetails":
-      return effect.value.trim() ? "Saved your activity details" : null;
+    case "setActivityCount":
+      return null;
+    case "saveActivitySection":
+      if (!effect.items.length) return "Saved for your essays";
+      return effect.section === "awards" ? "Added to your honors and awards" : "Added to your activities list";
+    case "finishActivities":
+      return null;
     case "setGoals":
       return effect.patch.intendedMajor ? `Saved your major: ${effect.patch.intendedMajor}` : "Saved to your profile";
     default:

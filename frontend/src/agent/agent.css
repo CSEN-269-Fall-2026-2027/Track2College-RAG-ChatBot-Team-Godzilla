@@ -509,7 +509,7 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  grid-template-columns: minmax(300px, 440px) minmax(0, 1fr);
   gap: 20px;
   align-items: stretch;
 }
@@ -526,20 +526,35 @@
   text-align: center;
 }
 
+/* Jordan grows with the pop-up, so the card has no empty space at the bottom. */
 .voice-popup .voice-portrait {
-  width: 60px;
-  height: 60px;
+  flex: 1 1 200px;
+  width: 100%;
+  height: auto;
+  min-height: 120px;
+  max-height: 340px;
+  border-radius: 20px;
+}
+
+.voice-popup .voice-portrait img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .voice-popup .voice-invite strong {
-  font-size: 18px;
+  font-size: 24px;
+}
+
+.voice-popup .voice-state {
+  font-size: 15px;
 }
 
 .voice-details {
-  flex: 1;
+  flex: none;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
   width: 100%;
   margin-top: 10px;
   padding-top: 20px;
@@ -547,8 +562,29 @@
   text-align: left;
 }
 
+.voice-details .tool-dialog-from {
+  color: var(--text);
+  font-size: 19px;
+  font-weight: 700;
+  text-align: left;
+}
+
 .voice-details .tool-dialog-steps {
   margin: 0;
+  gap: 14px;
+}
+
+.voice-details .tool-dialog-steps li {
+  grid-template-columns: 32px 1fr;
+  align-items: center;
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.voice-details .tool-dialog-steps li::before {
+  width: 32px;
+  height: 32px;
+  font-size: 15px;
 }
 
 .voice-popup .voice-invite {
@@ -556,8 +592,11 @@
 }
 
 .voice-popup .voice-btn {
+  flex: none;
   width: 100%;
   min-width: 0;
+  min-height: 56px;
+  font-size: 17px;
 }
 
 @media (max-width: 860px) {
@@ -571,8 +610,9 @@
     overflow: visible;
   }
 
-  .voice-details {
+  .voice-popup .voice-portrait {
     flex: none;
+    height: 120px;
   }
 }
 
@@ -610,6 +650,24 @@
   color: var(--text-muted);
   font-size: 14px;
   text-align: center;
+}
+
+/* Before the first call, this card's two lines are centered and large. */
+.voice-popup .voice-log-empty {
+  align-items: center;
+  gap: 10px;
+}
+
+.voice-popup .voice-log-empty .field-label {
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.voice-popup .voice-log-empty p {
+  max-width: 24em;
+  font-size: 19px;
+  line-height: 1.4;
 }
 
 /* ---------- Call window ---------- */

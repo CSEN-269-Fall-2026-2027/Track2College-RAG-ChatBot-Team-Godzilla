@@ -195,7 +195,7 @@ export interface PiqDraftResult {
 
 /** Drafts the chosen UC PIQs (≤350 words each) from the profile, activities, and any personal answers. */
 export async function generatePiqDrafts(
-  piqs: { id: string; answers: { question: string; answer: string }[] }[],
+  piqs: { id: string; answers: { question: string; answer: string }[]; used_activities?: string[] }[],
   profileSummary: string,
   activities: string,
   signal?: AbortSignal,
@@ -207,6 +207,12 @@ export async function generatePiqDrafts(
     signal,
   );
   return result.essays.map((e) => ({ id: e.id, question: e.question, essay: e.essay, wordCount: e.word_count }));
+}
+
+/** Reads what the student told Milo into rows for their activities list. */
+export async function extractActivities(notes: string, section: string, signal?: AbortSignal): Promise<{ name: string; role: string; description: string; level: string }[]> {
+  const result = await post<{ activities: { name: string; role: string; description: string; level: string }[] }>("/activities/extract", { notes, section }, signal);
+  return result.activities;
 }
 
 export interface FoundCounselor {
@@ -353,7 +359,7 @@ export async function startUcAccount(
   /** UC already verified this account, so its emailed-code screen won't appear again. */
   verified = false,
   piqs: UcPiq[] = [],
-  browser: UcBrowser = "local",
+  browser: UcBrowser = "cloud",
 ): Promise<string> {
   const result = await post<{ run_id: string }>("/agent/uc-account/start", {
     email,

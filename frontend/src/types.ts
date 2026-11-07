@@ -13,6 +13,16 @@ export interface Message {
   mentorId?: string;
   responseTimeMs?: number;
   error?: boolean;
+  /** The full question sent to the model, when the chat shows a shorter one (`content`). */
+  sentAs?: string;
+  /** Milo's "add them in Profile" reply for this question: shows the button that goes there. */
+  fillInProfile?: ActivitySectionId;
+  /** Answers to tap when this reply asks a yes/no or pick-one question. The student can still type. */
+  options?: string[];
+  /** Quill's one question for this essay (PIQ id): the student's next message answers it. */
+  essayFollowUp?: string;
+  /** The essay (PIQ id) this message asks Quill to write, or holds once written. */
+  essayFor?: string;
   /** Sent by a ready-made button (not typed): long ones show collapsed with "See more". */
   preset?: boolean;
   createdAt: number;
@@ -53,6 +63,16 @@ export type ActivityCategory =
   | "other-coursework"
   | "volunteering"
   | "work";
+
+/** The questions Milo's chapter asks, each with its own number and chat. */
+export type ActivitySectionId = "activities" | "volunteering" | "job" | "awards";
+
+export interface ActivitySectionState {
+  /** How many the student wants to report (3 means 3 or more). */
+  count?: number;
+  /** Milo's questions and the student's answers, saved when they hit Done. */
+  notes?: string;
+}
 
 export interface Activity {
   id: string;
@@ -167,7 +187,8 @@ export type PiqStatus = "not-started" | "drafting" | "ready";
 export interface PiqWork {
   /** Follow-up question id → the student's answer ("" = skipped). */
   answers: Record<string, string>;
-  draft?: { text: string; words: number; generatedAt: number };
+  /** `requested`: written because the student asked, or edited by them. Missing on drafts the app wrote on its own. */
+  draft?: { text: string; words: number; generatedAt: number; requested?: boolean };
 }
 
 export interface UcJourneyState {
@@ -179,7 +200,15 @@ export interface UcJourneyState {
   submittedAt: number | null;
   /** Post-submission follow-up ticks. */
   followUps: Record<string, boolean>;
-  /** Story activity questions (ACTIVITY_QUESTIONS id) → how many, the entry it created, and the optional details reply. */
+  /** Essays the student set aside for now: Quill moves on to the next one. */
+  skippedPiqs?: string[];
+  /** How many activities the student told Milo they want to report (3 means 3 or more). */
+  activityCount?: number;
+  /** Milo's questions and the student's answers, saved for essay drafting when they hit Done. */
+  activityNotes?: string;
+  /** The same count and saved chat for the volunteering and job questions. */
+  activitySections?: Partial<Record<Exclude<ActivitySectionId, "activities">, ActivitySectionState>>;
+  /** The old activity questions (ACTIVITY_QUESTIONS id) → how many, the entry it created, and the optional details reply. */
   activitySurvey?: Record<string, ActivitySurveyAnswer>;
   /** Student said they're done with (or skipping) activities on the Profile page. */
   activitiesReviewed?: boolean;
@@ -214,7 +243,7 @@ export interface AgentState {
   reviewMode?: ReviewMode;
   /** Story mode's Financial Aid step: FAFSA or Scholarships (switchable any time). */
   aidMode?: AidMode;
-  /** Which counselor the "Talk to a counselor" task shows: the AI voice call or the student's own school counselor. */
+  /** Which counselor tool is open: the AI voice call or the student's own school counselor. */
   counselorMode?: "virtual" | "school";
   /** Counselor the student confirmed. */
   counselor?: { name: string; email: string; title: string; serves: string; sourceUrl: string; confirmedAt: number };
@@ -226,6 +255,11 @@ export interface AgentState {
   fafsaDoneAt?: number;
   /** Student marked their UC Statement of Intent to Register submitted. */
   sirDoneAt?: number;
+  /**
+   * UC apply finished in the tool this visit, but Applied isn't committed until the popup ✕.
+   * Survives Local → Cloud remounts so closing still checks the map off.
+   */
+  pendingApply?: boolean;
   /** UC application login. Saved only once UC has accepted it (a new account or a sign-in). */
   ucAccount?: {
     email: string;
@@ -240,7 +274,7 @@ export interface AgentState {
     setupAt?: number;
     /** UC's "About you" category was completed. */
     aboutAt?: number;
-    /** The personal insight answers were entered on UC. */
+    /** Personal insight answers were entered on UC; set when the student closes the apply tool. */
     piqAt?: number;
     signedInAt?: number;
   };

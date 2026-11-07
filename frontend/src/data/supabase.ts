@@ -1,6 +1,6 @@
 import { createClient, type Session as SupabaseSession } from "@supabase/supabase-js";
 import type { GameState } from "../game/progress";
-import type { Conversation, CoursePlan, PersonalInfo, Profile, ProfileAnalysis, Transcript } from "../types";
+import type { Conversation, PersonalInfo, Profile, Transcript } from "../types";
 import { AuthError, type DataStore, type Session } from "./store";
 
 /** Generated schema types live in `./database.types` for reference / future typed queries. */
@@ -8,9 +8,11 @@ import { AuthError, type DataStore, type Session } from "./store";
 /** Table and bucket names must match supabase/schema.sql. */
 const TABLES = {
   profiles: "profiles",
+  /** Legacy Insights table — still wiped on reset; app no longer reads/writes it. */
   analyses: "profile_analyses",
   conversations: "conversations",
   transcripts: "transcripts",
+  /** Legacy course-plan table — still wiped on reset; app no longer reads/writes it. */
   coursePlans: "course_plans",
   game: "game_progress",
   personalInfo: "personal_info",
@@ -64,13 +66,11 @@ export function createSupabaseStore(url: string, anonKey: string): DataStore {
   });
 
   const profiles = singleton<Profile>(TABLES.profiles);
-  const analyses = singleton<ProfileAnalysis>(TABLES.analyses);
   const game = singleton<Partial<GameState>>(TABLES.game);
   const personalInfo = singleton<PersonalInfo>(TABLES.personalInfo);
-  // Every chat is kept as a record of what the student asked; the app never loads old ones back.
+  // One row per chat thread; Advisor loads the latest non-empty chat per mentor.
   const conversations = collection<Conversation>(TABLES.conversations);
   const transcripts = collection<Transcript>(TABLES.transcripts);
-  const coursePlans = collection<CoursePlan>(TABLES.coursePlans);
 
   return {
     kind: "supabase",
@@ -108,7 +108,6 @@ export function createSupabaseStore(url: string, anonKey: string): DataStore {
       },
     },
     profiles,
-    analyses,
     game,
     personalInfo,
     async resetAllData(userId, email, password) {
@@ -188,8 +187,9 @@ export function createSupabaseStore(url: string, anonKey: string): DataStore {
         let record = transcript;
         if (file) {
           const path = `${userId}/${transcript.id}/${file.name}`;
+          const contentType = file.type || (/\.md$/i.test(file.name) ? "text/markdown" : "application/octet-stream");
           try {
-            check(await client.storage.from(TRANSCRIPT_BUCKET).upload(path, file, { upsert: true, contentType: file.type }));
+            check(await client.storage.from(TRANSCRIPT_BUCKET).upload(path, file, { upsert: true, contentType }));
             record = { ...transcript, storagePath: path };
           } catch (error) {
             // Storage may be unavailable while a project finishes restoring; still keep the parsed record.
@@ -210,6 +210,5 @@ export function createSupabaseStore(url: string, anonKey: string): DataStore {
         await transcripts.remove(userId, transcript.id);
       },
     },
-    coursePlans,
   };
 }

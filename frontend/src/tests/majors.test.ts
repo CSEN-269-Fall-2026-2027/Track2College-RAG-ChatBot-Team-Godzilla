@@ -64,4 +64,33 @@ describe("story mode", () => {
     expect(picked.goals.intendedMajor).toBe("Computer Science");
     expect(nextGuidedTurn(picked, sections, "Maya").id).not.toBe("major");
   });
+
+  it("skips the major question when onboarding already set one", () => {
+    const sections = { basics: 1, academics: 1, campuses: 0, finances: 0 };
+    let p = blankProfile({
+      basics: { ...blankProfile().basics, firstName: "Maya", gradeLevel: "12", graduationYear: "2027", highSchool: "Lincoln", city: "Fresno", state: "CA" },
+      academics: { ...blankProfile().academics, gpaUnweighted: "3.8" },
+      goals: { ...blankProfile().goals, intendedMajor: "Biology" },
+    });
+    p = toggleCampus(p, "UCLA", () => "a");
+    const turn = nextGuidedTurn(p, sections, "Maya");
+    expect(turn.id).not.toBe("major");
+    expect(turn.checkpointId).toBe("activities");
+  });
+
+  it("has Theo ask for the major and start a chat when the student wants help", () => {
+    const sections = { basics: 1, academics: 1, campuses: 0, finances: 0 };
+    const p = toggleCampus(
+      blankProfile({
+        basics: { ...blankProfile().basics, firstName: "Maya", gradeLevel: "12", graduationYear: "2027", highSchool: "Lincoln", city: "Fresno", state: "CA" },
+        academics: { ...blankProfile().academics, gpaUnweighted: "3.8" },
+      }),
+      "UCLA",
+      () => "a",
+    );
+    const turn = nextGuidedTurn(p, sections, "Maya");
+    expect(turn.speaker).toBe("theo");
+    expect(turn.prompt).toBe("Maya, please select your major.");
+    expect(turn.choices.at(-1)?.effect).toEqual({ type: "ask", mentorId: "theo", prompt: "Can you help me pick a major?" });
+  });
 });

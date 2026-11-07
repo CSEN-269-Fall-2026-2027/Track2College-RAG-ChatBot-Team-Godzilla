@@ -1,8 +1,10 @@
-import { useMemo, useState, type ReactNode } from "react";
+import type { AskOptions } from "../App";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { computeGpa, formatGpa } from "../academics";
 import { useAuth } from "../auth";
 import { COLLEGES } from "../colleges";
-import { activitiesStatus, journeyOf, PIQ_REQUIRED, toggleCampus } from "../journey/logic";
+import { getStore } from "../data";
+import { activitiesStatus, journeyOf, PIQ_REQUIRED, resetActivitiesStep, toggleCampus } from "../journey/logic";
 import { usePlanning } from "../planning";
 import {
   ACTIVITY_CATEGORY_LABELS,
@@ -16,13 +18,15 @@ import {
   type SaveState,
   type SectionId,
 } from "../profile";
-import { href } from "../router";
+import { essaysDoneCount } from "../journey/piqs";
+import { href, navigate } from "../router";
 import { newId } from "../storage";
-import type { ActivityCategory, Award, Profile, TranscriptCourse } from "../types";
+import type { ActivityCategory, Award, PersonalInfo, Profile, TranscriptCourse } from "../types";
+import { MAJOR_CHOICES } from "../constants";
 import { ProgressRing, Segmented, SelectField, TextArea, TextField, type Option } from "../components/Form";
 import { AlertIcon, CheckIcon, PlusIcon, TrashIcon } from "../components/icons";
 import { EssayTab } from "./EssayTab";
-import { MajorsTab } from "./MajorsTab";
+import { InterviewTab, interviewProgress } from "./InterviewTab";
 import { Fold, TranscriptTab } from "./TranscriptTab";
 
 type Group = "basics" | "academics" | "goals" | "preferences";
@@ -38,6 +42,7 @@ const GRADES = opts<Exclude<Profile["basics"]["gradeLevel"], "transfer" | "">>([
   ["12", "12th grade"],
   ["gap", "Gap year"],
 ]);
+const MAJOR_OPTIONS = MAJOR_CHOICES.map((m) => ({ value: m, label: m }));
 const YES_NO = opts<"yes" | "no">([
   ["yes", "Yes"],
   ["no", "No"],
@@ -93,16 +98,33 @@ const SAVE_LABEL: Record<SaveState, string> = {
   error: "Couldn’t save — we’ll retry on your next edit",
 };
 
-export function ProfilePage({ section: param, onAsk }: { section: string | null; onAsk: (text: string) => void }) {
+export function ProfilePage({ section: param, onAsk }: { section: string | null; onAsk: (text: string, options?: AskOptions) => void }) {
   const { profile, update, saveState } = useProfile();
   const { account } = useAuth();
   const { transcripts } = usePlanning();
   const section: ProfileRouteId = isRoute(param) ? param : "basics";
   const { sections } = completeness(profile);
-  const essaysReady = Object.values(journeyOf(profile).piqs).filter((s) => s === "ready").length;
+  const essaysFilled = essaysDoneCount(profile);
   const academic = useMemo(() => academicHistoryStatus(profile, transcripts), [profile, transcripts]);
   const transferUnsupported = profile.basics.gradeLevel === "transfer";
   const [editing, setEditing] = useState<Partial<Record<ProfileRouteId, boolean>>>({});
+  const [personal, setPersonal] = useState<PersonalInfo | null>(null);
+
+  // Nav ring for Counselor interview — same personal_info row Jordan and the UC agent use.
+  useEffect(() => {
+    if (!account?.id) {
+      setPersonal(null);
+      return;
+    }
+    let live = true;
+    getStore()
+      .then((store) => store.personalInfo.get(account.id))
+      .then((row) => live && setPersonal(row ?? {}))
+      .catch(() => live && setPersonal(null));
+    return () => {
+      live = false;
+    };
+  }, [account?.id]);
 
   const set: Setter = (group, key) => (value) => update((p) => ({ ...p, [group]: { ...p[group], [key]: value } }));
 
@@ -110,20 +132,21 @@ export function ProfilePage({ section: param, onAsk }: { section: string | null;
   const sectionDone = (id: SectionId) => {
     if (id === "basics") return sections.basics === 1;
     if (id === "academics") return academic.started;
-    if (id === "campuses") return ucs.length > 0;
+    if (id === "campuses") return ucs.length > 0 && !!profile.goals.intendedMajor;
     return false;
   };
 
   const sectionValue = (id: SectionId) => {
     if (id === "basics") return sections.basics;
     if (id === "academics") return academic.started ? 0.5 : 0;
-    if (id === "campuses") return sectionDone(id) ? 1 : 0;
+    if (id === "campuses") return (Number(ucs.length > 0) + Number(!!profile.goals.intendedMajor)) / 2;
     return 0;
   };
 
   const meta = (id: ProfileRouteId) =>
     PROFILE_SECTIONS.find((s) => s.id === id) ?? PROFILE_WORKSPACES.find((w) => w.id === id)!;
   const item = (id: ProfileRouteId, done: boolean, value: number) => ({ id, title: meta(id).title, done, value });
+  const interview = interviewProgress(personal);
   const navGroups = [
     {
       label: "Profile",
@@ -136,8 +159,8 @@ export function ProfilePage({ section: param, onAsk }: { section: string | null;
     {
       label: "Workspaces",
       items: [
-        item("essays", essaysReady >= PIQ_REQUIRED, essaysReady / PIQ_REQUIRED),
-        item("majors", !!profile.goals.intendedMajor, 0),
+        item("essays", essaysFilled >= PIQ_REQUIRED, essaysFilled / PIQ_REQUIRED),
+        item("interview", interview.done, interview.value),
       ],
     },
   ];
@@ -150,7 +173,8 @@ export function ProfilePage({ section: param, onAsk }: { section: string | null;
     basics: ![b.firstName, b.lastName, b.gradeLevel, b.graduationYear, b.highSchool, b.city, b.state, b.firstGen].some(Boolean),
     academics: ![a.gpaUnweighted, a.gpaWeighted, a.exams].some((v) => v.trim()),
     campuses: ucs.length === 0,
-    activities: profile.activities.length === 0 && profile.awards.length === 0,
+    // An empty list after finishing the step (0 for everything) is a finished page, not one to fill in.
+    activities: profile.activities.length === 0 && profile.awards.length === 0 && !activitiesStatus(profile).done,
     finances: ![f.needsAid, f.incomeRange, f.maxAnnualCost, f.fafsa].some(Boolean),
   };
   const isEditing = (id: ProfileRouteId) => editing[id] ?? !!empty[id];
@@ -289,8 +313,8 @@ export function ProfilePage({ section: param, onAsk }: { section: string | null;
 
             {section === "activities" && (
               <Panel {...panelProps("activities")}>
-                {isEditing("activities") ? <ActivitiesWorkspace profile={profile} update={update} /> : <ActivitiesSummary profile={profile} />}
-                <ActivitiesDone profile={profile} update={update} />
+                {isEditing("activities") ? <ActivitiesWorkspace profile={profile} update={update} /> : <ActivitiesSummary profile={profile} onAdd={() => setEdit("activities", true)} />}
+                <ActivitiesDone profile={profile} update={update} canReset={!isEditing("activities")} />
               </Panel>
             )}
 
@@ -317,7 +341,7 @@ export function ProfilePage({ section: param, onAsk }: { section: string | null;
               </div>
             )}
 
-            {section === "majors" && <MajorsTab onAsk={onAsk} />}
+            {section === "interview" && <InterviewTab onChange={setPersonal} />}
           </main>
         </div>
       </div>
@@ -350,9 +374,11 @@ function Panel({
           <h2>{title}</h2>
         </div>
         {!editing && (
-          <button className="pf-edit" onClick={onEdit}>
-            <PencilIcon /> Edit
-          </button>
+          <div className="pf-foot-actions">
+            <button className="pf-edit" onClick={onEdit}>
+              <PencilIcon /> Edit
+            </button>
+          </div>
         )}
       </header>
       {badge && <div className="pf-panel-badge">{badge}</div>}
@@ -362,9 +388,11 @@ function Panel({
           <span className={`pf-save ${saveState}`} aria-live="polite">
             {SAVE_LABEL[saveState]}
           </span>
-          <button className="btn-primary pf-done-btn" onClick={onDone}>
-            Done
-          </button>
+          <div className="pf-foot-actions">
+            <button className="btn-primary pf-done-btn" onClick={onDone}>
+              Done
+            </button>
+          </div>
         </footer>
       )}
     </section>
@@ -394,14 +422,19 @@ function Facts({ items }: { items: [string, string, boolean?][] }) {
   );
 }
 
-function ActivitiesSummary({ profile }: { profile: Profile }) {
+function ActivitiesSummary({ profile, onAdd }: { profile: Profile; onAdd: () => void }) {
   return (
     <>
       <h3 className="pf-subhead">
         Activities <span className="count">{profile.activities.length}</span>
       </h3>
       {profile.activities.length === 0 ? (
-        <p className="pf-empty">No activities yet.</p>
+        <p className="pf-empty">
+          No activities yet.{" "}
+          <button type="button" className="link-btn" onClick={onAdd}>
+            Add an activity
+          </button>
+        </p>
       ) : (
         <ul className="pf-rows">
           {profile.activities.map((a) => {
@@ -553,7 +586,7 @@ function AcademicsForm({ profile, set }: FormProps) {
   );
 }
 
-/** The UC campus checkboxes. One application covers every checked campus; the major is set once in Major selection. */
+/** The UC campus checkboxes and the one major, which applies to every checked campus. */
 function CampusesForm({ profile, update }: { profile: Profile; update: Update }) {
   const on = (name: string) => profile.colleges.some((c) => c.name.toLowerCase() === name.toLowerCase());
   return (
@@ -574,14 +607,14 @@ function CampusesForm({ profile, update }: { profile: Profile; update: Update })
           </li>
         ))}
       </ul>
-      <div className="pf-major-row">
-        <div className="pf-major-text">
-          <span className="pf-major-label">Intended major</span>
-          <strong className={profile.goals.intendedMajor ? undefined : "is-empty"}>{profile.goals.intendedMajor || "Not chosen yet"}</strong>
-        </div>
-        <a className="pf-edit" href={href("profile", "majors")}>
-          <PencilIcon /> {profile.goals.intendedMajor ? "Change" : "Choose"}
-        </a>
+      <div className="form-grid pf-campus-major">
+        <SelectField
+          label="Major (all UC campuses)"
+          value={profile.goals.intendedMajor}
+          options={MAJOR_OPTIONS}
+          onChange={(major) => update((p) => ({ ...p, goals: { ...p.goals, intendedMajor: major } }))}
+          placeholder="Choose a major…"
+        />
       </div>
     </>
   );
@@ -731,24 +764,42 @@ function ActivitiesWorkspace({ profile, update }: { profile: Profile; update: Up
 }
 
 /** Finishing (or skipping) activities here passes the journey step, which starts essay drafting. */
-function ActivitiesDone({ profile, update }: { profile: Profile; update: Update }) {
+function ActivitiesDone({ profile, update, canReset }: { profile: Profile; update: Update; canReset: boolean }) {
   const status = activitiesStatus(profile);
+  const reset = canReset && (
+    <button
+      className="btn-ghost"
+      onClick={() => {
+        if (!window.confirm("Start activities over? This deletes your activities, honors and awards, and what you told Milo.")) return;
+        update(resetActivitiesStep);
+        navigate("advisor");
+      }}
+    >
+      Reset
+    </button>
+  );
   if (status.done) {
     return (
-      <p className="pf-done">
-        <CheckIcon width={14} height={14} /> Activities step done
-      </p>
+      <div className="pf-done pf-done-row">
+        <span className="pf-done-label">
+          <CheckIcon width={14} height={14} /> Activities step done
+        </span>
+        {reset}
+      </div>
     );
   }
   return (
     <div className="pf-finish">
-      <button
-        className="btn-primary"
-        disabled={status.answered && !status.fits}
-        onClick={() => update((p) => ({ ...p, ucJourney: { ...journeyOf(p), activitiesReviewed: true } }))}
-      >
-        {profile.activities.length ? "I'm done with activities" : "Skip activities for now"}
-      </button>
+      <div className="pf-finish-actions">
+        <button
+          className="btn-primary"
+          disabled={status.answered && !status.fits}
+          onClick={() => update((p) => ({ ...p, ucJourney: { ...journeyOf(p), activitiesReviewed: true } }))}
+        >
+          {profile.activities.length ? "I'm done with activities" : "Skip activities for now"}
+        </button>
+        {reset}
+      </div>
       <p className="field-hint">
         {status.answered && !status.fits
           ? "Shorten any description over 350 characters to finish this step."

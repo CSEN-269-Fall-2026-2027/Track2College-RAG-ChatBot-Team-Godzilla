@@ -3,7 +3,7 @@ export { COLLEGE_NAMES as KNOWN_COLLEGES } from "./colleges";
 /**
  * The intended-major choices: ten of the largest majors across the UC campuses (one pick covers
  * every campus the student applies to). Anything else is "Other". Edit this list to change the
- * choices everywhere: Profile → Major selection, the journey map, story mode, and the chatbot.
+ * choices everywhere: Profile → UC campuses, the journey map, story mode, and the chatbot.
  */
 export const UC_MAJORS = [
   "Biology",
