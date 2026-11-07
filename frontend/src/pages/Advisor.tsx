@@ -1,22 +1,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, clearSession, sendChat } from "../api";
 import { parseAssistantResponse } from "../parse";
-import { displayName, profileSummary, useProfile } from "../profile";
+import { completeness, displayName, profileSummary, useProfile, summaryForGuide, usesProgress } from "../profile";
 import { makeTitle, newId } from "../storage";
 import type { Handoff, Health } from "../App";
-import type { AidMode, Conversation, Message, PersonalInfo, ReviewMode, StoryMode } from "../types";
+import type { ActivitySectionId, AidMode, Conversation, Message, PersonalInfo, ReviewMode, StoryMode } from "../types";
 import { ChatView } from "../components/ChatView";
 import { Composer } from "../components/Composer";
 import { Character } from "../components/story/Character";
+import { Markdown } from "../components/Markdown";
 import { RetryIcon } from "../components/icons";
 import { GuidedView } from "../components/story/GuidedView";
 import { useAuth } from "../auth";
 import { getStore } from "../data";
 import { mentorById, specialistFor, type Mentor } from "../game/characters";
 import { STAGE_GUIDE, stageFor, useCurrentStage } from "../journey/guides";
-import { journeyOf, togglePiq, type CheckpointId } from "../journey/logic";
+import { navigate } from "../router";
+import { activitiesStatus, clearOpenActivityAnswer, journeyOf, type CheckpointId } from "../journey/logic";
+import { applyGuidedEffect, storyComplete } from "../journey/guided";
+import { activityReportMessage, applyDrafts, currentEssay, fillInProfileMessage, ESSAY_FOLLOW_UPS, FOLLOW_UP_THANKS, usedActivities, essayNotesFrom, miloNotes, PERSONAL_ANSWER, piqAboutAsk, piqWorkOf, setPiqAnswer, suggestedPiqTitles } from "../journey/piqs";
+import { miloNextLine } from "../journey/miloScript";
+import { usePiqDrafts } from "../journey/usePiqDrafts";
 import { openerFor, type OpenerAction, type ReviewTool } from "../game/openers";
 import { ReviewToolDialog } from "../components/story/ReviewApply";
+import { virtualCounselorDone } from "../agent/callState";
 import { agentOf, applyProgressSummary, cleanTranscriptLine } from "../agent/logic";
 
 interface AdvisorProps {
@@ -32,6 +39,7 @@ type Chats = Record<string, Conversation>;
 export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
   const { account } = useAuth();
   const { profile, update } = useProfile();
+  const piqDrafts = usePiqDrafts();
 
   const [chats, setChats] = useState<Chats>({});
   /** Advisor whose reply is in flight (only one request at a time). */
@@ -88,7 +96,25 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
    * The Counselor also gets the last call with Jordan, keeping its latest lines.
    */
   const contextFor = (persona: string) => {
-    const base = [contextRef.current, progressRef.current].filter(Boolean).join("\n\n").slice(0, 6000);
+    const base = [summaryForGuide(contextRef.current ?? "", persona), usesProgress(persona) ? progressRef.current : ""].filter(Boolean).join("\n\n").slice(0, 6000);
+    // Quill works from what the student told Milo and any essay it just wrote in the chat (which
+    // never goes through /chat itself). Those keep at least 4000 of the 6000 characters.
+    if (persona === "quill") {
+      const essay = [...(chatsRef.current.quill?.messages ?? [])].reverse().find((m) => m.essayFor)?.content;
+      const notes = miloNotes(journeyOf(profileRef.current));
+      const used = usedActivities(profileRef.current, currentEssay(profileRef.current) ?? undefined);
+      const extra = [
+        used.length ? `\n\nACTIVITIES ALREADY USED IN OTHER ESSAYS: ${used.join(", ")}` : "",
+        essay && `\n\nTHE ESSAY YOU JUST WROTE FOR THE STUDENT:\n${essay}`,
+        notes && `\n\nWHAT THE STUDENT TOLD MILO ABOUT THEIR ACTIVITIES:\n${notes}`,
+      ]
+        .filter(Boolean)
+        .join("");
+      if (extra) {
+        const kept = extra.slice(0, Math.max(4000, 6000 - base.length));
+        return base.slice(0, 6000 - kept.length) + kept;
+      }
+    }
     const lines = callRef.current?.lines ?? [];
     if (modeFor(persona) !== "counselor" || !lines.length) return base || null;
     const call = lines.map((l) => `${l.role === "student" ? "Student" : "Jordan"}: ${cleanTranscriptLine(l.text)}`).join("\n");
@@ -110,21 +136,44 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
     });
   }, []);
 
+  // Load the latest chat per advisor from Supabase (empty stubs from "restart" are skipped).
   useEffect(() => {
+    let live = true;
     setChats({});
     setFreshId(null);
     setPendingFor(null);
     abortRef.current?.abort();
     abortRef.current = null;
     savedRef.current = new Map();
-    // Every session starts with empty chats. Earlier sessions' chats stay saved in Supabase as the
-    // record of what the student asked, but they're never loaded back in.
+    getStore()
+      .then((store) => store.conversations.list(userId))
+      .then((listed) => {
+        if (!live) return;
+        const latest: Chats = {};
+        for (const c of listed) {
+          const key = c.mentorId || "sage";
+          if (!latest[key] || c.updatedAt > latest[key].updatedAt) latest[key] = c;
+        }
+        const loaded: Chats = {};
+        for (const [key, c] of Object.entries(latest)) {
+          if (!c.messages.length) continue;
+          loaded[key] = c;
+          savedRef.current.set(c.id, c.updatedAt);
+        }
+        setChats(loaded);
+      })
+      .catch(() => {
+        // Offline / first load: start with empty chats; new messages still save when possible.
+      });
+    return () => {
+      live = false;
+    };
   }, [userId]);
 
   // Persist any chat that changed since it was last saved.
   useEffect(() => {
     for (const c of Object.values(chats)) {
-      if (!c.messages.length || savedRef.current.get(c.id) === c.updatedAt) continue;
+      if (savedRef.current.get(c.id) === c.updatedAt) continue;
       savedRef.current.set(c.id, c.updatedAt);
       getStore()
         .then((store) => store.conversations.save(userId, c))
@@ -154,12 +203,19 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
       try {
         const response = await sendChat(query, sessionId, contextFor(persona), controller.signal, persona, modeFor(persona));
         const parsed = parseAssistantResponse(response.answer);
+        const body = parsed.answer || response.answer;
+        // After "Suggest four essays", offer a chip per Top 4 + Backup title (same ask as Quill's opener buttons).
+        const suggestionChips =
+          persona === "quill" && query.trim().toLowerCase().startsWith("suggest four essays")
+            ? suggestedPiqTitles(body)
+            : [];
         const message: Message = {
           id: newId(),
           role: "assistant",
-          content: parsed.answer || response.answer,
+          content: body,
           sources: parsed.sources,
-          followups: parsed.followups,
+          followups: suggestionChips.length ? suggestionChips : parsed.followups,
+          ...(parsed.options.length ? { options: parsed.options } : {}),
           ...(parsed.mood ? { mood: parsed.mood } : {}),
           mentorId: persona,
           responseTimeMs: response.response_time_ms,
@@ -183,38 +239,65 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
     [appendMessage, onHealth],
   );
 
+  /** Milo's questions are written in advance, so they don't need the model. */
+  const sayScripted = useCallback(
+    (persona: Mentor["id"], messages: Message[]) => {
+      const line = persona === "milo" ? miloNextLine(messages) : null;
+      if (!line) return false;
+      const reply: Message = { id: newId(), role: "assistant", content: line.content, mentorId: "milo", createdAt: Date.now(), ...(line.options ? { options: line.options } : {}) };
+      appendMessage(persona, reply);
+      setFreshId(reply.id);
+      return true;
+    },
+    [appendMessage],
+  );
+
   const send = useCallback(
-    (text: string, fresh: boolean, persona: Mentor["id"], preset = false) => {
+    (text: string, fresh: boolean, persona: Mentor["id"], preset = false, display?: string) => {
       const query = text.trim();
       if (!query || abortRef.current) return;
 
       const now = Date.now();
-      const userMessage: Message = { id: newId(), role: "user", content: query, createdAt: now, ...(preset ? { preset: true } : {}) };
+      const userMessage: Message = {
+        id: newId(),
+        role: "user",
+        content: display ?? query,
+        createdAt: now,
+        ...(display ? { sentAs: query } : {}),
+        ...(preset ? { preset: true } : {}),
+      };
       const current = chatsRef.current[persona] ?? null;
 
       if (current && current.messages.length > 0 && !fresh) {
-        setChat(persona, () => ({ ...current, messages: [...current.messages, userMessage], updatedAt: now }));
-        request(query, current.sessionId, persona);
+        const messages = [...current.messages, userMessage];
+        const answersQuestion = !!current.messages.at(-1)?.essayFollowUp;
+        setChat(persona, () => ({ ...current, messages, updatedAt: now }));
+        // That answers Quill's one question for the essay, which gets saved with it. No model needed.
+        if (answersQuestion) {
+          const thanks: Message = { id: newId(), role: "assistant", content: FOLLOW_UP_THANKS, mentorId: "quill", createdAt: now };
+          appendMessage(persona, thanks);
+          setFreshId(thanks.id);
+        } else if (!sayScripted(persona, messages)) request(query, current.sessionId, persona);
         return;
       }
 
       if (fresh && current?.sessionId) clearSession(current.sessionId);
       const next: Conversation = {
         id: current && !fresh ? current.id : newId(),
-        title: makeTitle(query),
+        title: makeTitle(display ?? query),
         sessionId: fresh ? null : (current?.sessionId ?? null),
         mentorId: persona,
         // Freeze the opening message the student saw, so it stays even as the profile changes.
-        intro: current?.intro ?? openerFor(mentorById(persona), profileRef.current, nameRef.current, modeFor(persona)).text,
+        intro: (fresh ? undefined : current?.intro) ?? openerFor(mentorById(persona), profileRef.current, nameRef.current, modeFor(persona)).text,
         messages: [userMessage],
         createdAt: current && !fresh ? current.createdAt : now,
         updatedAt: now,
       };
       setChat(persona, () => next);
       setFreshId(null);
-      request(query, next.sessionId, persona);
+      if (!sayScripted(persona, next.messages)) request(query, next.sessionId, persona);
     },
-    [request, setChat],
+    [request, sayScripted, setChat],
   );
 
   const retry = useCallback((persona: string) => {
@@ -222,12 +305,18 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
     if (!convo || abortRef.current) return;
     const lastUser = [...convo.messages].reverse().find((m) => m.role === "user");
     if (!lastUser) return;
+    // A failed "Brainstorm my essay" writes it again, which adds its message back.
+    if (lastUser.essayFor) {
+      setChat(persona, () => ({ ...convo, messages: convo.messages.slice(0, convo.messages.indexOf(lastUser)), updatedAt: Date.now() }));
+      writeRef.current(lastUser.essayFor);
+      return;
+    }
     setChat(persona, () => ({
       ...convo,
       messages: convo.messages.at(-1)?.error ? convo.messages.slice(0, -1) : convo.messages,
       updatedAt: Date.now(),
     }));
-    request(lastUser.content, convo.sessionId, persona);
+    request(lastUser.sentAs ?? lastUser.content, convo.sessionId, persona);
   }, [request, setChat]);
 
   const stop = useCallback(() => {
@@ -236,6 +325,55 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
     setPendingFor(null);
   }, []);
 
+  /** "Brainstorm my essay": Quill writes it into the chat. It's only saved if the student says so. */
+  const writeEssayInChat = async (piqId: string) => {
+    if (abortRef.current) return;
+    const now = Date.now();
+    const asked: Message = { id: newId(), role: "user", content: "Brainstorm my essay", essayFor: piqId, preset: true, createdAt: now };
+    const hadEssay = chatsRef.current.quill?.messages.some((m) => m.role === "assistant" && m.essayFor);
+    setChat("quill", (c) =>
+      c
+        ? { ...c, messages: [...c.messages, asked], updatedAt: now }
+        : {
+            id: newId(),
+            title: "Brainstorm my essay",
+            sessionId: null,
+            mentorId: "quill",
+            intro: openerFor(mentorById("quill"), profileRef.current, nameRef.current, null).text,
+            messages: [asked],
+            createdAt: now,
+            updatedAt: now,
+          },
+    );
+    setFreshId(null);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setPendingFor("quill");
+    const result = await piqDrafts.write(piqId, { regenerate: hadEssay, signal: controller.signal });
+    if (abortRef.current === controller) {
+      abortRef.current = null;
+      setPendingFor(null);
+    }
+    if (!result) return;
+    const message: Message =
+      "error" in result
+        ? { id: newId(), role: "assistant", content: result.error, error: true, createdAt: Date.now() }
+        : { id: newId(), role: "assistant", content: result.text, essayFor: piqId, mentorId: "quill", createdAt: Date.now() };
+    appendMessage("quill", message);
+    setFreshId(message.id);
+  };
+  const writeRef = useRef(writeEssayInChat);
+  writeRef.current = writeEssayInChat;
+  const saveEssay = useCallback(
+    (message: Message) => {
+      const id = message.essayFor;
+      if (id) update((p) => applyDrafts(p, [{ id, question: "", essay: message.content, wordCount: 0 }]));
+    },
+    [update],
+  );
+
+  const stopRef = useRef(stop);
+  stopRef.current = stop;
   const sendRef = useRef(send);
   const retryRef = useRef(retry);
   sendRef.current = send;
@@ -246,19 +384,60 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
   const [selectedStage, setSelectedStage] = useState<CheckpointId | null>(null);
   useEffect(() => setSelectedStage(null), [currentStage]);
   const stage = selectedStage ?? currentStage;
-  const guide = mentorById(stage === "review" ? reviewMode : STAGE_GUIDE[stage]);
+  // Application Assistant (and Counselor tools) unlock only after earlier journey steps are done.
+  const applyUnlocked = storyComplete(profile, completeness(profile).sections);
+  const effectiveStage = stage === "review" && !applyUnlocked ? currentStage : stage;
+  const guide = mentorById(effectiveStage === "review" ? reviewMode : STAGE_GUIDE[effectiveStage]);
   /** The application tool open under the Review & Apply persona's first message. */
   const [reviewTool, setReviewTool] = useState<ReviewTool | null>(null);
+  useEffect(() => {
+    if (!applyUnlocked) setReviewTool(null);
+  }, [applyUnlocked]);
   const guideRef = useRef(guide.id);
   guideRef.current = guide.id;
 
   /** Ask a guide (the one on screen by default); a different guide brings their planet into focus. */
   /** Sends a ready-made question (a button, or a hand-off from another page) to a guide. */
-  const askGuide = useCallback((prompt: string, mentorId: Mentor["id"] = guideRef.current, preset = true) => {
+  const askGuide = useCallback((prompt: string, mentorId: Mentor["id"] = guideRef.current, preset = true, display?: string) => {
     if (mentorId !== guideRef.current) setSelectedStage(stageFor(mentorId, currentStageRef.current));
     const hasHistory = (chatsRef.current[mentorId]?.messages.length ?? 0) > 0;
-    sendRef.current(prompt, !hasHistory, mentorId, preset);
+    sendRef.current(prompt, !hasHistory, mentorId, preset, display);
   }, []);
+  /** Starts a guide's chat over with this as the first message, dropping any reply still on its way. */
+  const restartWith = useCallback((prompt: string, mentorId: Mentor["id"]) => {
+    if (mentorId !== guideRef.current) setSelectedStage(stageFor(mentorId, currentStageRef.current));
+    stopRef.current();
+    sendRef.current(prompt, true, mentorId, true);
+  }, []);
+  /** 3 or more of something: Milo starts over and says to add them on the Profile page, without asking the model. */
+  const sendToProfile = useCallback((section: ActivitySectionId) => {
+    stopRef.current();
+    const old = chatsRef.current.milo;
+    if (old?.sessionId) void clearSession(old.sessionId);
+    const now = Date.now();
+    const asked: Message = { id: newId(), role: "user", content: activityReportMessage(section, 3), preset: true, createdAt: now };
+    const reply: Message = { id: newId(), role: "assistant", content: fillInProfileMessage(section), fillInProfile: section, mentorId: "milo", createdAt: now };
+    setChat("milo", () => ({
+      id: newId(),
+      title: "Activities",
+      sessionId: null,
+      mentorId: "milo",
+      intro: openerFor(mentorById("milo"), profileRef.current, nameRef.current, null).text,
+      messages: [asked, reply],
+      createdAt: now,
+      updatedAt: now,
+    }));
+    setFreshId(reply.id);
+  }, [setChat]);
+  const fillInProfile = useCallback(
+    (message: Message) => {
+      const section = message.fillInProfile;
+      if (!section) return;
+      update((p) => applyGuidedEffect(p, { type: "fillInProfile", section }, newId));
+      navigate("profile", "activities");
+    },
+    [update],
+  );
   /** A message from a guide that isn't a model reply (the call log, a mode switch). Starts the chat if needed. */
   const postNote = useCallback(
     (content: string, mentorId: Mentor["id"]) => {
@@ -291,8 +470,8 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
     [postNote],
   );
 
-  // Restarting a guide's chat (the restart button, or switching modes) goes back to the opening
-  // message. The old chat stays saved as a record of what was asked; it just leaves the screen.
+  // Restarting a guide's chat clears the screen and writes an empty stub so a reload does not
+  // bring the old thread back. Prior message rows stay in Supabase as a record.
   const restartChat = useCallback(
     (mentorId: Mentor["id"]) => {
       if (pendingFor === mentorId) stop();
@@ -301,9 +480,60 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
       if (old.sessionId) void clearSession(old.sessionId);
       setChat(mentorId, () => null);
       setFreshId(null);
+      const stub: Conversation = {
+        id: newId(),
+        title: old.title,
+        sessionId: null,
+        mentorId,
+        messages: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      savedRef.current.set(stub.id, stub.updatedAt);
+      getStore()
+        .then((store) => store.conversations.save(userId, stub))
+        .catch(() => savedRef.current.delete(stub.id));
     },
-    [pendingFor, stop, setChat],
+    [pendingFor, stop, setChat, userId],
   );
+  // Resetting essays on the Profile page clears the chosen questions, and Quill's chat goes with it.
+  const essayCount = Object.keys(journeyOf(profile).piqs).length;
+  const lastEssayCount = useRef(essayCount);
+  useEffect(() => {
+    if (lastEssayCount.current > 0 && essayCount === 0) restartChat("quill");
+    lastEssayCount.current = essayCount;
+  }, [essayCount, restartChat]);
+  // Resetting activities on the Profile page clears the number, and Milo's chat goes with it.
+  const activityCount = journeyOf(profile).activityCount;
+  const lastActivityCount = useRef(activityCount);
+  useEffect(() => {
+    if (lastActivityCount.current !== undefined && activityCount === undefined) restartChat("milo");
+    lastActivityCount.current = activityCount;
+  }, [activityCount, restartChat]);
+  // Finishing activities ends that conversation (it's saved), so Milo opens fresh with what's next.
+  const activitiesDone = activitiesStatus(profile).done;
+  const lastActivitiesDone = useRef(activitiesDone);
+  useEffect(() => {
+    if (activitiesDone && !lastActivitiesDone.current) restartChat("milo");
+    lastActivitiesDone.current = activitiesDone;
+  }, [activitiesDone, restartChat]);
+
+  // Quill works through one essay at a time: a new essay starts a clean chat. What the student
+  // types there is saved with the essay, so writing it (here or in Profile) can use it.
+  const essayId = currentEssay(profile);
+  const quillMessages = chats.quill?.messages;
+  const lastEssay = useRef(essayId);
+  useEffect(() => {
+    // That includes picking the four topics: the suggestions chat ends and essay 1 starts clean.
+    if (lastEssay.current !== essayId) {
+      restartChat("quill");
+      lastEssay.current = essayId;
+      return;
+    }
+    if (!essayId || !quillMessages) return;
+    const notes = essayNotesFrom(quillMessages);
+    if (notes && notes !== piqWorkOf(profile, essayId).answers[PERSONAL_ANSWER]) update((p) => setPiqAnswer(p, essayId, PERSONAL_ANSWER, notes));
+  }, [essayId, quillMessages, profile, update, restartChat]);
   const onModeChange = useCallback(
     (_mode: ReviewMode) => {
       restartChat("counselor");
@@ -314,7 +544,14 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
   );
   const onAidModeChange = useCallback((_mode: AidMode) => restartChat("penny"), [restartChat]);
 
-  const onGuideFollowup = useCallback((question: string) => askGuide(question, guideRef.current, false), [askGuide]);
+  const onGuideFollowup = useCallback(
+    (question: string) => {
+      const about = piqAboutAsk(question);
+      if (about) askGuide(about.prompt, guideRef.current, true, about.display);
+      else askGuide(question, guideRef.current, false);
+    },
+    [askGuide],
+  );
   const onGuideRetry = useCallback(() => retryRef.current(guideRef.current), []);
   const onGuideSend = useCallback((text: string) => sendRef.current(text, false, guideRef.current), []);
 
@@ -324,7 +561,7 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
     if (!handoff || handled.current === handoff.id) return;
     handled.current = handoff.id;
     if (abortRef.current) stop();
-    askGuide(handoff.text, specialistFor(handoff.text));
+    askGuide(handoff.text, handoff.mentorId ?? specialistFor(handoff.text), true, handoff.display);
   }, [handoff, stop, askGuide]);
 
   useEffect(() => {
@@ -342,23 +579,65 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
   const guideBusy = pendingFor === guide.id;
   // Before the first message, the guide opens with a line (and quick actions) based on the profile.
   const guideMode = guide.id === "penny" ? aidMode : null;
-  // The Review & Apply personas keep their buttons under the first message for the whole chat.
   const reviewGuide = guide.id === "counselor" || guide.id === "assistant";
   const started = !!guideChat?.messages.length;
-  const showActions = reviewGuide || (!started && !guideBusy);
+  // Theo, Quill, Milo once activities are done, and the Review & Apply personas keep their buttons under the first message for the whole chat.
+  const miloDone = guide.id === "milo" && activitiesStatus(profile).done;
+  const showActions = reviewGuide || guide.id === "theo" || guide.id === "quill" || miloDone || (!started && !guideBusy);
   const opener = useMemo(() => openerFor(guide, profile, name, guideMode), [guide, profile, name, guideMode]);
+  /** A button whose answer is the same for everyone: shows it right away, for no tokens. */
+  const answerWithoutModel = (question: string, answer: string, mentorId: Mentor["id"]) => {
+    const now = Date.now();
+    const asked: Message = { id: newId(), role: "user", content: question, preset: true, createdAt: now };
+    const reply: Message = { id: newId(), role: "assistant", content: answer, mentorId, createdAt: now };
+    setChat(mentorId, (c) =>
+      c
+        ? { ...c, messages: [...c.messages, asked, reply], updatedAt: now }
+        : {
+            id: newId(),
+            title: makeTitle(question),
+            sessionId: null,
+            mentorId,
+            intro: opener.text,
+            messages: [asked, reply],
+            createdAt: now,
+            updatedAt: now,
+          },
+    );
+    setFreshId(reply.id);
+  };
   const runOpener = (action: OpenerAction) => {
     if (action.kind === "tool") {
+      // Don't open Apply until a full virtual-counselor run-through is done.
+      if (action.tool === "apply" && !virtualCounselorDone(agent.counselorCall)) return;
       setReviewTool(action.tool);
       return;
     }
-    if (action.kind === "pickPiq") {
-      update((p) => {
-        const journey = journeyOf(p);
-        return action.piqId in journey.piqs ? p : { ...p, ucJourney: togglePiq(journey, action.piqId) };
-      });
+    if (action.kind === "profile") {
+      navigate("profile", action.section);
+      return;
     }
-    askGuide(action.prompt, guide.id);
+    if (action.kind === "followUp") {
+      const now = Date.now();
+      const asked: Message = { id: newId(), role: "user", content: action.label, preset: true, createdAt: now };
+      const question: Message = { id: newId(), role: "assistant", content: ESSAY_FOLLOW_UPS[action.piqId], essayFollowUp: action.piqId, mentorId: "quill", createdAt: now };
+      setChat("quill", (c) =>
+        c
+          ? { ...c, messages: [...c.messages, asked, question], updatedAt: now }
+          : { id: newId(), title: action.label, sessionId: null, mentorId: "quill", intro: opener.text, messages: [asked, question], createdAt: now, updatedAt: now },
+      );
+      setFreshId(question.id);
+      return;
+    }
+    if (action.kind === "write") {
+      void writeEssayInChat(action.piqId);
+      return;
+    }
+    if (action.kind === "ask" && action.answer) {
+      answerWithoutModel(action.display ?? action.label, action.answer, guide.id);
+      return;
+    }
+    askGuide(action.prompt, guide.id, true, action.kind === "ask" ? (action.display ?? action.label) : undefined);
   };
 
   return (
@@ -368,7 +647,10 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
           visible={visible}
           studentName={name}
           userId={userId}
-          onAsk={askGuide}
+          onAsk={(prompt, mentorId, display) => askGuide(prompt, mentorId, true, display)}
+          onRestartAsk={restartWith}
+          onSendToProfile={sendToProfile}
+          miloMessages={chats.milo?.messages ?? []}
           guideName={guide.name}
           selectedStage={selectedStage}
           onSelectStage={setSelectedStage}
@@ -391,11 +673,14 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
                         <strong>{guide.name}</strong>
                         <small>{guide.title}</small>
                       </span>
-                      {started && (
+                      {(started || (guide.id === "milo" && clearOpenActivityAnswer(profile) !== profile)) && (
                         <button
                           type="button"
                           className="chat-restart"
-                          onClick={() => restartChat(guide.id)}
+                          onClick={() => {
+                            restartChat(guide.id);
+                            if (guide.id === "milo") update(clearOpenActivityAnswer);
+                          }}
                           aria-label={`Restart your chat with ${guide.name}`}
                           title="Start over from the first message"
                         >
@@ -405,7 +690,16 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
                       )}
                     </div>
                     <div className="row row-assistant">
-                      <div className="bubble bubble-assistant">{started ? (guideChat?.intro ?? guide.greeting(name)) : opener.text}</div>
+                      {/* Their opening line stays in step with their buttons, which follow what the student has picked. */}
+                      <div className="bubble bubble-assistant">
+                        <Markdown
+                          text={
+                            started && guide.id !== "theo" && guide.id !== "quill" && !miloDone
+                              ? (guideChat?.intro ?? guide.greeting(name))
+                              : opener.text
+                          }
+                        />
+                      </div>
                     </div>
                     {showActions && opener.actions.length > 0 && (
                       <div className="story-opener-actions" role="group" aria-label={`${guide.name}'s suggestions`}>
@@ -417,13 +711,22 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
                               type="button"
                               className={`story-opener-action${open ? " on" : ""}`}
                               onClick={() => runOpener(a)}
-                              disabled={a.kind !== "tool" && pending}
+                              disabled={(a.kind !== "tool" && pending) || (a.kind === "write" && piqDrafts.busy)}
                               aria-pressed={a.kind === "tool" ? open : undefined}
                             >
-                              {a.label}
+                              {a.kind === "write" && piqDrafts.isBrainstorming(a.piqId) ? "Brainstorming your essay…" : a.label}
                             </button>
                           );
                         })}
+                        {guide.id === "assistant" && (
+                          <button
+                            type="button"
+                            className="story-opener-action"
+                            onClick={() => window.open("https://apply.universityofcalifornia.edu/my-application/login", "_blank", "noopener,noreferrer")}
+                          >
+                            Make an account
+                          </button>
+                        )}
                       </div>
                     )}
                     {reviewGuide && reviewTool && opener.actions.some((a) => a.kind === "tool" && a.tool === reviewTool) && (
@@ -437,6 +740,8 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
                 freshId={freshId}
                 onFollowup={onGuideFollowup}
                 onRetry={onGuideRetry}
+                onSaveEssay={saveEssay}
+                onFillInProfile={fillInProfile}
               />
               <Composer
                 busy={pending}

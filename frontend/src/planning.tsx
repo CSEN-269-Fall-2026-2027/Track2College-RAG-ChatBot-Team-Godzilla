@@ -1,9 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ApiError, analyzeTranscript, buildCoursePlan } from "./api";
+import { ApiError, analyzeTranscript } from "./api";
 import { getStore } from "./data";
-import { profileSummary, useProfile } from "./profile";
+import { useProfile } from "./profile";
 import { newId } from "./storage";
-import type { CoursePlan, Transcript } from "./types";
+import type { Transcript } from "./types";
 
 export const TRANSCRIPT_TYPES = ".pdf,.txt,.csv,.md,application/pdf,text/plain,text/csv,text/markdown";
 export const MAX_TRANSCRIPT_BYTES = 5 * 1024 * 1024;
@@ -12,16 +12,13 @@ interface PlanningContextValue {
   transcripts: Transcript[];
   uploading: string | null;
   uploadError: string | null;
+  /** Cleared on the next successful save; set when an edit/delete fails to reach Supabase. */
+  saveError: string | null;
   upload: (file: File) => Promise<Transcript | null>;
   /** Create or focus a blank manual course list (upload never required). */
   ensureManualTranscript: () => Promise<Transcript>;
   updateTranscript: (transcript: Transcript) => void;
   removeTranscript: (transcript: Transcript) => void;
-  plans: CoursePlan[];
-  planning: string | null;
-  planError: string | null;
-  buildPlan: (college: string, major: string) => Promise<CoursePlan | null>;
-  removePlan: (id: string) => void;
 }
 
 const PlanningContext = createContext<PlanningContextValue | null>(null);
@@ -41,24 +38,18 @@ export function PlanningProvider({ userId, children }: { userId: string; childre
   profileRef.current = profile;
 
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
-  const [plans, setPlans] = useState<CoursePlan[]>([]);
   const [uploading, setUploading] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [planning, setPlanning] = useState<string | null>(null);
-  const [planError, setPlanError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const transcriptsRef = useRef(transcripts);
   transcriptsRef.current = transcripts;
 
   useEffect(() => {
     let cancelled = false;
     getStore().then(async (store) => {
-      const [storedTranscripts, storedPlans] = await Promise.all([
-        store.transcripts.list(userId).catch(() => []),
-        store.coursePlans.list(userId).catch(() => []),
-      ]);
+      const storedTranscripts = await store.transcripts.list(userId).catch(() => []);
       if (cancelled) return;
       setTranscripts((current) => [...current, ...storedTranscripts.filter((t) => !current.some((c) => c.id === t.id))]);
-      setPlans((current) => [...current, ...storedPlans.filter((p) => !current.some((c) => c.id === p.id))]);
     });
     return () => {
       cancelled = true;
@@ -74,6 +65,7 @@ export function PlanningProvider({ userId, children }: { userId: string; childre
       }
       setUploading(file.name);
       setUploadError(null);
+      setSaveError(null);
       try {
         const extracted = await analyzeTranscript(file);
         const draft: Transcript = { ...extracted, id: newId(), fileName: file.name, uploadedAt: Date.now(), storagePath: null };
@@ -113,10 +105,11 @@ export function PlanningProvider({ userId, children }: { userId: string; childre
       concerns: [],
     };
     setTranscripts((current) => [draft, ...current]);
+    setSaveError(null);
     try {
       await (await getStore()).transcripts.save(userId, draft);
-    } catch {
-      // Local list still usable; autosave retries on edit.
+    } catch (error) {
+      setSaveError(errorMessage(error, "Couldn't save the course list to your account. Edits may be lost if you leave."));
     }
     return draft;
   }, [userId]);
@@ -124,7 +117,12 @@ export function PlanningProvider({ userId, children }: { userId: string; childre
   const updateTranscript = useCallback(
     (transcript: Transcript) => {
       setTranscripts((current) => current.map((t) => (t.id === transcript.id ? transcript : t)));
-      getStore().then((store) => store.transcripts.save(userId, transcript)).catch(() => {});
+      setSaveError(null);
+      getStore()
+        .then((store) => store.transcripts.save(userId, transcript))
+        .catch((error) => {
+          setSaveError(errorMessage(error, "Couldn't save transcript changes to your account. Please try again."));
+        });
     },
     [userId],
   );
@@ -132,45 +130,12 @@ export function PlanningProvider({ userId, children }: { userId: string; childre
   const removeTranscript = useCallback(
     (transcript: Transcript) => {
       setTranscripts((current) => current.filter((t) => t.id !== transcript.id));
-      getStore().then((store) => store.transcripts.remove(userId, transcript)).catch(() => {});
-    },
-    [userId],
-  );
-
-  const buildPlan = useCallback(
-    async (college: string, major: string) => {
-      const p = profileRef.current;
-      const latest = transcriptsRef.current[0];
-      setPlanning(college);
-      setPlanError(null);
-      try {
-        const result = await buildCoursePlan({
-          college,
-          major,
-          gradeLevel: p.basics.gradeLevel,
-          completedCourses: (latest?.courses ?? []).map(({ name, gradeLevel, level, area, grade }) => ({ name, gradeLevel, level, area, grade })),
-          profileSummary: profileSummary(p),
+      setSaveError(null);
+      getStore()
+        .then((store) => store.transcripts.remove(userId, transcript))
+        .catch((error) => {
+          setSaveError(errorMessage(error, "Couldn't delete that transcript from your account. Please try again."));
         });
-        const plan: CoursePlan = { ...result, id: newId(), college, major, createdAt: Date.now() };
-        setPlans((current) => [plan, ...current.filter((x) => x.college.toLowerCase() !== college.toLowerCase())]);
-        const store = await getStore();
-        const replaced = plans.filter((x) => x.college.toLowerCase() === college.toLowerCase());
-        await Promise.all([store.coursePlans.save(userId, plan), ...replaced.map((x) => store.coursePlans.remove(userId, x.id))]).catch(() => {});
-        return plan;
-      } catch (error) {
-        setPlanError(errorMessage(error, "The course plan couldn't be generated. Please try again."));
-        return null;
-      } finally {
-        setPlanning(null);
-      }
-    },
-    [userId, plans],
-  );
-
-  const removePlan = useCallback(
-    (id: string) => {
-      setPlans((current) => current.filter((p) => p.id !== id));
-      getStore().then((store) => store.coursePlans.remove(userId, id)).catch(() => {});
     },
     [userId],
   );
@@ -180,30 +145,13 @@ export function PlanningProvider({ userId, children }: { userId: string; childre
       transcripts,
       uploading,
       uploadError,
+      saveError,
       upload,
       ensureManualTranscript,
       updateTranscript,
       removeTranscript,
-      plans,
-      planning,
-      planError,
-      buildPlan,
-      removePlan,
     }),
-    [
-      transcripts,
-      uploading,
-      uploadError,
-      upload,
-      ensureManualTranscript,
-      updateTranscript,
-      removeTranscript,
-      plans,
-      planning,
-      planError,
-      buildPlan,
-      removePlan,
-    ],
+    [transcripts, uploading, uploadError, saveError, upload, ensureManualTranscript, updateTranscript, removeTranscript],
   );
   return <PlanningContext.Provider value={value}>{children}</PlanningContext.Provider>;
 }

@@ -743,6 +743,63 @@ a {
   margin-top: 4px;
 }
 
+.quick-replies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.quick-reply {
+  min-height: 40px;
+  padding: 8px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--accent);
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.quick-reply:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.quick-reply:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.essay-save-btn {
+  align-self: flex-start;
+}
+
+.campus-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.campus-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 650;
+  text-decoration: none;
+  transition: transform 0.15s var(--ease);
+}
+
+.campus-link:hover {
+  transform: translateY(-1px);
+}
+
 .source-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
@@ -2078,42 +2135,9 @@ input[type="radio"] {
   list-style: none;
 }
 
-/* UC campuses: the one intended major, set apart from the campus grid. */
-.pf-major-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+/* UC campuses: the one major, below the campus grid. */
+.pf-campus-major {
   margin-top: 24px;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--bg-subtle);
-}
-
-.pf-major-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.pf-major-label {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-
-.pf-major-text strong {
-  font-size: 16px;
-  color: var(--text);
-}
-
-.pf-major-text strong.is-empty {
-  font-weight: 500;
-  color: var(--text-muted);
 }
 
 .pf-campus {
@@ -2449,6 +2473,12 @@ input[type="radio"] {
   margin-top: 18px;
 }
 
+.pf-foot-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .pf-panel-foot {
   display: flex;
   flex-wrap: wrap;
@@ -2471,6 +2501,24 @@ input[type="radio"] {
 
 .pf-save.error {
   color: var(--danger);
+}
+
+.pf-done-row {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.pf-done-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pf-finish-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .pf-done-btn {
@@ -6146,6 +6194,13 @@ a.stat:hover {
   font-size: 13.5px;
 }
 
+.essays-summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .essays-warn {
   color: var(--danger);
   font-weight: 650;
@@ -6158,6 +6213,108 @@ a.stat:hover {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.essay-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.essay-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 22px;
+  border-left: 3px solid var(--border-strong);
+}
+
+.essay-row.is-ready {
+  border-left-color: var(--success);
+}
+
+.essay-row-text {
+  min-width: 0;
+}
+
+.essay-row-text h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.essay-row-text p {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.essay-row .btn-primary {
+  flex: none;
+}
+
+.essay-page {
+  padding: 20px 24px;
+}
+
+.essay-back {
+  margin-bottom: 12px;
+}
+
+.essay-page-title {
+  margin: 0 0 12px;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.essay-page-status {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.essay-save-note {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.essay-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.essay-page-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.essay-delete {
+  margin-left: auto;
+  color: var(--danger);
+}
+
+@media (max-width: 560px) {
+  .essay-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .essay-delete {
+    margin-left: 0;
+  }
 }
 
 .essay-card {
@@ -6357,48 +6514,6 @@ a.stat:hover {
 }
 
 /* "More" menu for the less-used essay actions. */
-.more-menu {
-  position: relative;
-}
-
-.more-menu-list {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 6px);
-  z-index: 20;
-  display: grid;
-  min-width: 210px;
-  padding: 6px;
-  border: 1px solid var(--border-strong);
-  border-radius: 12px;
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-pop);
-}
-
-.more-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  font-size: 13.5px;
-  text-align: left;
-}
-
-.more-menu-item:hover:not(:disabled),
-.more-menu-item:focus-visible {
-  background: var(--bg-hover);
-  outline: none;
-}
-
-.more-menu-item:disabled {
-  opacity: 0.5;
-}
-
-.more-menu-item.is-danger {
-  color: var(--danger);
-}
-
 .essay-card-body {
   font-size: 15.5px;
   line-height: 1.75;
@@ -6484,122 +6599,6 @@ a.stat:hover {
   }
 }
 
-/* Profile → Major selection: the Major match survey. */
-.mj-campus-note { margin-top: 14px; }
-
-.mj-step { display: grid; gap: 10px; }
-
-.mj-progress { display: flex; gap: 6px; }
-.mj-progress span {
-  flex: 1;
-  height: 5px;
-  border-radius: 999px;
-  background: var(--bg-hover);
-}
-.mj-progress span.done { background: var(--accent); }
-.mj-progress span.on { background: color-mix(in srgb, var(--accent) 45%, var(--bg-hover)); }
-
-.mj-count {
-  margin: 4px 0 0;
-  color: var(--text-muted);
-  font-size: 12.5px;
-  font-weight: 650;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
-
-.mj-prompt { margin: 0 0 4px; font-size: 18px; font-weight: 700; }
-
-.mj-options {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 8px;
-}
-
-.mj-option {
-  min-height: 48px;
-  padding: 10px 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: 12px;
-  background: var(--bg-elevated);
-  color: var(--text);
-  font: inherit;
-  font-size: 14.5px;
-  font-weight: 560;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-}
-.mj-option:hover { border-color: var(--accent); background: var(--accent-soft); }
-.mj-option.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-
-.mj-back { justify-self: start; }
-
-.mj-results { display: grid; gap: 12px; }
-
-.mj-areas { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-
-.mj-area {
-  display: grid;
-  gap: 10px;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--bg-elevated);
-}
-
-.mj-area-head { display: flex; gap: 12px; align-items: flex-start; }
-.mj-area-head strong { font-size: 15.5px; }
-.mj-area-head p { margin: 2px 0 0; color: var(--text-muted); font-size: 13.5px; }
-
-.mj-rank {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.mj-majors { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 38px; }
-
-.mj-major {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 34px;
-  padding: 0 12px;
-  border: 1px dashed var(--border-strong);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: 13.5px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.mj-major:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.mj-major:disabled { opacity: 0.5; cursor: not-allowed; }
-.mj-major.added {
-  border-style: solid;
-  border-color: transparent;
-  background: var(--accent-soft);
-  color: var(--accent);
-  cursor: default;
-}
-
-.mj-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
-.mj-actions .field-hint { margin: 0; }
-
-@media (max-width: 560px) {
-  .mj-majors { padding-left: 0; }
-  .mj-options { grid-template-columns: 1fr; }
-}
-
 /* ---------- Profile page: readability pass ----------
    A slimmer banner, more room between and inside sections, and larger secondary text so each
    piece of information is easy to pick out. Colors, the nav, and About you's facts grid are unchanged. */
@@ -6681,15 +6680,6 @@ a.stat:hover {
 
 .pf-page .pf-campus-city {
   font-size: 13.5px;
-}
-
-.pf-page .pf-major-row {
-  margin-top: 28px;
-  padding: 16px 20px;
-}
-
-.pf-page .pf-major-text strong {
-  font-size: 17px;
 }
 
 @media (min-width: 900px) {

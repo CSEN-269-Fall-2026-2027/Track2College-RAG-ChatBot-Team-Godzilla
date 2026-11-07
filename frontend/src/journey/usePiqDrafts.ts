@@ -1,12 +1,20 @@
-import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, createElement, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiError, generatePiqDrafts } from "../api";
 import { profileSummary, useProfile } from "../profile";
-import { activitiesSummary, applyDrafts, canGeneratePiq, chosenPiqs, piqRequest, piqsToAutoDraft, piqWorkOf } from "./piqs";
+import { activitiesSummary, applyDrafts, canGeneratePiq, chosenPiqs, limitWords, piqRequest, piqWorkOf } from "./piqs";
 
 interface PiqDrafts {
   generate: (ids: string[], opts?: { regenerate?: boolean }) => Promise<boolean>;
+  /** Writes one essay without saving it, so Quill can show it in the chat. Null if it was cancelled. */
+  write: (id: string, opts?: { regenerate?: boolean; signal?: AbortSignal }) => Promise<{ text: string } | { error: string } | null>;
+  /** The essay to open for editing in Profile → Essays. */
+  editRequest: string | null;
+  requestEdit: (id: string | null) => void;
   busy: boolean;
+  /** Being written and saved by Generate. */
   isGenerating: (id: string) => boolean;
+  /** Being written into Quill's chat by Brainstorm. */
+  isBrainstorming: (id: string) => boolean;
   errorFor: (id: string) => string | null;
 }
 
@@ -14,18 +22,17 @@ const PiqDraftsContext = createContext<PiqDrafts | null>(null);
 
 /**
  * Generates PIQ drafts and saves them to the profile (shown in Profile → Essays). Shared app-wide so the
- * story, the Essays tab and auto-drafting see one "writing…" state. Once the activities step is done, every
- * chosen PIQ that has what it needs is drafted automatically — no essay questions asked.
+ * story, Quill's chat and the Essays tab see one "writing…" state. Essays are only written when the student asks.
  */
 export function PiqDraftsProvider({ children }: { children: ReactNode }) {
   const { profile, update } = useProfile();
   /** PIQ ids currently being drafted. */
   const [generating, setGenerating] = useState<string[]>([]);
+  const [brainstorming, setBrainstorming] = useState<string | null>(null);
   const [error, setError] = useState<{ ids: string[]; message: string } | null>(null);
+  const [editRequest, requestEdit] = useState<string | null>(null);
   /** Sync lock so a second click can't sneak through before React re-renders. */
   const busyRef = useRef(false);
-  /** Auto-draft tries each PIQ once per session; after a failure the student retries by hand. */
-  const autoTried = useRef(new Set<string>());
 
   const generate = useCallback(
     async (ids: string[], opts?: { regenerate?: boolean }) => {
@@ -44,7 +51,7 @@ export function PiqDraftsProvider({ children }: { children: ReactNode }) {
           ids,
           message: opts?.regenerate
             ? "Couldn't regenerate that essay. Please try again."
-            : "Answer Quill's question for this prompt first — even a blank answer works.",
+            : "Pick this question first, then try again.",
         });
         return false;
       }
@@ -69,23 +76,39 @@ export function PiqDraftsProvider({ children }: { children: ReactNode }) {
     [profile, update],
   );
 
-  // `generating` is a dependency so PIQs that became ready mid-request are picked up when it finishes.
-  useEffect(() => {
-    if (busyRef.current) return;
-    const ids = piqsToAutoDraft(profile).filter((id) => !autoTried.current.has(id));
-    if (!ids.length) return;
-    ids.forEach((id) => autoTried.current.add(id));
-    void generate(ids);
-  }, [profile, generate, generating]);
+  const write = useCallback<PiqDrafts["write"]>(
+    async (id, opts) => {
+      if (busyRef.current) return null;
+      busyRef.current = true;
+      setBrainstorming(id);
+      try {
+        const [draft] = await generatePiqDrafts(piqRequest(profile, [id]), profileSummary(profile), activitiesSummary(profile), opts?.signal, {
+          regenerate: !!opts?.regenerate,
+        });
+        return { text: limitWords(draft.essay) };
+      } catch (err) {
+        if (opts?.signal?.aborted) return null;
+        return { error: err instanceof ApiError ? err.message : "Couldn't write that essay. Please try again." };
+      } finally {
+        busyRef.current = false;
+        setBrainstorming(null);
+      }
+    },
+    [profile],
+  );
 
   const value = useMemo<PiqDrafts>(
     () => ({
       generate,
-      busy: generating.length > 0,
+      write,
+      editRequest,
+      requestEdit,
+      busy: generating.length > 0 || brainstorming !== null,
       isGenerating: (id) => generating.includes(id),
+      isBrainstorming: (id) => brainstorming === id,
       errorFor: (id) => (error?.ids.includes(id) ? error.message : null),
     }),
-    [generate, generating, error],
+    [generate, write, editRequest, generating, brainstorming, error],
   );
 
   return createElement(PiqDraftsContext.Provider, { value }, children);

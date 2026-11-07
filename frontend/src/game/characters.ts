@@ -100,19 +100,19 @@ export const MENTORS: Mentor[] = [
   {
     id: "milo",
     name: "Milo",
-    title: "Majors Guide",
-    specialty: "Exploring majors, matching them to your interests, and picking UC programs",
+    title: "Activities Guide",
+    specialty: "Getting to know what you do outside of class, so your essays sound like you",
     species: "human",
     palette: { body: "#1f6b4f", belly: "#f7ecd0", accent: "#1f6b4f", dark: "#14213d" },
     scene: "campus",
     voice: 370,
     greeting: (name) =>
-      `Hey${name ? ` ${name}` : ""}! Let's figure out what you might want to study — tell me what you enjoy.`,
+      `Hey${name ? ` ${name}` : ""}! I want to learn more about you and what you do outside of class.`,
     suggestions: [
-      { title: "Find my major", prompt: "Help me find college majors that fit my interests and favorite classes." },
-      { title: "Impacted majors", prompt: "What are impacted majors at the UCs and how do they affect my chances?" },
-      { title: "Undeclared", prompt: "Can I apply to a UC as undeclared, and is that a good idea?" },
-      { title: "Majors to careers", prompt: "How do different majors connect to careers I might like?" },
+      { title: "What counts", prompt: "What counts as an activity for a UC application?" },
+      { title: "Work & family", prompt: "Do a job or family responsibilities count as activities?" },
+      { title: "Not much to report", prompt: "I don't think I've done much outside of class. What could I talk about?" },
+      { title: "Awards", prompt: "Should I mention awards or honors, even small ones?" },
     ],
   },
 ];
@@ -173,7 +173,7 @@ export function sceneFor(question: string | undefined, mentor: Mentor): SceneId 
 export function specialistFor(question: string): Mentor["id"] {
   if (FINANCE.test(question)) return "penny";
   if (ESSAY.test(question)) return "quill";
-  if (MAJOR.test(question)) return "milo";
+  if (MAJOR.test(question)) return "theo";
   if (CAMPUS.test(question) && !APPLICATION.test(question)) return "theo";
   return "sage";
 }

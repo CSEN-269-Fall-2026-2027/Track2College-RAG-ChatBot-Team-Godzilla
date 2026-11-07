@@ -35,7 +35,8 @@ describe("application progress for the chatbot", () => {
     const text = applyProgressSummary(blankProfile(), null, oct30);
     expect(text).toContain("School counselor: not looked up yet");
     expect(text).toContain("UC application account: not started");
-    expect(text).toContain("UC application submitted: not yet");
+    expect(text).toContain("UC application filled by assistant through Personal insight: not yet");
+    expect(text).toContain("UC application marked submitted: not yet");
     expect(text).not.toContain("Birthday on file");
   });
 });

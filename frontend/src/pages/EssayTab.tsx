@@ -1,20 +1,33 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { activitiesStatus, journeyOf, PIQ_PROMPTS, PIQ_REQUIRED, PIQ_WORD_LIMIT, setPiqStatus } from "../journey/logic";
-import { canGeneratePiq, chosenPiqs, countWords, deleteDraft, editDraft, piqWorkOf, swapPiq } from "../journey/piqs";
+import { useEffect, useState } from "react";
+import type { AskOptions } from "../App";
+import { PIQ_PROMPTS, PIQ_REQUIRED, PIQ_WORD_LIMIT } from "../journey/logic";
+import { chosenPiqs, countWords, deleteDraft, editDraft, essayHasText, essayHelpRequest, essaysReadyCount, limitWords, overLimit, piqWorkOf, resetEssays, startedDraft, swapPiq } from "../journey/piqs";
 import { usePiqDrafts } from "../journey/usePiqDrafts";
 import { useProfile } from "../profile";
-import { navigate } from "../router";
-import { CheckIcon, CopyIcon, FileIcon, RetryIcon, SparkIcon, TrashIcon } from "../components/icons";
+import { navigate, setLeaveGuard } from "../router";
+import { ChatIcon, CheckIcon, FileIcon, SparkIcon, TrashIcon } from "../components/icons";
 import type { Profile } from "../types";
 
-/** Profile → Essays: one card per chosen UC PIQ — drafted automatically from activities, then revised by the student. */
-export function EssayTab({ onAsk }: { onAsk: (text: string) => void }) {
-  const { profile } = useProfile();
+const UNSAVED_WARNING = "You have unsaved changes to this essay. Leave without saving?";
+
+/** Profile → Essays: the four chosen UC PIQs, each opening into its own page. */
+export function EssayTab({ onAsk }: { onAsk: (text: string, options?: AskOptions) => void }) {
+  const { profile, update } = useProfile();
   const piq = usePiqDrafts();
+  const [openId, setOpenId] = useState<string | null>(null);
+  /** Pasting over a draft the student never asked for: the box starts empty until they type. */
+  const [startBlank, setStartBlank] = useState(false);
 
   const openStory = () => navigate("advisor");
-
   const ids = chosenPiqs(profile);
+
+  // "I already wrote my essay" opens that essay.
+  useEffect(() => {
+    if (!piq.editRequest) return;
+    setOpenId(piq.editRequest);
+    setStartBlank(!startedDraft(profile, piq.editRequest));
+    piq.requestEdit(null);
+  }, [piq, profile]);
 
   if (!ids.length) {
     return (
@@ -35,9 +48,27 @@ export function EssayTab({ onAsk }: { onAsk: (text: string) => void }) {
     );
   }
 
-  const statuses = journeyOf(profile).piqs;
-  const drafted = ids.filter((id) => piqWorkOf(profile, id).draft).length;
-  const readyCount = ids.filter((id) => statuses[id] === "ready").length;
+  if (openId && ids.includes(openId)) {
+    return (
+      <EssayPage
+        key={openId}
+        id={openId}
+        profile={profile}
+        startBlank={startBlank}
+        piq={piq}
+        onAsk={onAsk}
+        onBack={() => {
+          setOpenId(null);
+          setStartBlank(false);
+        }}
+        onSwitch={(to) => {
+          setOpenId(to);
+          setStartBlank(false);
+        }}
+      />
+    );
+  }
+
   const overCount = ids.filter((id) => countWords(piqWorkOf(profile, id).draft?.text ?? "") > PIQ_WORD_LIMIT).length;
 
   return (
@@ -47,7 +78,7 @@ export function EssayTab({ onAsk }: { onAsk: (text: string) => void }) {
           <h2>Your UC Personal Insight Questions</h2>
           <p>
             {ids.length < PIQ_REQUIRED ? `${ids.length} of ${PIQ_REQUIRED} chosen · ` : ""}
-            {drafted} of {PIQ_REQUIRED} drafted · {readyCount} marked ready
+            {essaysReadyCount(profile)}/{PIQ_REQUIRED} ready
             {overCount ? (
               <>
                 {" · "}
@@ -58,17 +89,52 @@ export function EssayTab({ onAsk }: { onAsk: (text: string) => void }) {
             ) : null}
           </p>
         </div>
-        {ids.length < PIQ_REQUIRED && (
-          <button className="btn-ghost" onClick={openStory}>
-            Choose {PIQ_REQUIRED - ids.length} more with Quill
+        <div className="essays-summary-actions">
+          {ids.length < PIQ_REQUIRED && (
+            <button className="btn-ghost" onClick={openStory}>
+              Choose {PIQ_REQUIRED - ids.length} more with Quill
+            </button>
+          )}
+          <button
+            className="btn-ghost"
+            disabled={piq.busy}
+            onClick={() => {
+              if (window.confirm("Start your essays over? This removes the questions you chose and deletes their essays.")) update(resetEssays);
+            }}
+          >
+            Reset
           </button>
-        )}
+        </div>
       </section>
 
-      <ol className="essay-cards">
-        {ids.map((id) => (
-          <EssayCard key={id} id={id} profile={profile} ready={statuses[id] === "ready"} piq={piq} onAsk={onAsk} onOpenStory={openStory} />
-        ))}
+      <ol className="essay-rows">
+        {ids.map((id) => {
+          const meta = PIQ_PROMPTS.find((q) => q.id === id);
+          const ready = essayHasText(profile, id);
+          const words = countWords(piqWorkOf(profile, id).draft?.text ?? "");
+          return (
+            <li key={id} className={`card essay-row${ready ? " is-ready" : ""}`}>
+              <div className="essay-row-text">
+                <h3>{meta?.title}</h3>
+                <p>{meta?.prompt}</p>
+                <span className={`essay-status ${ready ? "ready" : ""}`}>
+                  {piq.isGenerating(id) ? (
+                    "Generating…"
+                  ) : ready ? (
+                    <>
+                      <CheckIcon width={12} height={12} /> Ready · {words} words
+                    </>
+                  ) : (
+                    "Not started"
+                  )}
+                </span>
+              </div>
+              <button type="button" className="btn-primary" onClick={() => setOpenId(id)} aria-label={`Enter ${meta?.title}`}>
+                Enter
+              </button>
+            </li>
+          );
+        })}
       </ol>
 
       <p className="privacy-note">
@@ -78,77 +144,116 @@ export function EssayTab({ onAsk }: { onAsk: (text: string) => void }) {
   );
 }
 
-function EssayCard({
+/** One essay: edit and save it, switch its question, delete it, rewrite it, or ask Quill for help. */
+function EssayPage({
   id,
   profile,
-  ready,
+  startBlank,
   piq,
   onAsk,
-  onOpenStory,
+  onBack,
+  onSwitch,
 }: {
   id: string;
   profile: Profile;
-  ready: boolean;
+  startBlank: boolean;
   piq: ReturnType<typeof usePiqDrafts>;
-  onAsk: (text: string) => void;
-  onOpenStory: () => void;
+  onAsk: (text: string, options?: AskOptions) => void;
+  onBack: () => void;
+  onSwitch: (to: string) => void;
 }) {
   const { update } = useProfile();
-  const [editing, setEditing] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [changing, setChanging] = useState(false);
   const meta = PIQ_PROMPTS.find((q) => q.id === id);
-  const n = PIQ_PROMPTS.findIndex((q) => q.id === id) + 1;
   const draft = piqWorkOf(profile, id).draft;
-  const words = draft ? countWords(draft.text) : 0;
+  const savedText = draft?.text ?? "";
+  /** What's on file, which the box is compared against. A paste over an unrequested draft starts from nothing. */
+  const [baseline, setBaseline] = useState(startBlank ? "" : savedText);
+  const [text, setText] = useState(baseline);
+  /** The last edit went past the limit, so the end of it was cut. */
+  const [clipped, setClipped] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
+  const [changing, setChanging] = useState(false);
+
+  const words = countWords(text);
   const over = words > PIQ_WORD_LIMIT;
-  const generatable = canGeneratePiq(profile, id);
   const writing = piq.isGenerating(id);
   const error = piq.errorFor(id);
+  const dirty = text !== baseline;
 
-  const activitiesDone = activitiesStatus(profile).done;
+  // A rewrite (or Quill saving from the chat) replaces what's on screen.
+  const [lastSaved, setLastSaved] = useState(savedText);
+  if (savedText !== lastSaved) {
+    setLastSaved(savedText);
+    setBaseline(savedText);
+    setText(savedText);
+  }
 
-  const copy = async () => {
-    if (!draft) return;
-    await navigator.clipboard.writeText(draft.text);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 2000);
+  // Leaving by any other route (the sidebar, the top bar, closing the tab) asks too.
+  useEffect(() => {
+    if (!dirty) return;
+    setLeaveGuard(() => window.confirm(UNSAVED_WARNING));
+    const onUnload = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", onUnload);
+    return () => {
+      setLeaveGuard(null);
+      window.removeEventListener("beforeunload", onUnload);
+    };
+  }, [dirty]);
+
+  /** True when it's fine to leave this essay. */
+  const confirmLeave = () => {
+    if (dirty && !window.confirm(UNSAVED_WARNING)) return false;
+    setLeaveGuard(null);
+    return true;
   };
 
-  const regenerate = () => {
-    if (!window.confirm(`Regenerate your “${meta?.title}” essay? Any edits you've made to it will be replaced.`)) return;
-    setEditing(false);
-    void piq.generate([id], { regenerate: true });
+  const save = () => {
+    const kept = limitWords(text);
+    update((p) => (kept.trim() ? editDraft(p, id, kept) : deleteDraft(p, id)));
+    setText(kept);
+    setBaseline(kept);
+    setLastSaved(kept.trim() ? kept : "");
+    setClipped(false);
+    setJustSaved(true);
+  };
+
+  const rewrite = () => {
+    if (draft && !window.confirm(`Regenerate your “${meta?.title}” essay? It will replace what's here.`)) return;
+    setJustSaved(false);
+    void piq.generate([id], { regenerate: !!draft });
   };
 
   const remove = () => {
     if (!window.confirm(`Delete your “${meta?.title}” response? This can't be undone.`)) return;
-    setEditing(false);
+    setJustSaved(false);
+    setClipped(false);
     update((p) => deleteDraft(p, id));
+    setText("");
+    setBaseline("");
+    setLastSaved("");
+  };
+
+  const askQuill = () => {
+    if (!confirmLeave()) return;
+    const help = essayHelpRequest(profile, id);
+    onAsk(help.query, { display: help.display, mentorId: "quill" });
   };
 
   const others = PIQ_PROMPTS.filter((q) => !chosenPiqs(profile).includes(q.id));
 
-  const status = ready ? "ready" : draft ? "draft" : generatable ? "can-generate" : "needs-answers";
-  const statusLabel = { ready: "Ready", draft: "Draft", "can-generate": writing ? "Writing…" : "Ready to generate", "needs-answers": "Needs one answer" }[status];
-
   return (
-    <li className={`card essay-card is-${status}`}>
-      <header className="essay-card-head">
-        <span className="essay-card-num">{n}</span>
-        <div className="essay-card-title">
-          <h3>{meta?.title}</h3>
-          <span className={`essay-status ${status}`}>
-            {status === "ready" && <CheckIcon width={12} height={12} />} {statusLabel}
-          </span>
-        </div>
-      </header>
+    <section className="card essay-page">
+      <button type="button" className="link-btn essay-back" onClick={() => confirmLeave() && onBack()}>
+        ← Back to all essays
+      </button>
+
+      <h2 className="essay-page-title">{meta?.title}</h2>
 
       <div className="essay-card-question">
         <div className="essay-card-question-top">
-          <span className="essay-card-question-label">Question {n} of 8 · the prompt you're answering</span>
+          <span className="essay-card-question-label">The question you're answering</span>
           <button type="button" className="link-btn" onClick={() => setChanging((c) => !c)} aria-expanded={changing} disabled={writing}>
-            {changing ? "Cancel" : "Change question"}
+            {changing ? "Cancel" : "Switch question"}
           </button>
         </div>
         <p>{meta?.prompt}</p>
@@ -157,7 +262,7 @@ function EssayCard({
       {changing && (
         <div className="essay-change" role="group" aria-label={`Pick a different question instead of ${meta?.title}`}>
           <p className="essay-change-note">
-            Pick a different question. {draft ? "Your current response stays saved in case you switch back." : ""}
+            Pick a different question. {draft ? "Your saved response stays here in case you switch back." : ""}
           </p>
           <ul>
             {others.map((q) => (
@@ -166,13 +271,12 @@ function EssayCard({
                   type="button"
                   className="essay-change-option"
                   onClick={() => {
+                    if (!confirmLeave()) return;
                     update((p) => swapPiq(p, id, q.id));
-                    setChanging(false);
+                    onSwitch(q.id);
                   }}
                 >
-                  <strong>
-                    {PIQ_PROMPTS.findIndex((x) => x.id === q.id) + 1}. {q.title}
-                  </strong>
+                  <strong>{q.title}</strong>
                   <span>{q.prompt}</span>
                 </button>
               </li>
@@ -187,158 +291,53 @@ function EssayCard({
         </p>
       )}
 
-      {draft ? (
-        <>
-          {editing ? (
-            <textarea
-              className="essay-card-editor"
-              value={draft.text}
-              onChange={(e) => update((p) => editDraft(p, id, e.target.value))}
-              rows={14}
-              aria-label={`Edit ${meta?.title} essay`}
-              autoFocus
-            />
-          ) : (
-            <div className={`essay-card-body${writing ? " is-writing" : ""}`} aria-busy={writing}>
-              {writing ? (
-                <p className="essay-rewriting">Rewriting your essay… this can take a few seconds.</p>
-              ) : (
-                draft.text.split(/\n{2,}/).map((para, i) => (
-                  <p key={i}>{para}</p>
-                ))
-              )}
-            </div>
-          )}
-
-          <div className="essay-meter" aria-hidden="true">
-            <span className={over ? "over" : ""} style={{ width: `${Math.min(100, (words / PIQ_WORD_LIMIT) * 100)}%` }} />
-          </div>
-
-          <footer className="essay-card-foot">
-            <span className={`essay-count${over ? " over" : ""}`} aria-live="polite">
-              {words} / {PIQ_WORD_LIMIT} words{over ? ` · cut ${words - PIQ_WORD_LIMIT}` : ""}
-            </span>
-            <div className="essay-card-actions">
-              <button className="btn-ghost" onClick={() => setEditing((e) => !e)} disabled={writing}>
-                {editing ? "Done editing" : "Edit"}
-              </button>
-              <button
-                className={ready ? "btn-ghost" : "btn-primary"}
-                disabled={!ready && over}
-                title={!ready && over ? `Cut it to ${PIQ_WORD_LIMIT} words first` : undefined}
-                onClick={() => update((p) => ({ ...p, ucJourney: setPiqStatus(journeyOf(p), id, ready ? "drafting" : "ready") }))}
-              >
-                {ready ? "Mark as draft" : "Mark ready"}
-              </button>
-              <MoreMenu
-                label={`More for ${meta?.title}`}
-                items={[
-                  { label: copied ? "Copied" : "Copy text", icon: <CopyIcon width={14} height={14} />, onClick: copy, disabled: writing },
-                  { label: writing ? "Writing…" : "Rewrite with Quill", icon: <RetryIcon width={14} height={14} />, onClick: regenerate, disabled: piq.busy },
-                  {
-                    label: "Ask for revision help",
-                    onClick: () =>
-                      onAsk(`Help me revise my UC PIQ response for "${meta?.prompt}" so it sounds more like me and stays under ${PIQ_WORD_LIMIT} words:\n\n${draft.text}`),
-                  },
-                  { label: "Delete response", icon: <TrashIcon width={14} height={14} />, onClick: remove, disabled: writing, danger: true },
-                ]}
-              />
-            </div>
-          </footer>
-        </>
-      ) : generatable ? (
-        <div className="essay-card-pending">
-          <p>
-            {writing
-              ? "Quill is writing this essay from your activities and profile…"
-              : activitiesDone
-                ? "Quill has what it needs for this essay."
-                : "Quill will draft this automatically once your activities are done — or write it now."}
-          </p>
-          <button className="btn-primary" onClick={() => piq.generate([id])} disabled={piq.busy}>
-            <SparkIcon width={15} height={15} />
-            {writing ? "Writing your essay…" : "Generate this essay"}
-          </button>
+      {writing ? (
+        <div className="essay-card-body is-writing" aria-busy="true">
+          <p className="essay-rewriting">Generating…</p>
         </div>
       ) : (
-        <div className="essay-card-pending">
-          <p>Quill needs one answer from you before drafting this one.</p>
-          <button className="btn-ghost" onClick={onOpenStory}>
-            Answer with Quill
-          </button>
-        </div>
+        <textarea
+          className="essay-card-editor"
+          value={text}
+          placeholder="Paste or type your essay here."
+          onChange={(e) => {
+            setClipped(overLimit(e.target.value));
+            setJustSaved(false);
+            setText(limitWords(e.target.value));
+          }}
+          rows={14}
+          aria-label={`${meta?.title} essay`}
+        />
       )}
-    </li>
-  );
-}
 
-interface MenuItem {
-  label: string;
-  icon?: ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  danger?: boolean;
-}
+      <div className="essay-meter" aria-hidden="true">
+        <span className={over ? "over" : ""} style={{ width: `${Math.min(100, (words / PIQ_WORD_LIMIT) * 100)}%` }} />
+      </div>
 
-/** A "More" button that opens a short list of less-used actions. Escape or a click outside closes it. */
-function MoreMenu({ label, items }: { label: string; items: MenuItem[] }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
+      <div className="essay-page-status">
+        <span className={`essay-count${over ? " over" : ""}`} aria-live="polite">
+          {words} / {PIQ_WORD_LIMIT} words{over ? ` · cut ${words - PIQ_WORD_LIMIT}` : ""}
+          {clipped ? ` · UC's limit is ${PIQ_WORD_LIMIT} words, so anything past it was removed` : ""}
+        </span>
+        <span className="essay-save-note" role="status">
+          {dirty ? "Unsaved changes" : justSaved ? "Saved" : ""}
+        </span>
+      </div>
 
-  useEffect(() => {
-    if (!open) return;
-    ref.current?.querySelector<HTMLButtonElement>("[role=menuitem]:not([disabled])")?.focus();
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setOpen(false);
-        buttonRef.current?.focus();
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  const onMenuKey = (e: ReactKeyboardEvent) => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    e.preventDefault();
-    const list = [...(ref.current?.querySelectorAll<HTMLButtonElement>("[role=menuitem]:not([disabled])") ?? [])];
-    const i = list.indexOf(document.activeElement as HTMLButtonElement);
-    list[(i + (e.key === "ArrowDown" ? 1 : -1) + list.length) % list.length]?.focus();
-  };
-
-  return (
-    <div className="more-menu" ref={ref}>
-      <button ref={buttonRef} type="button" className="btn-ghost" aria-haspopup="menu" aria-expanded={open} aria-label={label} onClick={() => setOpen((o) => !o)}>
-        More ▾
-      </button>
-      {open && (
-        <div className="more-menu-list" role="menu" onKeyDown={onMenuKey}>
-          {items.map((item) => (
-            <button
-              key={item.label}
-              type="button"
-              role="menuitem"
-              className={`more-menu-item${item.danger ? " is-danger" : ""}`}
-              disabled={item.disabled}
-              onClick={() => {
-                setOpen(false);
-                item.onClick();
-              }}
-            >
-              {item.icon}
-              {item.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+      <div className="essay-page-actions">
+        <button type="button" className="btn-primary" onClick={save} disabled={!dirty || writing}>
+          Save
+        </button>
+        <button type="button" className="btn-ghost" onClick={askQuill} disabled={writing}>
+          <ChatIcon width={14} height={14} /> Get help from Quill
+        </button>
+        <button type="button" className="btn-ghost" onClick={rewrite} disabled={piq.busy}>
+          <SparkIcon width={14} height={14} /> {writing ? "Generating…" : draft ? "Regenerate my essay" : "Generate my essay"}
+        </button>
+        <button type="button" className="btn-ghost essay-delete" onClick={remove} disabled={writing || !draft}>
+          <TrashIcon width={14} height={14} /> Delete response
+        </button>
+      </div>
+    </section>
   );
 }

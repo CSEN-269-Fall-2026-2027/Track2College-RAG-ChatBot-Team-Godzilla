@@ -128,7 +128,7 @@ export const PROFILE_SECTIONS = [
 export const PROFILE_WORKSPACES = [
   { id: "activities", title: "Activities & awards" },
   { id: "essays", title: "Personal insight essays" },
-  { id: "majors", title: "Major selection" },
+  { id: "interview", title: "Counselor interview" },
 ] as const;
 
 export type SectionId = (typeof PROFILE_SECTIONS)[number]["id"];
@@ -160,6 +160,32 @@ export function completeness(p: Profile) {
   const sections = Object.fromEntries(PROFILE_SECTIONS.map(({ id }) => [id, id === "basics" ? basics : 0])) as Record<SectionId, number>;
   return { overall: basics, sections };
 }
+
+const AID_LINES = ["Needs financial aid", "Student annual budget", "Household income range", "FAFSA or California Dream Act status"];
+const ESSAY_LINES = ["Chosen UC Personal Insight Questions"];
+const ACTIVITY_LINES = ["Activities:", "Awards:"];
+const ACADEMIC_LINES = ["Reported unweighted GPA", "Reported weighted GPA", "AP/IB or English-proficiency exams"];
+/** What each guide can do without, so every message costs fewer tokens. Other guides get the whole profile. */
+const LINES_A_GUIDE_SKIPS: Record<string, string[]> = {
+  milo: [...AID_LINES, ...ESSAY_LINES, ...ACADEMIC_LINES, "UC campus list", "Note:", "Biggest college question", "Wants help with first"],
+  theo: [...AID_LINES, ...ESSAY_LINES, ...ACTIVITY_LINES, "Note:"],
+  penny: [...ESSAY_LINES, ...ACTIVITY_LINES, ...ACADEMIC_LINES],
+  quill: [...AID_LINES, "Note:", "Biggest college question"],
+};
+
+/** The profile summary without the lines this guide doesn't use. */
+export function summaryForGuide(summary: string, guide: string): string {
+  const skip = LINES_A_GUIDE_SKIPS[guide];
+  return skip
+    ? summary
+        .split("\n")
+        .filter((line) => !skip.some((prefix) => line.startsWith(prefix)))
+        .join("\n")
+    : summary;
+}
+
+/** Only these guides talk about application progress. */
+export const usesProgress = (guide: string) => !LINES_A_GUIDE_SKIPS[guide];
 
 export type AcademicHistoryStatus = {
   started: boolean;
@@ -283,13 +309,6 @@ export function profileSummary(p: Profile): string {
   );
   lines.push("Context: Track2College prepares first-year UC applicants; it does not replace the official UC application.");
   return lines.join("\n");
-}
-
-export function profileHash(p: Profile): string {
-  const text = JSON.stringify({ ...p, updatedAt: 0 });
-  let hash = 0;
-  for (let i = 0; i < text.length; i++) hash = (Math.imul(31, hash) + text.charCodeAt(i)) | 0;
-  return (hash >>> 0).toString(36);
 }
 
 // ---------------------------------------------------------------------------

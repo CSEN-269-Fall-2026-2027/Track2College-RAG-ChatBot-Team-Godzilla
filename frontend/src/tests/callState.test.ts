@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TypedEchoFilter, callPhase, isWrapUpLine, mouthFrame, nearBottom, presence } from "../agent/callState";
+import { TypedEchoFilter, callPhase, isWrapUpLine, mouthFrame, nearBottom, presence, virtualCounselorDone } from "../agent/callState";
 
 const base = { joined: true, starting: false, status: "disconnected", error: null, hadSession: false };
 
@@ -81,5 +81,33 @@ describe("isWrapUpLine", () => {
   it("ignores other lines, including the silence prompt", () => {
     expect(isWrapUpLine("Are you still there? If you have any more questions, feel free to ask!")).toBe(false);
     expect(isWrapUpLine("Thanks so much for talking with me today!")).toBe(false);
+  });
+});
+
+describe("virtualCounselorDone", () => {
+  it("stays incomplete after only the first check-in answer", () => {
+    expect(virtualCounselorDone({ lines: [{ role: "student", text: "I'm doing well" }] })).toBe(false);
+    expect(
+      virtualCounselorDone({
+        lines: [
+          { role: "counselor", text: "How's senior year going?" },
+          { role: "student", text: "Pretty good" },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("completes once Jordan says goodbye and the student has spoken", () => {
+    expect(
+      virtualCounselorDone({
+        lines: [
+          { role: "student", text: "I'm good" },
+          {
+            role: "counselor",
+            text: "Thanks so much for talking with me today! When you're ready, you can go ahead with your UC application.",
+          },
+        ],
+      }),
+    ).toBe(true);
   });
 });

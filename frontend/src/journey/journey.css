@@ -95,84 +95,70 @@
   left: 0;
   z-index: 50;
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
+  align-items: center;
+  padding: 24px;
 }
-.jm-scrim { position: absolute; inset: 0; border: 0; background: rgba(20, 24, 22, 0.35); cursor: default; }
 
+.jm-scrim { position: absolute; inset: 0; border: 0; background: rgba(20, 24, 22, 0.45); cursor: default; }
+
+/* A centered card sized to its tasks, so two tasks don't sit in a tall empty panel. */
 .jm-panel {
   position: relative;
-  width: min(460px, 100%);
-  height: 100%;
+  width: min(560px, 100%);
+  max-height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 20px;
   background: var(--bg-elevated);
-  border-left: 4px solid var(--jm-ink, #2f3a33);
-  animation: jm-slide 0.22s ease-out;
+  box-shadow: 0 18px 50px rgba(20, 24, 22, 0.28);
+  animation: jm-pop 0.2s ease-out;
 }
 
-.jm-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
-.jm-panel-kicker { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
-.jm-panel-head h2 { margin: 2px 0 0; font-size: 19px; }
+.jm-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 22px 24px 0; }
+.jm-panel-kicker { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+.jm-panel-head h2 { margin: 4px 0 0; font-size: 26px; line-height: 1.2; }
 .jm-panel-head h2:focus { outline: none; }
-.jm-panel-body { flex: 1; overflow: auto; padding: 16px 18px 28px; display: grid; gap: 14px; align-content: start; }
+.jm-panel-body { min-height: 0; overflow: auto; padding: 8px 24px 24px; display: grid; gap: 16px; align-content: start; }
 
-.jm-progress { display: grid; gap: 6px; font-size: 13px; font-weight: 600; }
+.jm-progress { display: grid; gap: 8px; font-size: 15px; font-weight: 700; }
+.jm-panel .jm-bar { height: 10px; overflow: hidden; border: 0; border-radius: 999px; background: var(--bg-hover); }
+.jm-panel .jm-bar span { border-radius: 999px; background: var(--accent); }
 
-.jm-tasks, .jm-manual, .jm-mini-list, .jm-campuses ul, .jm-piqs ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.jm-tasks li { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; }
-.jm-check { flex: none; display: grid; place-items: center; width: 18px; height: 18px; margin-top: 2px; border: 2px solid var(--border-strong); }
-.jm-tasks li.done .jm-check { background: #6f8f5a; border-color: #6f8f5a; color: #fff; }
-.jm-task-label { display: block; font-weight: 600; }
-.jm-task-label em { font-weight: 400; color: var(--text-muted); }
-.jm-task-detail { display: block; font-size: 12.5px; color: var(--text-muted); }
+.jm-tasks { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.jm-tasks li {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  font-size: 17px;
+  line-height: 1.35;
+}
+.jm-tasks li.done { border-color: transparent; background: var(--accent-soft); }
+.jm-check { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border: 2px solid var(--border-strong); border-radius: 50%; }
+.jm-tasks li.done .jm-check { border-color: var(--accent); background: var(--accent); color: var(--bg-elevated); }
+.jm-task-label { display: block; min-width: 0; font-weight: 600; }
 .jm-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
-.jm-note { margin: 0; font-size: 13px; color: var(--text-muted); }
-.jm-tip { display: grid; gap: 3px; padding: 10px 12px; border-left: 4px solid #c9a23f; background: var(--bg-subtle); font-size: 13px; }
-.jm-h3 { margin: 6px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+.jm-note { margin: 0; font-size: 15px; color: var(--text-muted); }
 .jm-cta { display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; justify-self: start; }
 
-.jm-mini-list li { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 6px 10px; border: 1px solid var(--border); }
-.jm-warn { color: var(--warning); font-weight: 600; }
-.jm-ok { color: var(--text-muted); }
-
-.jm-campuses li, .jm-piqs li {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 6px 8px;
-  align-items: center;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-}
-
-.jm-campuses li.on, .jm-piqs li.on { border-color: #6f8f5a; background: var(--bg-subtle); }
-.jm-campus-toggle, .jm-piq-toggle, .jm-manual label { display: flex; gap: 9px; align-items: flex-start; font-size: 14px; cursor: pointer; }
-.jm-campus-toggle small { color: var(--text-muted); margin-left: 4px; }
-.jm-piq-toggle span, .jm-manual label span { display: grid; gap: 2px; }
-.jm-piq-toggle small, .jm-manual small { color: var(--text-muted); font-size: 12.5px; }
-.jm-piqs li { grid-template-columns: 1fr; }
-.jm-ext { color: var(--text-muted); }
-.jm-input { grid-column: 1 / -1; height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 13.5px; }
-
-.jm-seg { display: inline-flex; border: 2px solid var(--jm-ink, #2f3a33); justify-self: start; }
-.jm-seg button { padding: 4px 10px; border: 0; background: var(--bg-elevated); color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; }
-.jm-seg button + button { border-left: 2px solid var(--jm-ink, #2f3a33); }
-.jm-seg button.on { background: #c9a23f; color: #2f3a33; font-weight: 700; }
-
-.jm-submitted { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0; color: #4c6b3e; font-weight: 600; font-size: 14px; }
-.jm-link { border: 0; background: none; color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit; }
-.jm-confirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px; border: 2px dashed var(--border-strong); }
-.jm-confirm p { flex-basis: 100%; margin: 0; font-size: 13px; }
+.jm-link { justify-self: start; padding: 0; border: 0; background: none; color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit; font-size: 13px; }
 
 @keyframes jm-pulse { 50% { box-shadow: 0 0 0 7px rgba(242, 194, 48, 0.15); } }
-@keyframes jm-slide { from { transform: translateX(40px); opacity: 0; } }
+@keyframes jm-pop { from { transform: scale(0.97); opacity: 0; } }
 
 @media (max-width: 720px) {
   .jm-top { flex-wrap: wrap; padding: 10px 16px; gap: 8px 12px; }
   .jm-overall { flex-basis: 100%; }
   .jm-scroll { padding: 12px 16px 24px; }
-  .jm-panel-wrap { align-items: flex-end; }
-  .jm-panel { height: 88%; border-left: 0; border-top: 4px solid #2f3a33; animation-name: jm-sheet; }
+  .jm-panel-wrap { align-items: flex-end; padding: 0; }
+  .jm-panel { max-height: 88%; border-radius: 20px 20px 0 0; animation-name: jm-sheet; }
 }
 
 @keyframes jm-sheet { from { transform: translateY(40px); opacity: 0; } }
@@ -181,9 +167,6 @@
   .jm-panel { animation: none; }
   .map-btn, .jm-bar span { transition: none; }
 }
-
-/* Global form styles stretch inputs; keep panel checkboxes checkbox-sized. */
-.jm-panel input[type="checkbox"] { flex: none; width: 16px; height: 16px; margin: 3px 0 0; accent-color: #6f8f5a; }
 
 
 /* ------------------------------------------------------------ Campus map
@@ -199,6 +182,8 @@
   --cn-route: #cdbf9c;
   --cn-route-deep: #a99766;
   --cn-gold: #c9a23f;
+  --cn-here: #0d9488;
+  --cn-here-glow: rgba(13, 148, 136, 0.8);
   --cn-sage-deep: #4f7a5a;
   --cn-ring: #4f7a5a;
 }
@@ -210,6 +195,8 @@
   --cn-route: #4c5449;
   --cn-route-deep: #8d8a70;
   --cn-sage-deep: #7fae86;
+  --cn-here: #4fd1c5;
+  --cn-here-glow: rgba(79, 209, 197, 0.8);
   --cn-ring: #a9c9a7;
 }
 
@@ -383,28 +370,76 @@
   display: block;
   width: 100%;
   height: 100%;
-  transition: filter 0.2s, opacity 0.2s;
+  transition: filter 0.2s, opacity 0.2s, transform 0.2s;
 }
 
-/* Done: slightly quieter, with a check. Later chapters: softer until they're reached.
-   Every building stays clickable, so its guide is always one click away. */
-.jm-stop-complete .jm-planet {
-  filter: saturate(0.6) brightness(1.02);
+/* The current chapter stands out most: bigger, vivid, and glowing. Future chapters have muted color,
+   and done ones are a faint gray with a check. Selecting or hovering a stop brings out its color. Every
+   building stays clickable, so its guide is always one click away. Filters, not opacity, so the route
+   never shows through. */
+.jm-stop-current .jm-planet {
+  filter: saturate(1.7) contrast(1.1) drop-shadow(0 0 7px var(--cn-here-glow));
+  transform: scale(1.14);
+  transform-origin: 50% 90%;
 }
 
-/* Faded with a filter, not opacity, so the route never shows through a building. */
-.jm-stop-upcoming .jm-planet {
-  filter: saturate(0.3) contrast(0.72) brightness(1.1);
+.jm-stop-complete .jm-planet,
+.jm-done-badge svg {
+  filter: grayscale(1) contrast(0.32) brightness(1.5);
 }
 
+.jm-stop-upcoming .jm-planet,
+.jm-stop-current.is-unselected .jm-planet {
+  filter: saturate(0.55) contrast(0.85) brightness(1.08);
+}
+
+/* Another stop is selected, so it gets the attention. The "you're here" marker stays put. */
+.jm-stop-current.is-unselected .jm-planet {
+  transform: none;
+}
+
+.jm-stop-current.is-unselected .jm-planet-btn:hover .jm-planet,
+.jm-stop-current.is-unselected .jm-planet-btn:focus-visible .jm-planet {
+  filter: none;
+}
+
+.jm-stop-complete .jm-planet-btn:hover .jm-planet,
+.jm-stop-complete .jm-planet-btn:focus-visible .jm-planet,
+.jm-stop-complete.is-selected .jm-planet,
+.jm-stop-complete .jm-planet-btn:hover .jm-done-badge svg,
+.jm-stop-complete .jm-planet-btn:focus-visible .jm-done-badge svg,
+.jm-stop-complete.is-selected .jm-done-badge svg,
 .jm-stop-upcoming .jm-planet-btn:hover .jm-planet,
 .jm-stop-upcoming .jm-planet-btn:focus-visible .jm-planet,
 .jm-stop-upcoming.is-selected .jm-planet {
-  filter: saturate(0.75) contrast(0.92);
+  filter: none;
 }
 
-:root[data-theme="dark"] .jm-stop-upcoming .jm-planet {
-  filter: saturate(0.3) brightness(0.8);
+:root[data-theme="dark"] .jm-stop-complete .jm-planet,
+:root[data-theme="dark"] .jm-done-badge svg {
+  filter: grayscale(1) contrast(0.4) brightness(0.42);
+}
+
+:root[data-theme="dark"] .jm-stop-upcoming .jm-planet,
+:root[data-theme="dark"] .jm-stop-current.is-unselected .jm-planet {
+  filter: saturate(0.55) contrast(0.85) brightness(0.78);
+}
+
+:root[data-theme="dark"] .jm-stop-current.is-unselected .jm-planet-btn:hover .jm-planet,
+:root[data-theme="dark"] .jm-stop-current.is-unselected .jm-planet-btn:focus-visible .jm-planet {
+  filter: none;
+}
+
+:root[data-theme="dark"] .jm-stop-complete .jm-planet-btn:hover .jm-planet,
+:root[data-theme="dark"] .jm-stop-complete .jm-planet-btn:focus-visible .jm-planet,
+:root[data-theme="dark"] .jm-stop-complete.is-selected .jm-planet,
+:root[data-theme="dark"] .jm-stop-complete .jm-planet-btn:hover .jm-done-badge svg,
+:root[data-theme="dark"] .jm-stop-complete .jm-planet-btn:focus-visible .jm-done-badge svg,
+:root[data-theme="dark"] .jm-stop-complete.is-selected .jm-done-badge svg,
+:root[data-theme="dark"] .jm-stop-upcoming .jm-planet-btn:hover .jm-planet,
+:root[data-theme="dark"] .jm-stop-upcoming .jm-planet-btn:focus-visible .jm-planet,
+:root[data-theme="dark"] .jm-stop-upcoming.is-selected .jm-planet {
+  filter: none;
 }
 
 /* Selected (whose chat is open): a thin rounded frame around the building and its lawn. */
@@ -428,13 +463,13 @@
   position: absolute;
   left: 50%;
   bottom: 100%;
-  transform: translate(-50%, calc(var(--px) * -2));
+  transform: translate(-50%, calc(var(--px) * -4));
   line-height: 0;
 }
 
 /* The Admissions Office flag already reaches the top, so its marker sits above the flag. */
 .jm-stop:last-child .jm-here {
-  transform: translate(-50%, calc(var(--px) * -4));
+  transform: translate(-50%, calc(var(--px) * -6));
 }
 
 
@@ -471,15 +506,11 @@
 }
 
 .jm-stop-current .jm-label small {
-  color: #8a6a00;
+  color: var(--cn-here);
 }
 
 .jm-stop-complete .jm-label small {
   color: var(--cn-sage-deep);
-}
-
-:root[data-theme="dark"] .jm-stop-current .jm-label small {
-  color: var(--cn-gold);
 }
 
 .jm-stop.is-selected .jm-label strong {
@@ -509,10 +540,13 @@
 
 /* Selected chapter: a quiet link to its full to-do list. */
 .jm-explore {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 2;
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  margin-top: 3px;
   padding: 2px 4px;
   border: 0;
   border-radius: 6px;
@@ -527,27 +561,6 @@
   text-decoration-color: transparent;
   text-underline-offset: 3px;
   transition: text-decoration-color 0.15s;
-  animation: jm-explore-in 0.2s ease-out;
-}
-
-/* Wide map: "See tasks" hangs under the label without taking space, so selecting a stop
-   never makes its label taller and shifts the whole map. */
-[data-layout="wide"] .jm-label {
-  position: relative;
-}
-
-[data-layout="wide"] .jm-explore {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  width: max-content;
-  margin: 3px auto 0;
-}
-
-[data-layout="tall"] .jm-explore {
-  align-self: flex-start;
-  margin-left: -4px;
 }
 
 .jm-explore:hover {
@@ -559,13 +572,8 @@
   outline-offset: 1px;
 }
 
-@keyframes jm-explore-in {
-  from { opacity: 0; transform: translateY(-2px); }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .jm-explore {
-    animation: none;
     transition: none;
   }
 }
@@ -618,20 +626,20 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 0 14px 6px;
-  border: 2px solid var(--cn-ink);
-  border-radius: 4px;
+  padding: 0 21px 9px;
+  border: 3px solid var(--cn-ink);
+  border-radius: 6px;
   background: var(--bg-elevated, #fff);
-  box-shadow: 0 3px 0 color-mix(in srgb, var(--cn-ink) 18%, transparent);
+  box-shadow: 0 4.5px 0 color-mix(in srgb, var(--cn-ink) 18%, transparent);
 }
 
 .jm-sign-head {
   align-self: stretch;
-  margin: 0 -14px 4px;
-  padding: 3px 10px;
+  margin: 0 -21px 6px;
+  padding: 4.5px 15px;
   background: var(--jm-sign-head);
   color: #f6efdd;
-  font-size: 10px;
+  font-size: 15px;
   font-weight: 750;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -640,14 +648,14 @@
 }
 
 .jm-sign-count {
-  font-size: 13px;
+  font-size: 19.5px;
   font-weight: 650;
   color: var(--cn-text);
   white-space: nowrap;
 }
 
 .jm-sign-count strong {
-  font-size: 22px;
+  font-size: 33px;
   font-weight: 800;
   line-height: 1.1;
   color: var(--cn-sage-deep);
@@ -655,7 +663,7 @@
 }
 
 .jm-sign-count strong.is-text {
-  font-size: 16px;
+  font-size: 24px;
 }
 
 .jm-sign-board.is-urgent .jm-sign-count strong {

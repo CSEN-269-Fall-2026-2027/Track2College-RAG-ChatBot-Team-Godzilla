@@ -1,4 +1,5 @@
-import { journeyOf } from "../journey/logic";
+import { virtualCounselorDone } from "./callState";
+import { journeyOf, ucAccountReady } from "../journey/logic";
 import type { AgentState, CallLine, PersonalInfo, Profile } from "../types";
 
 /**
@@ -6,7 +7,7 @@ import type { AgentState, CallLine, PersonalInfo, Profile } from "../types";
  * application busywork and the student only approves it. Pure helpers here.
  */
 
-export type AgentTaskId = "counselor" | "ucAccount" | "fafsa" | "sir";
+export type AgentTaskId = "virtualCounselor" | "emailCounselor" | "ucAccount" | "fafsa" | "sir";
 
 export interface AgentTask {
   id: AgentTaskId;
@@ -15,6 +16,8 @@ export interface AgentTask {
   /** Shown but not usable yet. */
   comingSoon?: boolean;
 }
+
+export { virtualCounselorDone };
 
 export function agentOf(profile: Profile): AgentState {
   return journeyOf(profile).agent ?? {};
@@ -46,6 +49,8 @@ export function withUcRunProgress(
   const isCurrent = !login || sameEmail(current?.email, login.email);
   const uc = isCurrent && current ? current : accepted ? { email: accepted.email, generatedAt: now } : null;
   if (!uc) return a;
+  // Status leaves "signed_in" almost immediately for "filling"; treat created+verified as a working login.
+  const signedIn = run.status === "signed_in" || (run.created && run.verified && run.status !== "needs_code" && run.status !== "login_failed");
   const next = {
     ...uc,
     ...(accepted ? { email: accepted.email, password: accepted.password } : {}),
@@ -54,7 +59,7 @@ export function withUcRunProgress(
     setupAt: uc.setupAt ?? (run.setup ? now : undefined),
     aboutAt: uc.aboutAt ?? (run.about ? now : undefined),
     piqAt: uc.piqAt ?? (run.piq ? now : undefined),
-    signedInAt: uc.signedInAt ?? (run.status === "signed_in" ? now : undefined),
+    signedInAt: uc.signedInAt ?? (signedIn ? now : undefined),
   };
   const same =
     current === uc &&
@@ -66,16 +71,20 @@ export function agentTasks(profile: Profile): AgentTask[] {
   const a = agentOf(profile);
   return [
     {
-      id: "counselor",
-      title: "Talk to a counselor",
-      // Either a call with the virtual counselor or an email sent to their school counselor.
-      done: !!a.counselorCall || !!a.counselorEmail?.sentAt,
+      id: "virtualCounselor",
+      title: "Meet with the virtual counselor",
+      done: virtualCounselorDone(a.counselorCall),
+    },
+    {
+      id: "emailCounselor",
+      title: "Email your counselor",
+      done: !!a.counselorEmail?.sentAt,
     },
     {
       id: "ucAccount",
       title: "UC application",
-      // Checked off once the UC account exists and is verified.
-      done: !!(a.ucAccount?.verifiedAt || a.ucAccount?.signedInAt),
+      // Checked off once a saved login has worked with UC.
+      done: ucAccountReady(a.ucAccount),
     },
     { id: "fafsa", title: "Submit the FAFSA or CA Dream Act", done: fafsaSubmitted(profile) },
     { id: "sir", title: "Submit your Intent to Register", done: !!a.sirDoneAt },
@@ -116,7 +125,7 @@ function wordsToNumber(words: string): number {
 }
 
 /**
- * What the transcript shows for one of Jordan's lines: no tone cues, no stray comma the voice
+ * What the transcript shows for one of Jordan's lines: no tone cues, no stray comma/bang the voice
  * sometimes starts a sentence with, and years as digits ("two thousand twenty seven" → 2027).
  */
 export function cleanTranscriptLine(text: string): string {
@@ -124,7 +133,7 @@ export function cleanTranscriptLine(text: string): string {
     .replace(SPELLED_YEAR, (_match, afterThousand?: string, afterTwenty?: string) =>
       String(2000 + (afterThousand ? wordsToNumber(afterThousand) : afterTwenty ? wordsToNumber(afterTwenty) : 0)),
     )
-    .replace(/^[\s,;:.]+/, "")
+    .replace(/^[\s,;:.!?]+/, "")
     .replace(/\s+([,;:.!?])/g, "$1")
     .replace(/([.!?])\s*,\s*/g, "$1 ")
     .trim();
@@ -272,7 +281,11 @@ export function applyProgressSummary(profile: Profile, personal: PersonalInfo | 
             ? `drafted ("${mail.subject}"), not sent`
             : "not drafted"),
   );
-  lines.push(`Practice call with Jordan (virtual counselor): ${a.counselorCall ? chatDate(a.counselorCall.endedAt) : "none yet"}`);
+  lines.push(
+    `Practice call with Jordan (virtual counselor): ${
+      virtualCounselorDone(a.counselorCall) ? `finished ${chatDate(a.counselorCall!.endedAt)}` : a.counselorCall ? "started but not finished" : "none yet"
+    }`,
+  );
 
   const uc = a.ucAccount;
   if (uc) {
@@ -281,14 +294,17 @@ export function applyProgressSummary(profile: Profile, personal: PersonalInfo | 
       (uc.verifiedAt || uc.signedInAt) && "verified / signed in",
       uc.setupAt && "application level and start term set",
       uc.aboutAt && "\"About you\" filled in",
-      uc.piqAt && "Personal Insight answers entered",
+      uc.piqAt && "Personal Insight answers entered (tool closed)",
     ].filter(Boolean);
     lines.push(`UC application account (${uc.email}): ${steps.length ? steps.join("; ") : "started, not created yet"}`);
   } else {
     lines.push("UC application account: not started with the Application assistant");
   }
   const submittedAt = journeyOf(profile).submittedAt;
-  lines.push(`UC application submitted: ${submittedAt ? `yes, ${chatDate(submittedAt)}` : "not yet"}`);
+  lines.push(
+    `UC application filled by assistant through Personal insight: ${uc?.piqAt ? chatDate(uc.piqAt) : "not yet"}`,
+  );
+  lines.push(`UC application marked submitted: ${submittedAt ? `yes, ${chatDate(submittedAt)}` : "not yet"}`);
   lines.push(`UC Statement of Intent to Register: ${a.sirDoneAt ? `submitted ${chatDate(a.sirDoneAt)}` : `not yet (due ${chatDate(sirDeadlineDate(profile, now))})`}`);
 
   if (personal) {

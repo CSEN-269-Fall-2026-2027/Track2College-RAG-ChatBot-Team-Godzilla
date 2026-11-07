@@ -1,4 +1,5 @@
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
+import { campusLinksFor } from "../campusLinks";
 import type { Message } from "../types";
 import { useElapsed, useReveal } from "../hooks";
 import { Markdown } from "./Markdown";
@@ -38,20 +39,36 @@ export const UserMessage = memo(function UserMessage({ message }: { message: Mes
 interface AssistantMessageProps {
   message: Message;
   animate: boolean;
+  /** The student's question this answers, and their major: these pick Theo's campus website buttons. */
+  question: string;
+  major: string;
   busy: boolean;
   onFollowup: (question: string) => void;
   onRetry: () => void;
+  onSaveEssay?: (message: Message) => void;
+  onFillInProfile?: (message: Message) => void;
+  /** The newest message: only its answer buttons are still open. */
+  latest?: boolean;
 }
 
 export const AssistantMessage = memo(function AssistantMessage({
   message,
   animate,
+  question,
+  major,
   busy,
   onFollowup,
   onRetry,
+  onSaveEssay,
+  onFillInProfile,
+  latest,
 }: AssistantMessageProps) {
   const { visible, done } = useReveal(message.content, animate);
   const [copied, setCopied] = useState(false);
+  const campusLinks = useMemo(
+    () => (message.mentorId === "theo" ? campusLinksFor(question, message.content, major) : []),
+    [message.mentorId, message.content, question, major],
+  );
 
   const copy = async () => {
     const sources = message.sources?.length ? `\n\nSources:\n${message.sources.map((s) => `- ${s}`).join("\n")}` : "";
@@ -85,6 +102,39 @@ export const AssistantMessage = memo(function AssistantMessage({
 
       {done && (
         <div className="assistant-extras">
+          {latest && !!message.options?.length && (
+            <section className="quick-replies" aria-label="Answers you can pick">
+              {message.options.map((option) => (
+                <button key={option} className="quick-reply" onClick={() => onFollowup(option)} disabled={busy}>
+                  {option}
+                </button>
+              ))}
+            </section>
+          )}
+
+          {message.fillInProfile && onFillInProfile && (
+            <button className="btn-primary essay-save-btn" onClick={() => onFillInProfile(message)}>
+              Go to Activities &amp; awards
+            </button>
+          )}
+
+          {message.essayFor && onSaveEssay && (
+            <button className="btn-primary essay-save-btn" onClick={() => onSaveEssay(message)}>
+              Save this essay to my profile
+            </button>
+          )}
+
+          {!!campusLinks.length && (
+            <section className="campus-links" aria-label="Campus websites">
+              {campusLinks.map((link) => (
+                <a key={link.campus} className="campus-link" href={link.url} target="_blank" rel="noreferrer noopener">
+                  {link.label}
+                  <ExternalIcon width={13} height={13} />
+                </a>
+              ))}
+            </section>
+          )}
+
           {!!message.sources?.length && (
             <section className="sources" aria-label="Sources">
               <div className="source-list">

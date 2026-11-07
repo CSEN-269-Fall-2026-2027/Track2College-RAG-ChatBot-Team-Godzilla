@@ -87,8 +87,14 @@ end $$;
 -- ---------------------------------------------------------------------------
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('transcripts', 'transcripts', false, 5242880, array['application/pdf', 'text/plain', 'text/csv'])
-on conflict (id) do nothing;
+values (
+  'transcripts',
+  'transcripts',
+  false,
+  5242880,
+  array['application/pdf', 'text/plain', 'text/csv', 'text/markdown', 'application/octet-stream']
+)
+on conflict (id) do update set allowed_mime_types = excluded.allowed_mime_types;
 
 drop policy if exists "Users manage own transcript files" on storage.objects;
 create policy "Users manage own transcript files" on storage.objects

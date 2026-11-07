@@ -41,10 +41,31 @@ export function navigate(route: Route, param?: string) {
   window.location.hash = href(route, param).slice(1);
 }
 
+/** Asked before the page changes; false keeps the student where they are (see EssayTab). */
+let leaveGuard: (() => boolean) | null = null;
+export function setLeaveGuard(guard: (() => boolean) | null) {
+  leaveGuard = guard;
+}
+
+/** Every useLocation hears each hash change, but the guard should only ask once per change. */
+let lastEvent: HashChangeEvent | null = null;
+let lastAllowed = true;
+function mayLeave(event: HashChangeEvent): boolean {
+  if (event !== lastEvent) {
+    lastEvent = event;
+    lastAllowed = leaveGuard?.() ?? true;
+    if (lastAllowed) leaveGuard = null;
+    // Put the address back without firing another change.
+    else window.history.replaceState(null, "", event.oldURL);
+  }
+  return lastAllowed;
+}
+
 export function useLocation(): Location {
   const [location, setLocation] = useState(parseHash);
   useEffect(() => {
-    const onChange = () => {
+    const onChange = (event: HashChangeEvent) => {
+      if (!mayLeave(event)) return;
       setLocation(parseHash());
       document.querySelector(".page-scroll")?.scrollTo({ top: 0 });
     };

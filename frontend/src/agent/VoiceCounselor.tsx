@@ -24,8 +24,8 @@ interface VoiceCounselorProps {
   lastCall?: { endedAt: number; lines: CallLine[] };
   /** Called when a call ends in which the student said something. */
   onEnd: (lines: CallLine[]) => void;
-  /** Called when Jordan saves the student's birthday or birthplace. */
-  onPersonalInfo: (info: PersonalInfo) => void;
+  /** Called when Jordan saves the student's birthday or birthplace (may reject if Supabase save fails). */
+  onPersonalInfo: (info: PersonalInfo) => void | Promise<void>;
   /**
    * "page": intro, join card, and the last conversation below it.
    * "popup" (Review & Apply pop-up, which explains the call itself): no intro, and the last
@@ -174,14 +174,24 @@ function Call({ studentName, profileSummary, ucDeadline, entryYear, lastCall, on
         },
         // Jordan calls these (see backend/voice.py) once the student has answered.
         clientTools: {
-          save_birth_date: ({ birth_date }: { birth_date?: string }) => {
+          save_birth_date: async ({ birth_date }: { birth_date?: string }) => {
             const birthDate = String(birth_date ?? "").trim();
-            if (BIRTH_DATE_RE.test(birthDate)) onPersonalInfoRef.current({ birthDate });
+            if (!BIRTH_DATE_RE.test(birthDate)) return;
+            try {
+              await onPersonalInfoRef.current({ birthDate });
+            } catch {
+              setError("Couldn't save your birthday to your account. You can tell Jordan again, or add it later.");
+            }
           },
-          save_birthplace: ({ birth_country, birth_city }: { birth_country?: string; birth_city?: string }) => {
+          save_birthplace: async ({ birth_country, birth_city }: { birth_country?: string; birth_city?: string }) => {
             const birthCountry = String(birth_country ?? "").trim();
             const birthCity = String(birth_city ?? "").trim();
-            if (birthCountry || birthCity) onPersonalInfoRef.current({ birthCountry, birthCity });
+            if (!birthCountry && !birthCity) return;
+            try {
+              await onPersonalInfoRef.current({ birthCountry, birthCity });
+            } catch {
+              setError("Couldn't save your birthplace to your account. You can tell Jordan again, or add it later.");
+            }
           },
         },
         onMessage: ({ message, role }: MessagePayload) => {
@@ -271,6 +281,8 @@ function Call({ studentName, profileSummary, ucDeadline, entryYear, lastCall, on
   const saved = lastCall?.lines ?? [];
   const initials = (studentName.trim()[0] ?? "Y").toUpperCase();
 
+  const callStatus = <span className="voice-state">{joined && live ? "In a call now" : lastTalked}</span>;
+
   return (
     <section className={`voice voice-${variant}`} aria-label="Talk to a counselor">
       {variant === "page" && (
@@ -286,11 +298,12 @@ function Call({ studentName, profileSummary, ucDeadline, entryYear, lastCall, on
         </div>
         <div className="voice-invite">
           <strong>Jordan · AI counselor</strong>
-          <span className="voice-state">{joined && live ? "In a call now" : lastTalked}</span>
+          {variant !== "popup" && callStatus}
         </div>
         <button ref={joinBtnRef} type="button" className="btn-primary voice-btn" onClick={join} disabled={joined}>
           <VideoIcon width={17} height={17} /> Join video call
         </button>
+        {variant === "popup" && callStatus}
         {details && <div className="voice-details">{details}</div>}
       </div>
 

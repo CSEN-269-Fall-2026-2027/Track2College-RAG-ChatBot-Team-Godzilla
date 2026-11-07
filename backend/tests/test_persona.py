@@ -1,9 +1,33 @@
 import unittest
 
-from persona import extract_mood, mode_prompt, normalize_mode, normalize_persona, persona_prompt
+from persona import extract_mood, needs_campus_notes, number_suggested_essays, mode_prompt, normalize_mode, normalize_persona, persona_prompt
 
 
 class PersonaTests(unittest.TestCase):
+    def test_suggested_essays_get_uc_numbers(self) -> None:
+        reply = (
+            "**Top 4**\n1. **Leadership** – Captaining soccer.\n2. Academic subject – Why CS.\n"
+            "3. **Community (Prompt 7)** – Helping out.\n4. what makes you stand out: You.\n\n"
+            "**Backup**\n- Significant challenge – Something hard. Leadership matters here too."
+        )
+        self.assertEqual(
+            number_suggested_essays("Suggest four essays for me.", reply),
+            "**Top 4**\n1. **Leadership (Prompt #1)** – Captaining soccer.\n2. Academic subject (Prompt #6) – Why CS.\n"
+            "3. **Community (Prompt #7)** – Helping out.\n4. What makes you stand out (Prompt #8): You.\n\n"
+            "**Backup**\n- Significant challenge (Prompt #5) – Something hard. Leadership matters here too.",
+        )
+
+    def test_other_quill_answers_arent_numbered(self) -> None:
+        self.assertEqual(number_suggested_essays("How do I write this?", "Leadership is about people."), "Leadership is about people.")
+
+    def test_theo_leaves_out_campus_notes_when_picking_a_major(self) -> None:
+        self.assertIn("Golden Bears", persona_prompt("theo"))
+        self.assertNotIn("Golden Bears", persona_prompt("theo", campus_notes=False))
+        self.assertIn("Mood:", persona_prompt("theo", campus_notes=False))
+        self.assertFalse(needs_campus_notes(["Can you help me pick a major?", "", ""]))
+        self.assertTrue(needs_campus_notes(["What's Biology like at UC Davis?", "", ""]))
+        self.assertTrue(needs_campus_notes(["What about housing there?", "", ""]))
+
     def test_unknown_persona_adds_nothing(self) -> None:
         self.assertIsNone(normalize_persona("bowser"))
         self.assertEqual(persona_prompt(None), "")

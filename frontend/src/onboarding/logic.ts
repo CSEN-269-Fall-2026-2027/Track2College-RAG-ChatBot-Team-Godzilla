@@ -41,9 +41,9 @@ export const QUESTIONS: QuestionDef[] = [
     prompt: "Have a transcript handy?",
     hint: "Optional — upload if you want, or enter courses later. An unofficial copy from your school portal works.",
   },
-  { id: "gpa", checkpoint: 1, prompt: "What’s your school-reported GPA, if you know it?", hint: "Optional — distinct from any calculated UC GPA estimate." },
+  { id: "gpa", checkpoint: 1, prompt: "What’s your school-reported GPA, if you know it?" },
   { id: "subjects", checkpoint: 2, prompt: "What subjects do you enjoy?" },
-  { id: "majors", checkpoint: 2, prompt: "Any majors you’re curious about?", hint: "“I’m still exploring” is a great answer." },
+  { id: "majors", checkpoint: 2, prompt: "Which major do you plan to apply for?", hint: "Pick one for all your UC campuses. You can change it anytime." },
 ];
 
 export function questionsForCheckpoint(checkpoint: number): QuestionDef[] {
@@ -56,7 +56,7 @@ export function questionErrors(profile: Profile, questionId: string): string[] {
       return profile.basics.firstName.trim() ? [] : ["Add the name you’d like us to use."];
     case "grade":
       if (profile.basics.gradeLevel === "transfer") {
-        return ["This tool supports first-year UC applicants (including gap year). Transfer applicants use a different UC process."];
+        return ["This tool supports first-year UC applicants. Transfer applicants use a different UC process."];
       }
       return profile.basics.gradeLevel ? [] : ["Pick your current grade."];
     case "year":
@@ -145,13 +145,11 @@ export const US_STATES = [
 export const GRADE_OPTIONS: { id: GradeLevel; label: string }[] = [
   { id: "9", label: "9th" },
   { id: "10", label: "10th" },
-  { id: "11", label: "11th (junior)" },
-  { id: "12", label: "12th (senior)" },
-  { id: "gap", label: "Gap year" },
+  { id: "11", label: "11th" },
+  { id: "12", label: "12th" },
 ];
 
 export const SUBJECT_CHIPS = ["English", "Math", "Science", "History", "Art", "Music", "CS / coding", "Languages", "Business", "Other"];
-export const MAJOR_CHIPS = ["Computer Science", "Biology", "Business", "Engineering", "Psychology", "Nursing", "Undecided", "Other"];
 export const CAREER_CHIPS = ["Healthcare", "Tech", "Education", "Arts", "Law / government", "Trades", "Still exploring"];
 export const ACTIVITY_CHIPS = ["Clubs", "Sports", "Job / paid work", "Volunteering", "Personal projects", "Family responsibilities", "Other"];
 export const REGION_CHIPS = ["Stay in-state", "Nearby states", "Anywhere in the U.S.", "Open to other countries", "Not sure yet"];

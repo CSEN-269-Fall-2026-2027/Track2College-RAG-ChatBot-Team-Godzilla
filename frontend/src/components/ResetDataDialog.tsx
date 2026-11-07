@@ -69,7 +69,7 @@ export function ResetDataDialog({ onClose }: { onClose: () => void }) {
           </button>
         </header>
         <p id="reset-desc">
-          This permanently deletes everything saved to your account: your profile, chats, transcripts and uploaded files, course plans,
+          This permanently deletes everything saved to your account: your profile, chats, transcripts and uploaded files,
           essay progress, journey map, and XP. Your login stays, and you'll start over from onboarding. <strong>This can't be undone.</strong>
         </p>
         <form onSubmit={submit}>

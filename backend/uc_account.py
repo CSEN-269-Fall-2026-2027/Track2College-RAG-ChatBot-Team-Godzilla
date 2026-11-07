@@ -58,6 +58,8 @@ CREATE_WAIT_S = 30
 # How often the run looks at the UC page again. Each look is a couple of round trips to the browser.
 TICK_MS = 150
 PIQ_REQUIRED = 4
+# Cloud Browserbase: after the last essay is in, close the session if idle this long.
+CLOUD_IDLE_CLOSE_S = 30
 
 _lock = threading.Lock()
 _runs: dict[str, dict] = {}
@@ -338,12 +340,31 @@ def _drive(
     setup_done = False
     create_error = ""  # Why UC refused the new account, if it did.
     create_clicked_at = 0.0
+    # Cloud only: when the last essay is in, start a grace period then release Browserbase.
+    finished_at: float | None = None
+    is_cloud = _current(run_id, "browser") == "cloud"
 
     def sign_in_instead(reason: str) -> None:
         nonlocal create_error, may_sign_in
         create_error, may_sign_in = reason, True
         _set(run_id, "signing_in", "UC couldn't create that account, so we're trying to sign in instead…")
         page.goto(UC_LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
+
+    def mark_finished(detail: str | None = None) -> None:
+        """Mark the run complete; in cloud mode start the idle countdown to release Browserbase."""
+        nonlocal finished_at
+        with _lock:
+            _runs[run_id]["finished"] = True
+        finished_at = time.monotonic()
+        prior = detail or _current(run_id, "detail") or "Ready for review."
+        if is_cloud:
+            _set(
+                run_id,
+                "piq_done",
+                f"{prior} The cloud browser closes in {CLOUD_IDLE_CLOSE_S} seconds to save session time — close this window when you're ready to continue.",
+            )
+        elif detail:
+            _set(run_id, "piq_done", detail)
 
     if mode == "create":
         try:
@@ -360,6 +381,25 @@ def _drive(
         page.wait_for_timeout(TICK_MS)
         with _lock:
             _runs[run_id]["page_url"] = page.url
+
+        # After the last essay: keep the page open for review. Cloud releases Browserbase after a grace
+        # period; local stays until the student closes the tool (or the Chrome window).
+        if finished_at is not None:
+            if _cancelled(run_id):
+                return
+            if is_cloud and time.monotonic() - finished_at >= CLOUD_IDLE_CLOSE_S:
+                _set(
+                    run_id,
+                    "piq_done",
+                    "Ready for review. Closed the cloud browser to save session time — close this window when you're done.",
+                )
+                try:
+                    page.close()
+                except Exception:  # noqa: BLE001 — session may already be gone
+                    pass
+                return
+            continue
+
         # A verified account never sees UC's code screen again, so a "ZIP code" box isn't one.
         verified = verified or _current(run_id, "verified")
         screen = _screen(page, look_for_code=not verified)
@@ -424,10 +464,11 @@ def _drive(
             else:
                 insight.step()
                 if insight.state == "done" and not _current(run_id, "finished"):
-                    with _lock:
-                        _runs[run_id]["finished"] = True
                     if not piqs:
-                        _set(run_id, "piq_done", "Filled in everything we have. Review it on UC and submit when you're ready.")
+                        mark_finished("Filled in everything we have. Review it on UC and submit when you're ready.")
+                    else:
+                        # _PersonalInsight._finish already set the entered/skipped summary.
+                        mark_finished()
 
 
 # Classify the page and mark code inputs together, avoiding separate sidebar/input checks over CDP.
@@ -751,8 +792,14 @@ class _AboutYou:
                 _set(self.run_id, "needs_you", f"UC didn't move on{': ' + error if error else ''}. Check the page and click Save & continue.")
 
     def _open_next(self, subs: list[dict]) -> None:
-        """Opens the first About you subpage that isn't complete and that we haven't handled yet."""
+        """Opens the next About you subpage we haven't handled this run.
+
+        Incomplete pages first; then complete ones we still need to revisit so updated facts
+        (e.g. a new birthplace from Jordan) overwrite what UC already has.
+        """
         nxt = next((s for s in subs if s["url"] not in self.visited and not uc_sections.is_done(s["status"])), None)
+        if nxt is None:
+            nxt = next((s for s in subs if s["url"] not in self.visited), None)
         if nxt is None:
             if self.state == "filling" or all(uc_sections.is_done(s["status"]) for s in subs):
                 self._finish()
@@ -833,7 +880,11 @@ class _PersonalInsight:
             return
 
         # Answer page for a question we opened: type the saved response and save.
+        # If answering is cleared but we're still here, the student was left to fix a rejected
+        # answer — wait until they leave the page instead of cancelling or crashing on retry.
         if on_answer:
+            if self.answering is None:
+                return
             self._answer()
             return
 
@@ -861,42 +912,55 @@ class _PersonalInsight:
             q = self.pending[0]
             if self.answering is q:
                 # We opened it, but UC came back without it answered: leave it to the student.
-                self._report("skipped", f"{q['title']} (UC didn't save it; please check it)")
-                self.pending.pop(0)
+                self._finish_question(q, "skipped", f"{q['title']} (UC didn't save it; please check it)")
                 continue
             _set(self.run_id, "filling", f"Opening {q['title']}…")
             if uc_sections.open_piq_answer(self.page, q["number"]):
                 self.answering = q
                 self._answer()  # the answer page is open: type it now instead of on the next look
             else:
-                self._report("skipped", f"{q['title']} (couldn't find its Answer or Edit button)")
-                self.pending.pop(0)
+                self._finish_question(q, "skipped", f"{q['title']} (couldn't find its Answer or Edit button)")
             return
         self._finish()
+
+    def _finish_question(self, q: dict, kind: str, text: str) -> None:
+        """Record the outcome for one PIQ and drop it from the queue (safe to call twice)."""
+        self._report(kind, text)
+        if q in self.pending:
+            self.pending.remove(q)
+        if self.answering is q:
+            self.answering = None
 
     def _answer(self) -> None:
         q = self.answering
         if q is None or uc_sections.piq_answer_code(self.page) != f"{q['number'] + 1:02d}":
             # An answer page we didn't open (or a different question): go back without touching it.
             uc_sections.log("on an answer page we didn't open; cancelling")
+            self.answering = None
             uc_sections.cancel_piq_answer(self.page)
+            return
+        if q not in self.pending:
+            # Already recorded (e.g. UC stayed on the page after a rejected save): wait for the student.
+            self.answering = None
             return
         replacing = bool(uc_sections.piq_box_text(self.page).strip())
         _set(self.run_id, "filling", f"{'Updating' if replacing else 'Typing'} your answer to {q['title']}…")
-        if not uc_sections.replace_piq_answer(self.page, q["text"]):
-            self._report("skipped", f"{q['title']} (couldn't enter the answer; please update it yourself)")
-            self.pending.remove(q)
+        try:
+            entered = uc_sections.replace_piq_answer(self.page, q["text"])
+        except Exception as exc:  # noqa: BLE001 — typing can throw if the page navigates mid-edit
+            uc_sections.log(f"couldn't enter {q['title']}: {exc}")
+            entered = False
+        if not entered:
+            self._finish_question(q, "skipped", f"{q['title']} (couldn't enter the answer; please update it yourself)")
             uc_sections.cancel_piq_answer(self.page)
             return
         if uc_sections.save_piq_answer(self.page):
-            self._report("entered", f"{q['title']} (updated)" if replacing else q["title"])
-            self.pending.remove(q)
-        else:
-            error = _visible_error(self.page)
-            self._report("skipped", f"{q['title']} (UC didn't accept it{': ' + error if error else ''})")
-            self.pending.remove(q)
-            uc_sections.show_banner(self.page, f"Track2College: UC didn't accept the {q['title']} answer. Check it and click Save & continue.")
-            _set(self.run_id, "needs_you", f"UC didn't accept your {q['title']} answer. Check it in the UC window.")
+            self._finish_question(q, "entered", f"{q['title']} (updated)" if replacing else q["title"])
+            return
+        error = _visible_error(self.page)
+        self._finish_question(q, "skipped", f"{q['title']} (UC didn't accept it{': ' + error if error else ''})")
+        uc_sections.show_banner(self.page, f"Track2College: UC didn't accept the {q['title']} answer. Check it and click Save & continue.")
+        _set(self.run_id, "needs_you", f"UC didn't accept your {q['title']} answer. Check it in the UC window.")
 
     def _report(self, kind: str, text: str) -> None:
         uc_sections.log(f"PIQ {kind}: {text}")
@@ -906,19 +970,26 @@ class _PersonalInsight:
     def _finish(self) -> None:
         self.state = "done"
         with _lock:
-            _runs[self.run_id]["piq"] = True
             entered = len(_runs[self.run_id]["piq_report"]["entered"])
         uc_sections.log("Personal insight finished")
         summary = f"Entered {entered} personal insight answer{'s' if entered != 1 else ''} on UC."
-        # Exactly the student's four answered (and nothing else): move on with Continue.
+        # All four answered: click Continue, then keep the window open until the student closes the tool.
         answered = set(uc_sections.answered_piq_numbers(self.page))
         if len(self.chosen) == PIQ_REQUIRED and answered == self.chosen:
             if uc_sections.continue_from_piq_questions(self.page):
+                with _lock:
+                    _runs[self.run_id]["piq"] = True
                 _set(self.run_id, "piq_done", f"{summary} All four are in, so we clicked Continue.")
             else:
-                _set(self.run_id, "piq_done", f"{summary} All four are in. Click Continue at the bottom of the page.")
+                with _lock:
+                    _runs[self.run_id]["piq"] = True
+                _set(
+                    self.run_id,
+                    "piq_done",
+                    f"{summary} All four are in. Click Continue at the bottom of the page, then close this window when you're done.",
+                )
         else:
-            _set(self.run_id, "piq_done", f"{summary} UC shows {len(answered)} of 4 answered; check the page before clicking Continue.")
+            _set(self.run_id, "piq_done", f"{summary} UC shows {len(answered)} of 4 answered; check the page before continuing.")
 
 
 def _debug_dump(page, name: str) -> None:

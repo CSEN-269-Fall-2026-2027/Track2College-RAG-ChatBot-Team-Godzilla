@@ -3,8 +3,9 @@ Fills sections of the UC application from what Track2College knows about the stu
 
 Fields are found by their labels, not by UC's page structure, so a field is only filled
 when one of our rules clearly matches its label and we have an exact answer for it.
-Everything required that we can't answer is reported back for the student to fill in.
-Nothing is guessed: no value, no fill.
+Already-filled fields are updated when our answer differs (so a new birthplace from Jordan
+overwrites a stale city on UC). Everything required that we can't answer is reported back
+for the student to fill in. Nothing is guessed: no value, no fill.
 """
 
 from __future__ import annotations
@@ -49,12 +50,19 @@ ABOUT_YOU_RULES: list[tuple[re.Pattern, str]] = [
 ]
 
 # Questions with a fixed answer we always give (label pattern → option to pick), checked
-# before the student-fact rules. "Have you ever had a different legal name?" isn't here:
-# UC pre-selects "No", and pre-answered fields are left alone.
+# before the student-fact rules. Re-applied every run so a prior Yes gets corrected.
 ABOUT_YOU_FIXED: list[tuple[re.Pattern, str]] = [
     (re.compile(r"do you have a lived name", re.I), "No"),
-    (re.compile(r"attended a california public school", re.I), "Yes"),
+    (re.compile(r"different legal name", re.I), "No"),
+    (re.compile(r"attended a california public school", re.I), "No"),
 ]
+
+# Never fill or report these (CA SSID and its consent checkbox). Setting public school to No
+# usually hides them; still ignore if a prior Yes left the layer open for a moment.
+ABOUT_YOU_IGNORE = re.compile(
+    r"ca ssid|authorize the release of my ca ssid|isagreereleasessid",
+    re.I,
+)
 
 # Fields that only make sense under a particular question: "City" under "Where were you born?"
 # is the birth city, never the home city. (question pattern, [(label pattern, fact key)])
@@ -151,16 +159,19 @@ _SCAN_JS = r"""() => {
       const question = clean(fs ? (fs.querySelector('legend') || fs).innerText.split('\n')[0] : e.name);
       const key = e.name || question;
       if (!groups[key]) { groups[key] = { idx: [], kind: 'radio', label: question, context: contextOf(e), options: [],
-        required: e.required || /\*/.test(question), empty: true }; out.push(groups[key]); }
+        required: e.required || /\*/.test(question), empty: true, value: '' }; out.push(groups[key]); }
       groups[key].idx.push(i); groups[key].options.push(labelOf(e) || e.value);
-      if (e.checked) groups[key].empty = false;
+      if (e.checked) { groups[key].empty = false; groups[key].value = labelOf(e) || e.value; }
     } else {
       const label = labelOf(e);
       const kind = e.tagName === 'SELECT' ? 'select' : type === 'checkbox' ? 'checkbox' : 'text';
+      const value = kind === 'select' ? clean(e.options[e.selectedIndex]?.label || e.value || '')
+        : kind === 'checkbox' ? (e.checked ? 'Yes' : '')
+        : clean(e.value);
       const empty = kind === 'select' ? (e.selectedIndex <= 0 && !e.value) || /^(select|choose|--)/i.test(e.options[e.selectedIndex]?.label || '')
         : kind === 'checkbox' ? !e.checked : !e.value.trim();
       out.push({ idx: [i], kind, label, context: contextOf(e), required: e.required || e.getAttribute('aria-required') === 'true' || /\*/.test(label),
-        empty, options: kind === 'select' ? [...e.options].map(o => clean(o.label)) : [] });
+        empty, value, options: kind === 'select' ? [...e.options].map(o => clean(o.label)) : [] });
     }
     i++;
   }
@@ -196,7 +207,11 @@ def current_section(page) -> str:
 def fill_page(
     page, rules: list[tuple[re.Pattern, str]], facts: dict[str, str], fixed: list[tuple[re.Pattern, str]] = ()
 ) -> dict:
-    """Fills what we can on the current page; returns what was filled and what's still needed."""
+    """Fills what we can on the current page; returns what was filled and what's still needed.
+
+    Already-filled boxes are updated when Track2College has a different answer (e.g. a new
+    birthplace from the counselor call), so a re-run doesn't leave stale UC values alone.
+    """
     filled: list[dict] = []
     check: list[str] = []
     facts = with_birth_parts(facts)
@@ -210,17 +225,23 @@ def fill_page(
         page.wait_for_timeout(250)
 
     # Re-scan: whatever is required and still empty is the student's to answer.
-    missing = [_short(f["label"]) for f in page.evaluate(_SCAN_JS) if f["required"] and f["empty"] and f["label"]]
+    missing = [
+        _short(f["label"])
+        for f in page.evaluate(_SCAN_JS)
+        if f["required"] and f["empty"] and f["label"] and not ABOUT_YOU_IGNORE.search(f["label"])
+    ]
     return {"filled": filled, "missing": list(dict.fromkeys(missing)), "check": check}
 
 
 def _fill_pass(page, rules, facts: dict[str, str], fixed, filled: list[dict], check: list[str]) -> None:
-    """One look at the page: fills every empty field we have an answer for."""
+    """One look at the page: fills (or corrects) every field we have an answer for."""
     for field in page.evaluate(_SCAN_JS):
-        if not field["empty"] or not field["label"]:
+        if not field["label"] or ABOUT_YOU_IGNORE.search(field["label"]):
             continue
         answer = next((a for pattern, a in fixed if pattern.search(field["label"])), None)
         if answer:
+            if _answers_match(field, None, field.get("value") or "", answer):
+                continue
             try:
                 shown = _pick_option(page, field, answer)
             except Exception as exc:  # noqa: BLE001 — leave it to the student
@@ -241,6 +262,8 @@ def _fill_pass(page, rules, facts: dict[str, str], fixed, filled: list[dict], ch
         value = (facts.get(key) or "").strip() if key else ""
         if not value:
             continue
+        if _answers_match(field, key, field.get("value") or "", value):
+            continue
         try:
             shown = _fill_field(page, field, key, value)
         except Exception as exc:  # noqa: BLE001 — leave this field to the student, keep going
@@ -250,6 +273,25 @@ def _fill_pass(page, rules, facts: dict[str, str], fixed, filled: list[dict], ch
             filled.append({"label": _short(field["label"]), "value": shown})
             if key in CHECK_FACTS:
                 check.append(CHECK_FACTS[key])
+
+
+def _answers_match(field: dict, key: str | None, current: str, wanted: str) -> bool:
+    """True when the page already shows our answer (so we can leave the field alone)."""
+    current, wanted = (current or "").strip(), (wanted or "").strip()
+    if not current or not wanted:
+        return False
+    if field["kind"] in ("radio", "select"):
+        options = field.get("options") or []
+        matched = _match_option(options, key, wanted) if key else next(
+            (o for o in options if o.strip().lower() == wanted.lower()),
+            "",
+        )
+        return bool(matched) and matched.strip().lower() == current.lower()
+    if key == "birth_country":
+        return COUNTRY_ALIASES.get(current.lower(), current.lower()) == COUNTRY_ALIASES.get(
+            wanted.lower(), wanted.lower()
+        )
+    return current.lower() == wanted.lower()
 
 
 def save_and_continue(page) -> bool:
@@ -656,6 +698,7 @@ def replace_piq_answer(page, text: str) -> bool:
 
 _REPLACE_ANSWER_JS = """(paragraphs) => {
   const box = document.getElementById('answerBox');
+  if (!box) return '';
   box.focus();
   document.execCommand('selectAll');
   document.execCommand('delete');

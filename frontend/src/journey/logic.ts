@@ -1,18 +1,36 @@
+import { virtualCounselorDone } from "../agent/callState";
 import { COLLEGE_NAMES } from "../colleges";
-import type { ActivityCategory, PiqStatus, Profile, TargetCollege, UcJourneyState } from "../types";
-import { hasAllDrafts, readyToGenerate } from "./piqs";
+import type { ActivityCategory, ActivitySectionId, ActivitySectionState, AgentState, PiqStatus, Profile, TargetCollege, UcJourneyState } from "../types";
+import { chosenPiqs, essayDone, essaysDoneCount } from "./piqs";
 
 /**
  * UC Journey Map: six checkpoints whose progress is derived from the student's
  * saved profile. Only PIQ statuses, manual review ticks, activity-question
- * answers and the explicit submission record live in `profile.ucJourney`.
+ * answers and the UC agent milestones live in `profile.ucJourney`.
  */
+
+/** True once Track2College has a saved UC login that UC accepted (verified or signed in). */
+export function ucAccountReady(uc: AgentState["ucAccount"] | undefined): boolean {
+  return !!(uc?.email && uc.password && (uc.verifiedAt || uc.signedInAt));
+}
 
 export const PIQ_WORD_LIMIT = 350;
 export const PIQ_REQUIRED = 4;
 /** UC activity/award description limit, in characters. */
 export const ACTIVITY_DESC_LIMIT = 350;
 export const UC_APPLY_URL = "https://apply.universityofcalifornia.edu/";
+
+/** One plain sentence on what each PIQ is really about, for Quill's opening line. */
+export const PIQ_ONE_LINERS: Record<string, string> = {
+  leadership: "It's about a time you made things better for a group, with or without a title.",
+  creativity: "It's about how you solve problems or make things in your own way.",
+  talent: "It's about something you're really good at and how you built it.",
+  opportunity: "It's about a chance you made the most of, or a school barrier you worked around.",
+  challenge: "It's about the hardest thing you've faced and what you did about it.",
+  subject: "It's about a subject you love and how you've taken it beyond class.",
+  community: "It's about what you've done to make your school or community better.",
+  standout: "It's about what makes you different that the rest of your application doesn't show.",
+};
 
 export const PIQ_PROMPTS = [
   // Exact wording from UC Admissions (admission.universityofcalifornia.edu → Personal insight questions).
@@ -27,8 +45,8 @@ export const PIQ_PROMPTS = [
 ] as const;
 
 /**
- * Direct yes/no (or how-many) activity questions the story asks, in order.
- * A "yes" adds one entry to the activities list, then one optional details question.
+ * The activity questions the story used to ask. Milo's chat replaced them; students who finished
+ * them still count as done with this step.
  */
 export const ACTIVITY_QUESTIONS: {
   id: string;
@@ -46,6 +64,61 @@ export const ACTIVITY_QUESTIONS: {
   { id: "work", name: "Job / family responsibilities", category: "work", question: "do you have a job, or regular family responsibilities like caring for siblings or helping at a family business? UC counts these too.", counted: false, details: "What do you do, and about how many hours a week?" },
 ];
 
+/** Milo's chapter, in order. Each has the same format: how many, a chat with Milo, then Done. */
+export const ACTIVITY_SECTIONS: { id: ActivitySectionId; category: ActivityCategory; question: string; turnId: string }[] = [
+  { id: "activities", category: "extracurricular", question: "are there any activities you want to report (sports, clubs, band)?", turnId: "activity-count" },
+  { id: "volunteering", category: "volunteering", question: "do you do any volunteering?", turnId: "volunteering-count" },
+  { id: "job", category: "work", question: "do you have a job?", turnId: "job-count" },
+  { id: "awards", category: "award", question: "do you have any honors or awards to report?", turnId: "awards-count" },
+];
+
+const SECTION_LABEL: Record<ActivitySectionId, string> = {
+  activities: "Activities",
+  volunteering: "Volunteering",
+  job: "Jobs",
+  awards: "Honors and awards",
+};
+
+export function activitySection(j: UcJourneyState, id: ActivitySectionId): ActivitySectionState {
+  return id === "activities" ? { count: j.activityCount, notes: j.activityNotes } : (j.activitySections?.[id] ?? {});
+}
+
+/** Replaces one question's number and saved chat. */
+export function withActivitySection(j: UcJourneyState, id: ActivitySectionId, state: ActivitySectionState): UcJourneyState {
+  if (id !== "activities") return { ...j, activitySections: { ...j.activitySections, [id]: state } };
+  const { activityCount: _count, activityNotes: _notes, ...rest } = j;
+  return {
+    ...rest,
+    ...(state.count !== undefined ? { activityCount: state.count } : {}),
+    ...(state.notes !== undefined ? { activityNotes: state.notes } : {}),
+  };
+}
+
+/** Answered with 0, or the student hit Done on Milo's chat. */
+export function activitySectionDone(j: UcJourneyState, id: ActivitySectionId): boolean {
+  const { count, notes } = activitySection(j, id);
+  return count === 0 || notes !== undefined;
+}
+
+/** How many this student already has in this section of their list. */
+export function activitySectionEntries(profile: Profile, id: ActivitySectionId): number {
+  const category = ACTIVITY_SECTIONS.find((s) => s.id === id)!.category;
+  const listed = profile.activities.filter((a) => a.category === category).length;
+  return id === "awards" ? listed + profile.awards.length : listed;
+}
+
+/** Answered with Milo, or already on the student's list, so there's nothing to ask. */
+export function activitySectionAnswered(profile: Profile, id: ActivitySectionId): boolean {
+  return activitySectionDone(journeyOf(profile), id) || activitySectionEntries(profile, id) > 0;
+}
+
+/** Restarting Milo's chat clears the number for the question in progress. Finished questions stay. */
+export function clearOpenActivityAnswer(profile: Profile): Profile {
+  const j = journeyOf(profile);
+  const open = ACTIVITY_SECTIONS.find((s) => !activitySectionAnswered(profile, s.id));
+  return open && activitySection(j, open.id).count !== undefined ? { ...profile, ucJourney: withActivitySection(j, open.id, {}) } : profile;
+}
+
 export function activitySurveyDone(j: UcJourneyState) {
   return ACTIVITY_QUESTIONS.every((q) => {
     const a = j.activitySurvey?.[q.id];
@@ -58,6 +131,7 @@ export function activitiesStatus(profile: Profile) {
   const j = journeyOf(profile);
   const acts = profile.activities;
   const answered =
+    ACTIVITY_SECTIONS.every((s) => activitySectionAnswered(profile, s.id)) ||
     activitySurveyDone(j) ||
     !!j.activitiesReviewed ||
     // Lists finished on the Profile page (or before the question flow existed) count too.
@@ -66,16 +140,15 @@ export function activitiesStatus(profile: Profile) {
   return { answered, fits, done: answered && fits };
 }
 
+/** Starts the activities step over: everything told to Milo and the whole list and awards go. */
+export function resetActivitiesStep(profile: Profile): Profile {
+  const { activityCount: _count, activityNotes: _notes, activitySections: _sections, activitySurvey: _survey, activitiesReviewed: _reviewed, ...rest } = journeyOf(profile);
+  return { ...profile, activities: [], awards: [], ucJourney: rest };
+}
+
 export const REVIEW_MANUAL = [
   { id: "supplements", label: "Checked campus or major supplements", detail: "Some majors ask for extra steps (portfolios, auditions, supplemental questions). Check each campus's major page." },
   { id: "fees", label: "Planned application fees or a fee waiver", detail: "UC charges a fee per campus; eligible students can get a fee waiver for up to four campuses inside the application." },
-] as const;
-
-export const FOLLOW_UPS = [
-  { id: "portals", label: "Watch your email and set up each campus portal" },
-  { id: "aid", label: "Submit the FAFSA or California Dream Act Application" },
-  { id: "grades", label: "Keep grades up and report any changes to UC" },
-  { id: "decisions", label: "Track admission decisions and reply by the deadline" },
 ] as const;
 
 export function emptyJourney(): UcJourneyState {
@@ -125,10 +198,9 @@ export interface Checkpoint {
 export function computeJourney(profile: Profile, sections: Record<string, number>, academicStarted = false) {
   const j = journeyOf(profile);
   const ucs = profile.colleges.filter(isUc);
-  const acts = profile.activities;
   const activities = activitiesStatus(profile);
   const chosen = Object.entries(j.piqs).slice(0, PIQ_REQUIRED);
-  const ready = chosen.filter(([, s]) => s === "ready").length;
+  const written = essaysDoneCount(profile);
   const academicsReady = academicStarted || sections.academics >= 1;
 
   const raw: Omit<Checkpoint, "done" | "total" | "complete" | "summary">[] = [
@@ -140,7 +212,7 @@ export function computeJourney(profile: Profile, sections: Record<string, number
         { id: "basics", label: "Student information", done: sections.basics >= 1, detail: "Name, grade, graduation year, school, and state." },
         {
           id: "academics",
-          label: "Start academic history",
+          label: "Add your GPA or courses",
           done: academicsReady,
           detail: "Add courses and/or a reported GPA. An uploaded file alone does not finish this step.",
         },
@@ -151,10 +223,10 @@ export function computeJourney(profile: Profile, sections: Record<string, number
       title: "Choose UCs",
       short: "Campuses",
       tasks: [
-        { id: "campus", label: "Save at least one UC campus", done: ucs.length > 0, detail: `${ucs.length} of 9 campuses saved` },
+        { id: "campus", label: "Pick your UC campuses", done: ucs.length > 0, detail: `${ucs.length} of 9 campuses saved` },
         {
           id: "majors",
-          label: "Choose your intended major",
+          label: "Choose your major",
           done: !!profile.goals.intendedMajor,
           detail: profile.goals.intendedMajor ? `${profile.goals.intendedMajor} at every campus` : "One major for all your UC campuses",
         },
@@ -165,38 +237,15 @@ export function computeJourney(profile: Profile, sections: Record<string, number
       title: "Work on Activities List",
       short: "Activities",
       tasks: [
-        {
-          id: "add",
-          label: "Answer the activity questions",
-          done: activities.answered,
-          detail: `${acts.length} of up to 20 entries · no quota required`,
-        },
-        {
-          id: "limit",
-          label: "Descriptions fit UC's limit",
-          done: activities.fits,
-          detail: `UC allows ${ACTIVITY_DESC_LIMIT} characters per activity.`,
-        },
-        {
-          id: "basics",
-          label: "Role and time for every listed activity",
-          done: acts.length > 0 && acts.every((a) => a.role.trim() && a.hoursPerWeek.trim()),
-          detail: "Hours/week and weeks/year where the category asks for them.",
-          optional: true,
-        },
-        {
-          id: "impact",
-          label: "Describe responsibilities and impact",
-          done: acts.length > 0 && acts.every((a) => a.description.trim()),
-          detail: "What you did, what you contributed, and what changed.",
-          optional: true,
-        },
-        {
-          id: "awards",
-          label: "Add honors and awards",
-          done: profile.awards.length > 0 || acts.some((a) => a.category === "award"),
-          optional: true,
-        },
+        // One line per question with its answer. Students who finished another way (the old questions,
+        // or the Profile page) still get every check.
+        ...ACTIVITY_SECTIONS.map((s) => {
+          const entries = activitySectionEntries(profile, s.id);
+          const count = activitySection(j, s.id).count ?? (entries || undefined);
+          const answer = count === undefined ? "" : `: ${count >= 3 ? "3+" : count}`;
+          return { id: s.id, label: `${SECTION_LABEL[s.id]}${answer}`, done: activities.answered || activitySectionAnswered(profile, s.id) };
+        }),
+        ...(activities.fits ? [] : [{ id: "limit", label: `Shorten descriptions to ${ACTIVITY_DESC_LIMIT} characters`, done: false }]),
       ],
     },
     {
@@ -204,26 +253,37 @@ export function computeJourney(profile: Profile, sections: Record<string, number
       title: "Four Essays",
       short: "PIQs",
       tasks: [
-        { id: "choose", label: "Choose four Personal Insight Questions", done: chosen.length >= PIQ_REQUIRED, detail: `${chosen.length} of 4 chosen` },
-        { id: "details", label: "Share personal details Quill can't find in your activities", done: readyToGenerate(profile), detail: "Only for questions about your personal life.", optional: true },
-        { id: "drafts", label: "Generate your four drafts", done: hasAllDrafts(profile), detail: "Written automatically once your activities are done · Profile → Essays.", optional: true },
-        { id: "ready", label: "Get all four responses ready", done: chosen.length >= PIQ_REQUIRED && ready >= PIQ_REQUIRED, detail: `${ready} of 4 ready · ${PIQ_WORD_LIMIT} words max each` },
+        { id: "choose", label: "Choose four essay topics", done: chosen.length >= PIQ_REQUIRED, detail: `${chosen.length} of 4 chosen` },
+        // One line per essay, in order.
+        ...Array.from({ length: PIQ_REQUIRED }, (_, i) => {
+          const id = chosenPiqs(profile)[i];
+          const title = PIQ_PROMPTS.find((q) => q.id === id)?.title;
+          const done = !!id && essayDone(profile, id);
+          return { id: `essay-${i + 1}`, label: `Essay ${i + 1}${title ? ` (${title})` : ""}: ${done ? "Done" : "Not done"}`, done };
+        }),
       ],
     },
   ];
 
-  const prior = raw.map((c) => c.tasks.filter((t) => !t.optional).every((t) => t.done));
   raw.push({
     id: "review",
     title: "Review & Apply",
     short: "Apply",
     tasks: [
-      { id: "academics", label: "Academic history started", done: academicsReady },
-      { id: "selections", label: "Campus and major selections", done: prior[1] },
-      { id: "activities", label: "Activities list ready", done: prior[2] },
-      { id: "piqs", label: "Four PIQs ready", done: prior[3] },
-      ...REVIEW_MANUAL.map((m) => ({ id: m.id, label: m.label, detail: m.detail, done: !!j.checks[m.id] })),
-      { id: "submitted", label: "Submitted on the official UC application", done: j.submittedAt !== null, detail: "Only you can record this." },
+      {
+        id: "virtualCounselor",
+        label: "Met with the virtual counselor",
+        done: virtualCounselorDone(j.agent?.counselorCall),
+      },
+      {
+        id: "emailCounselor",
+        label: "Emailed your counselor",
+        done: !!j.agent?.counselorEmail?.sentAt,
+      },
+      // Saved login that UC accepted (verified code or a successful sign-in).
+      { id: "account", label: "Created your UC account", done: !!ucAccountReady(j.agent?.ucAccount) },
+      // Agent finished Personal insight (committed when the student closes the tool), or they marked submission by hand.
+      { id: "submitted", label: "Applied to the UCs", done: !!j.agent?.ucAccount?.piqAt || j.submittedAt !== null },
     ],
   });
 
@@ -252,9 +312,8 @@ export function computeJourney(profile: Profile, sections: Record<string, number
   const checkpoints: Checkpoint[] = raw.map((c) => {
     const counted = c.tasks.filter((t) => !t.optional);
     const done = counted.filter((t) => t.done).length;
-    // Review & Apply finishes only when the student records submission — never from the checklist alone.
-    const complete = c.id === "review" ? j.submittedAt !== null : done === counted.length;
-    const summary = c.id === "essays" ? `${ready} of 4 ready` : `${done} of ${counted.length} tasks`;
+    const complete = done === counted.length;
+    const summary = c.id === "essays" ? `${written} of 4 done` : `${done} of ${counted.length} tasks`;
     return { ...c, done, total: counted.length, complete, summary };
   });
 
