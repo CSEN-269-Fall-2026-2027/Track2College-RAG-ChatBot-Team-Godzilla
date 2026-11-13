@@ -194,10 +194,13 @@ function TranscriptView({ transcript, transcripts, onSelect, onChange, onRemove,
   }, [transcript.id, transcript.school, transcript.reportedGpa.unweighted, transcript.reportedGpa.weighted, update]);
 
   // Older uploads can hold rows the reader repeated word for word; keep one of each.
+  // Blank manual rows share an empty name key — leave them alone so "Add a course" works.
   useEffect(() => {
     const seen = new Set<string>();
     const unique = transcript.courses.filter((c) => {
-      const key = [c.name.trim().toLowerCase(), c.gradeLevel, c.term.trim().toLowerCase(), c.grade.trim().toUpperCase()].join("|");
+      const name = c.name.trim().toLowerCase();
+      if (!name) return true;
+      const key = [name, c.gradeLevel, c.term.trim().toLowerCase(), c.grade.trim().toUpperCase()].join("|");
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
