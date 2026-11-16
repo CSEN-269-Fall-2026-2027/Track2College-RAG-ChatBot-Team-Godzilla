@@ -38,3 +38,41 @@ those answers.
 The `transcripts` storage bucket must allow `text/markdown` (and
 `application/octet-stream`) so `.md` uploads match the Academic history UI.
 Re-running `schema.sql` updates an existing bucket's `allowed_mime_types`.
+
+## Google connect
+
+Optional. Students keep signing in with email/password. At the end of onboarding
+they can **Connect Google** (or skip). That OAuth consent grants readonly access
+to Gmail, Calendar, and Drive; refresh tokens are encrypted and stored only on
+the server (`google_connections`). The chatbot does not use this data yet.
+
+### Google Cloud Console
+
+1. Create or open a Google Cloud project.
+2. Enable the **Gmail API**, **Google Calendar API**, and **Google Drive API**.
+3. Configure the OAuth consent screen (External is fine for testing). Add your
+   account as a **test user** while the app is in Testing.
+4. Create an **OAuth 2.0 Client ID** of type **Web application**.
+5. Add authorized redirect URI:
+   `http://127.0.0.1:8000/google/oauth/callback`
+   (or whatever you set as `GOOGLE_REDIRECT_URI`).
+6. Copy the client ID and secret into the root `.env` as `GOOGLE_CLIENT_ID` and
+   `GOOGLE_CLIENT_SECRET`. Set `GOOGLE_REDIRECT_URI`, `GOOGLE_FRONTEND_ORIGIN`
+   (usually `http://localhost:5500`), and `GOOGLE_TOKEN_ENCRYPTION_KEY`
+   (generate with the command in `.env.example`).
+7. Add `SUPABASE_SERVICE_ROLE_KEY` from Supabase → Project Settings → API.
+   Backend-only; never expose it as a `VITE_*` variable.
+8. Re-run [schema.sql](schema.sql) so `google_connections` exists, then restart
+   the API.
+
+### Scopes and verification
+
+Readonly scopes requested in one consent:
+
+- `gmail.readonly` (restricted — public production needs Google’s restricted-scope
+  verification / security assessment)
+- `calendar.readonly` and `drive.readonly` (sensitive — usually need verification
+  for a public OAuth app)
+
+While the consent screen is in Testing, only listed test users can connect.
+Shipping broadly with Gmail readonly requires Google’s verification process.

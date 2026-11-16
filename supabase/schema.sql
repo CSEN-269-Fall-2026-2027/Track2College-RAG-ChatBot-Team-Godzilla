@@ -34,6 +34,20 @@ create table if not exists public.personal_info (
   updated_at timestamptz not null default now()
 );
 
+-- Google OAuth refresh tokens for Gmail / Calendar / Drive (readonly).
+-- Ciphertext is written only by the FastAPI backend with the service-role key.
+-- No policies for authenticated/anon: RLS stays on, so the browser cannot read tokens.
+create table if not exists public.google_connections (
+  user_id                   uuid primary key references auth.users (id) on delete cascade,
+  google_email              text,
+  scopes                    text[] not null default '{}'::text[],
+  refresh_token_ciphertext  text not null,
+  token_uri                 text not null default 'https://oauth2.googleapis.com/token',
+  connected_at              timestamptz not null default now(),
+  updated_at                timestamptz not null default now(),
+  revoked_at                timestamptz
+);
+
 -- ---------------------------------------------------------------------------
 -- Per-user collections
 -- ---------------------------------------------------------------------------
@@ -81,6 +95,11 @@ begin
     );
   end loop;
 end $$;
+
+-- google_connections: RLS on, no grants to authenticated/anon. Service role only.
+alter table public.google_connections enable row level security;
+drop policy if exists "Users manage own rows" on public.google_connections;
+revoke all on public.google_connections from anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Private storage for original transcript files, stored at <user_id>/<transcript_id>/<file>.

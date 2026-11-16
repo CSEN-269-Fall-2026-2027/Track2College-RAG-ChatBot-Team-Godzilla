@@ -318,10 +318,17 @@ class ApiRequiresSignInTest(unittest.TestCase):
                 yield method, re.sub(r"\{[^}]+\}", "x", route.path)
 
     def test_every_route_but_health_and_docs_rejects_logged_out_requests(self):
-        public = {"/health", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"}
+        # /google/oauth/callback is public: Google redirects the browser here with ?code&state (no Bearer).
+        public = {"/health", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect", "/google/oauth/callback"}
         checked = 0
         for method, path in self._routes():
-            r = requests.request(method, f"http://127.0.0.1:{self.port}{path}", json={}, timeout=10)
+            r = requests.request(
+                method,
+                f"http://127.0.0.1:{self.port}{path}",
+                json={},
+                timeout=10,
+                allow_redirects=False,
+            )
             if path in public:
                 self.assertLess(r.status_code, 400, path)
             else:

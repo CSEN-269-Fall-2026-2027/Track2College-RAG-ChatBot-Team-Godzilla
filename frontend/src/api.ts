@@ -40,6 +40,17 @@ function authHeaders(): Record<string, string> {
   return headers;
 }
 
+async function readError(response: Response): Promise<string> {
+  let detail = `The server returned an error (${response.status}).`;
+  try {
+    const body = await response.json();
+    if (typeof body?.detail === "string") detail = body.detail;
+  } catch {
+    // Non-JSON error body; keep the status-based message.
+  }
+  return detail;
+}
+
 async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = { ...authHeaders(), "Content-Type": "application/json" };
 
@@ -51,18 +62,40 @@ async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promi
     throw new ApiError(`Couldn't reach the Track2College server at ${API_BASE}. Make sure the API is running.`, true);
   }
 
-  if (!response.ok) {
-    let detail = `The server returned an error (${response.status}).`;
-    try {
-      const body = await response.json();
-      if (typeof body?.detail === "string") detail = body.detail;
-    } catch {
-      // Non-JSON error body; keep the status-based message.
-    }
-    throw new ApiError(detail);
-  }
-
+  if (!response.ok) throw new ApiError(await readError(response));
   return response.json();
+}
+
+async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, { method: "GET", headers: authHeaders(), signal });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new ApiError(`Couldn't reach the Track2College server at ${API_BASE}. Make sure the API is running.`, true);
+  }
+  if (!response.ok) throw new ApiError(await readError(response));
+  return response.json();
+}
+
+export interface GoogleConnectionStatus {
+  connected: boolean;
+  googleEmail: string | null;
+  scopes: string[];
+  connectedAt: string | null;
+  configured: boolean;
+}
+
+export function getGoogleStatus(signal?: AbortSignal): Promise<GoogleConnectionStatus> {
+  return get("/google/status", signal);
+}
+
+export function startGoogleOAuth(signal?: AbortSignal): Promise<{ url: string }> {
+  return get("/google/oauth/start", signal);
+}
+
+export function disconnectGoogle(signal?: AbortSignal): Promise<{ ok: boolean }> {
+  return post("/google/disconnect", {}, signal);
 }
 
 export function sendChat(

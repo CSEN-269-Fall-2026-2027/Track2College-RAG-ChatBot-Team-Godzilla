@@ -27,7 +27,9 @@ from activities import extract_activities
 import uc_account
 from auth import Student, current_student
 from fastapi import Header
+from fastapi.responses import RedirectResponse
 from counselor import draft_counselor_email, find_counselors
+import google_oauth
 
 app = FastAPI(
     title="Track2College Chatbot API",
@@ -675,6 +677,60 @@ def agent_uc_account_code(run_id: str, request: UcAccountCodeRequest, student: S
         uc_account.submit_code(run_id, student.id, request.code)
     except uc_account.UcAccountError as error:
         raise HTTPException(status_code=400, detail=str(error))
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Connect Google (readonly Gmail / Calendar / Drive). Tokens only; chat unused.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/google/oauth/start")
+def google_oauth_start(student: Student = Depends(current_student)) -> dict:
+    """Returns the Google consent URL for the signed-in student."""
+    try:
+        return {"url": google_oauth.authorization_url(student.id)}
+    except google_oauth.GoogleOAuthError as error:
+        raise HTTPException(status_code=503, detail=str(error))
+
+
+@app.get("/google/oauth/callback")
+def google_oauth_callback(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
+    """Google redirects here after consent. Stores an encrypted refresh token, then sends the browser home."""
+    if error:
+        return RedirectResponse(google_oauth.frontend_redirect(ok=False, detail="Google connect was cancelled."), status_code=302)
+    if not code or not state:
+        return RedirectResponse(google_oauth.frontend_redirect(ok=False, detail="Google connect was incomplete."), status_code=302)
+    try:
+        google_oauth.complete_oauth(code, state)
+    except google_oauth.GoogleOAuthError as exc:
+        return RedirectResponse(google_oauth.frontend_redirect(ok=False, detail=str(exc)), status_code=302)
+    return RedirectResponse(google_oauth.frontend_redirect(ok=True), status_code=302)
+
+
+@app.get("/google/status")
+def google_status(student: Student = Depends(current_student)) -> dict:
+    """Whether this student has a live Google connection (no secrets)."""
+    try:
+        status = google_oauth.status_for(student.id)
+    except google_oauth.GoogleOAuthError as error:
+        raise HTTPException(status_code=503, detail=str(error))
+    return {
+        "connected": status.connected,
+        "googleEmail": status.google_email,
+        "scopes": list(status.scopes),
+        "connectedAt": status.connected_at,
+        "configured": google_oauth.configured(),
+    }
+
+
+@app.post("/google/disconnect")
+def google_disconnect(student: Student = Depends(current_student)) -> dict:
+    """Revoke at Google when possible and clear the stored refresh token."""
+    try:
+        google_oauth.disconnect(student.id)
+    except google_oauth.GoogleOAuthError as error:
+        raise HTTPException(status_code=503, detail=str(error))
     return {"ok": True}
 
 

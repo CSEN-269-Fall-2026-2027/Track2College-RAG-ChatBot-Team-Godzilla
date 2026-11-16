@@ -25,6 +25,11 @@ See [Supabase setup](supabase/README.md) for details.
 ElevenLabs is only needed for voice. Browserbase is only needed for cloud browser
 mode. Leave their settings blank if you don't use those features.
 
+**Connect Google** (optional) lets students authorize readonly Gmail, Calendar, and
+Drive during onboarding so the API can read that data later. It does not replace
+Supabase email sign-in. Set the `GOOGLE_*` and `SUPABASE_SERVICE_ROLE_KEY` values
+in `.env` and follow [Google connect](supabase/README.md#google-connect).
+
 ## Run
 
 Start the API in one terminal:

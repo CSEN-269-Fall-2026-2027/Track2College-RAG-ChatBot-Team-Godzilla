@@ -5,6 +5,7 @@ import { useProfile, type SaveState } from "../profile";
 import type { Theme } from "../App";
 import type { Profile } from "../types";
 import { JourneyPath } from "./JourneyPath";
+import { GoogleConnectPanel } from "./GoogleConnectPanel";
 import { QuestionFields, SummaryList } from "./QuestionFields";
 import {
   CHECKPOINT_COUNT,
@@ -16,6 +17,8 @@ import {
   resumeCheckpoint,
   setCheckpoint,
 } from "./logic";
+
+type OnboardingPhase = "questions" | "google" | "summary";
 
 interface OnboardingPageProps {
   theme: Theme;
@@ -35,16 +38,21 @@ export function OnboardingPage({ theme, onToggleTheme, onFinished }: OnboardingP
   const { profile, update, saveState } = useProfile();
   const [checkpoint, setCp] = useState(() => resumeCheckpoint(profile));
   const [qIndex, setQIndex] = useState(0);
-  const [summary, setSummary] = useState(false);
+  const [phase, setPhase] = useState<OnboardingPhase>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("google") === "connected" || params.get("google") === "error" ? "google" : "questions";
+  });
   const [errors, setErrors] = useState<string[]>([]);
   const [celebrate, setCelebrate] = useState(false);
   const [finishedAnim, setFinishedAnim] = useState(false);
 
+  const summary = phase === "summary";
+  const googleStep = phase === "google";
   const qs = useMemo(() => questionsForCheckpoint(checkpoint), [checkpoint]);
   const question = qs[Math.min(qIndex, Math.max(0, qs.length - 1))];
 
   /** During celebrate, show the runner already moving toward the next mark. */
-  const pathCheckpoint = summary || finishedAnim
+  const pathCheckpoint = summary || googleStep || finishedAnim
     ? CHECKPOINT_COUNT
     : celebrate
       ? checkpoint >= CHECKPOINT_COUNT - 1
@@ -57,10 +65,10 @@ export function OnboardingPage({ theme, onToggleTheme, onFinished }: OnboardingP
   }, []);
 
   useEffect(() => {
-    if (summary || profile.onboarding.completed) return;
+    if (summary || googleStep || profile.onboarding.completed) return;
     if (profile.onboarding.checkpoint === checkpoint) return;
     update((p) => setCheckpoint(p, checkpoint));
-  }, [checkpoint, summary, profile.onboarding.checkpoint, profile.onboarding.completed, update]);
+  }, [checkpoint, summary, googleStep, profile.onboarding.checkpoint, profile.onboarding.completed, update]);
 
   useEffect(() => {
     setQIndex((i) => Math.min(i, Math.max(0, qs.length - 1)));
@@ -77,7 +85,8 @@ export function OnboardingPage({ theme, onToggleTheme, onFinished }: OnboardingP
   const advanceAfterCheckpoint = useCallback(() => {
     setCelebrate(false);
     if (checkpoint >= CHECKPOINT_COUNT - 1) {
-      setSummary(true);
+      // Additive step 4: Connect Google (skippable), then the existing summary.
+      setPhase("google");
       update((p) => setCheckpoint(p, CHECKPOINT_COUNT));
       return;
     }
@@ -111,7 +120,11 @@ export function OnboardingPage({ theme, onToggleTheme, onFinished }: OnboardingP
     if (celebrate) return;
     setErrors([]);
     if (summary) {
-      setSummary(false);
+      setPhase("google");
+      return;
+    }
+    if (googleStep) {
+      setPhase("questions");
       setCp(CHECKPOINT_COUNT - 1);
       setQIndex(Math.max(0, questionsForCheckpoint(CHECKPOINT_COUNT - 1).length - 1));
       return;
@@ -130,15 +143,15 @@ export function OnboardingPage({ theme, onToggleTheme, onFinished }: OnboardingP
   const finish = () => {
     const errs = checkpointErrors(profile, 0);
     if (errs.length) {
-      setSummary(false);
+      setPhase("questions");
       setCp(0);
       setQIndex(0);
       setErrors(errs);
       return;
     }
-    // Summary only appears after checkpoint 3 — refuse finish if they somehow skip ahead.
+    // Summary only appears after the three question steps (+ optional Google) — refuse finish if they somehow skip ahead.
     if (!summary) {
-      setErrors(["Keep going — finish all three steps first."]);
+      setErrors(["Keep going — finish the earlier steps first."]);
       return;
     }
     setFinishedAnim(true);
@@ -177,14 +190,16 @@ export function OnboardingPage({ theme, onToggleTheme, onFinished }: OnboardingP
             </p>
           )}
 
-          {summary ? (
+          {googleStep ? (
+            <GoogleConnectPanel onContinue={() => setPhase("summary")} onBack={goBack} />
+          ) : summary ? (
             <>
               <h1 id="ob-heading">Your starting line</h1>
               <p className="ob-hint">Glance over your answers, edit anything, then start your plan.</p>
               <SummaryList
                 profile={profile}
                 onJump={(i) => {
-                  setSummary(false);
+                  setPhase("questions");
                   setCp(i);
                   setQIndex(0);
                   setErrors([]);
