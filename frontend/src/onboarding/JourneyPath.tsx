@@ -53,9 +53,9 @@ export function JourneyPath({ checkpoint, celebrate = false, onCelebrateEnd }: J
     <div className="ob-journey" aria-label={`Step ${Math.min(display + 1, CHECKPOINT_COUNT)} of ${CHECKPOINT_COUNT}`}>
       <div className="ob-journey-meta">
         <span className="ob-step-count">
-          Step {atFinish ? CHECKPOINT_COUNT + 1 : display + 1} of {CHECKPOINT_COUNT + 1}
+          Step {atFinish ? CHECKPOINT_COUNT : display + 1} of {CHECKPOINT_COUNT}
         </span>
-        <span className="ob-step-label">{atFinish ? "Google / Review" : CHECKPOINTS[display].label}</span>
+        <span className="ob-step-label">{atFinish ? "Review" : CHECKPOINTS[display].label}</span>
       </div>
 
       <div className={`ob-path ${celebrate ? "is-animating" : ""}`}>

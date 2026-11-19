@@ -1,6 +1,6 @@
 import { useRef, useState, type DragEvent } from "react";
 import { CheckIcon, UploadIcon } from "../components/icons";
-import { MAJOR_CHOICES } from "../constants";
+import { MAJOR_CHOICES, OTHER_MAJOR } from "../constants";
 import { TRANSCRIPT_TYPES, usePlanning } from "../planning";
 import { useProfile } from "../profile";
 import type { Profile } from "../types";
@@ -15,8 +15,12 @@ import {
   SIZE_CHIPS,
   SUBJECT_CHIPS,
   US_STATES,
+  applyTranscriptBasics,
+  inferGraduationYear,
   toggleList,
 } from "./logic";
+
+const EXPLORING_MAJOR = "__exploring__";
 
 interface Props {
   questionId: string;
@@ -65,6 +69,8 @@ export function QuestionFields({ questionId, profile, onChange }: Props) {
     onChange({ ...profile, onboarding: { ...profile.onboarding, ...patch } });
 
   switch (questionId) {
+    case "confirm":
+      return <ConfirmBasicsForm profile={profile} onChange={onChange} />;
     case "name":
       return (
         <label className="ob-field">
@@ -394,36 +400,181 @@ export function QuestionFields({ questionId, profile, onChange }: Props) {
   }
 }
 
-export function SummaryList({ profile, onJump }: { profile: Profile; onJump: (checkpoint: number) => void }) {
-  const { transcripts } = usePlanning();
-  const rows = [
-    { i: 0, label: "You", value: [profile.basics.firstName, profile.basics.gradeLevel && `Grade ${profile.basics.gradeLevel}`, profile.basics.graduationYear, profile.basics.state].filter(Boolean).join(" · ") },
+function ConfirmBasicsForm({ profile, onChange }: { profile: Profile; onChange: (next: Profile) => void }) {
+  const [editing, setEditing] = useState(false);
+  const year = new Date().getFullYear();
+  const years = Array.from({ length: 8 }, (_, i) => String(year + i));
+  const setBasics = (patch: Partial<Profile["basics"]>) => onChange({ ...profile, basics: { ...profile.basics, ...patch } });
+  const setAcademics = (patch: Partial<Profile["academics"]>) =>
+    onChange({ ...profile, academics: { ...profile.academics, ...patch } });
+
+  const gradeLabel = GRADE_OPTIONS.find((g) => g.id === profile.basics.gradeLevel)?.label
+    || (profile.basics.gradeLevel ? `Grade ${profile.basics.gradeLevel}` : "—");
+  const majorValue = profile.onboarding.exploringMajors
+    ? EXPLORING_MAJOR
+    : profile.goals.intendedMajor || "";
+
+  const setMajor = (value: string) => {
+    if (value === EXPLORING_MAJOR) {
+      onChange({
+        ...profile,
+        goals: { ...profile.goals, intendedMajor: "" },
+        onboarding: { ...profile.onboarding, exploringMajors: true },
+      });
+      return;
+    }
+    onChange({
+      ...profile,
+      goals: { ...profile.goals, intendedMajor: value },
+      onboarding: { ...profile.onboarding, exploringMajors: false },
+    });
+  };
+
+  const rows: { label: string; value: string }[] = [
+    { label: "Name", value: profile.basics.firstName.trim() || "—" },
+    { label: "Current grade", value: gradeLabel },
+    { label: "Graduation year", value: profile.basics.graduationYear || "—" },
+    { label: "State", value: profile.basics.state || "—" },
+    { label: "High school", value: profile.basics.highSchool.trim() || "—" },
     {
-      i: 1,
-      label: "Academic history",
-      value: [transcripts[0] && `Transcript: ${transcripts[0].fileName}`, profile.basics.highSchool, profile.academics.gpaUnweighted && `GPA ${profile.academics.gpaUnweighted}`].filter(Boolean).join(", ") || "Skipped — add it later",
+      label: "GPA",
+      value: [profile.academics.gpaUnweighted && `${profile.academics.gpaUnweighted} unweighted`, profile.academics.gpaWeighted && `${profile.academics.gpaWeighted} weighted`]
+        .filter(Boolean)
+        .join(" · ") || "—",
     },
-    { i: 2, label: "Interests", value: profile.onboarding.exploringMajors ? "Still exploring" : profile.goals.intendedMajor || profile.onboarding.subjects.join(", ") || "—" },
   ];
 
   return (
-    <ul className="ob-summary">
-      {rows.map((r) => (
-        <li key={r.i}>
-          <div>
-            <strong>{r.label}</strong>
-            <span>{r.value || "Not set"}</span>
-          </div>
-          <button type="button" className="ob-link" onClick={() => onJump(r.i)}>
-            Edit
+    <div className="ob-confirm">
+      <div className={`ob-confirm-card ${editing ? "is-editing" : ""}`}>
+        <div className="ob-confirm-card-head">
+          <p className="ob-confirm-card-title">Your details</p>
+          <button type="button" className="ob-link" onClick={() => setEditing((v) => !v)}>
+            {editing ? "Done" : "Edit"}
           </button>
-        </li>
-      ))}
-    </ul>
+        </div>
+
+        {editing ? (
+          <div className="ob-confirm-edit">
+            <label className="ob-field">
+              <span>Name</span>
+              <input
+                value={profile.basics.firstName}
+                onChange={(e) => setBasics({ firstName: e.target.value })}
+                autoComplete="nickname"
+                placeholder="Your name"
+                autoFocus
+              />
+            </label>
+
+            <div className="ob-field">
+              <span>Current grade</span>
+              <div className="ob-chips">
+                {GRADE_OPTIONS.map((g) => (
+                  <button
+                    key={g.id}
+                    type="button"
+                    className={`ob-chip ${profile.basics.gradeLevel === g.id ? "on" : ""}`}
+                    aria-pressed={profile.basics.gradeLevel === g.id}
+                    onClick={() =>
+                      setBasics({
+                        gradeLevel: g.id,
+                        graduationYear: profile.basics.graduationYear || inferGraduationYear(g.id),
+                      })
+                    }
+                  >
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="ob-row">
+              <label className="ob-field">
+                <span>Graduation year</span>
+                <select value={profile.basics.graduationYear} onChange={(e) => setBasics({ graduationYear: e.target.value })}>
+                  <option value="">Select year</option>
+                  {years.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="ob-field">
+                <span>State</span>
+                <select value={profile.basics.state} onChange={(e) => setBasics({ state: e.target.value })}>
+                  <option value="">Select</option>
+                  {US_STATES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                  <option value="Outside US">Outside the U.S.</option>
+                </select>
+              </label>
+            </div>
+
+            <label className="ob-field">
+              <span>High school</span>
+              <input
+                value={profile.basics.highSchool}
+                onChange={(e) => setBasics({ highSchool: e.target.value })}
+                placeholder="School name"
+              />
+            </label>
+
+            <div className="ob-row">
+              <label className="ob-field">
+                <span>Unweighted GPA</span>
+                <input
+                  value={profile.academics.gpaUnweighted}
+                  onChange={(e) => setAcademics({ gpaUnweighted: e.target.value })}
+                  placeholder="e.g. 3.6"
+                  inputMode="decimal"
+                />
+              </label>
+              <label className="ob-field">
+                <span>Weighted GPA</span>
+                <input
+                  value={profile.academics.gpaWeighted}
+                  onChange={(e) => setAcademics({ gpaWeighted: e.target.value })}
+                  placeholder="Optional"
+                  inputMode="decimal"
+                />
+              </label>
+            </div>
+          </div>
+        ) : (
+          <dl className="ob-confirm-review">
+            {rows.map((row) => (
+              <div key={row.label} className="ob-confirm-row">
+                <dt>{row.label}</dt>
+                <dd>{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </div>
+
+      <label className="ob-field">
+        <span>Intended major</span>
+        <select value={majorValue} onChange={(e) => setMajor(e.target.value)}>
+          <option value="">Select a major</option>
+          {MAJOR_CHOICES.filter((m) => m !== OTHER_MAJOR).map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+          <option value={OTHER_MAJOR}>{OTHER_MAJOR}</option>
+          <option value={EXPLORING_MAJOR}>Still exploring</option>
+        </select>
+      </label>
+    </div>
   );
 }
 
-/** Optional transcript upload; fills in school and GPA when they're still blank. */
+/** Required transcript upload; prefills name, school, grade, year, and GPA when blank. */
 function TranscriptField() {
   const { transcripts, upload, uploading, uploadError } = usePlanning();
   const { update } = useProfile();
@@ -434,15 +585,7 @@ function TranscriptField() {
   const send = async (file: File) => {
     const saved = await upload(file);
     if (!saved) return;
-    update((p) => ({
-      ...p,
-      basics: { ...p.basics, highSchool: p.basics.highSchool || saved.school },
-      academics: {
-        ...p.academics,
-        gpaUnweighted: p.academics.gpaUnweighted || saved.reportedGpa.unweighted,
-        gpaWeighted: p.academics.gpaWeighted || saved.reportedGpa.weighted,
-      },
-    }));
+    update((p) => applyTranscriptBasics(p, saved));
   };
 
   const onDrop = (event: DragEvent) => {
@@ -497,7 +640,7 @@ function TranscriptField() {
           ) : (
             <>
               <strong>Drop your transcript here or click to upload</strong>
-              <span>PDF, TXT, CSV, or Markdown (.md) up to 5 MB. No transcript? Just continue and answer a few questions instead.</span>
+              <span>PDF, TXT, CSV, or Markdown (.md) up to 5 MB. Required to continue.</span>
             </>
           )}
         </button>

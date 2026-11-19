@@ -189,13 +189,23 @@ describe("Apply", () => {
     expect(calendarEvents(p, new Date("2026-11-20T12:00:00Z"))[0].key).toBe("uc-deadline");
   });
 
-  it("counts down whole days to Nov 30 by California date", () => {
-    const p = storyDoneProfile(); // graduates 2027 → deadline Nov 30, 2026
+  it("counts down whole days to the nearest Nov 30 by California date", () => {
+    const p = storyDoneProfile(); // graduates 2027
     expect(daysUntilUcDeadline(p, new Date("2026-10-30T19:00:00Z"))).toBe(31);
     // 11 PM on Nov 29 in California is already Nov 30 in UTC, but there's still a day left.
     expect(daysUntilUcDeadline(p, new Date("2026-11-30T07:00:00Z"))).toBe(1);
     expect(daysUntilUcDeadline(p, new Date("2026-11-30T20:00:00Z"))).toBe(0);
-    expect(daysUntilUcDeadline(p, new Date("2026-12-01T08:30:00Z"))).toBe(-1);
+    // After this cycle closes, countdown flips to next Nov 30 (not negative forever).
+    expect(daysUntilUcDeadline(p, new Date("2026-12-01T08:30:00Z"))).toBe(364);
+  });
+
+  it("uses the nearest Nov 30 even when graduation year is later", () => {
+    const junior = {
+      ...storyDoneProfile(),
+      basics: { ...storyDoneProfile().basics, gradeLevel: "11" as const, graduationYear: "2028" },
+    };
+    expect(entryYear(junior)).toBe(2028);
+    expect(daysUntilUcDeadline(junior, new Date("2026-11-18T20:00:00Z"))).toBe(12);
   });
 
   it("tracks progress through the Oct 1 – Nov 30 filing period", () => {

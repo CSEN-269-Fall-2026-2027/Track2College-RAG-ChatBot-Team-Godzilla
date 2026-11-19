@@ -1,20 +1,18 @@
-import { createPortal } from "react-dom";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { usePlanning } from "../planning";
 import { academicHistoryStatus, completeness, useProfile } from "../profile";
 import { navigate } from "../router";
 import { readJSON, userKey, writeJSON } from "../storage";
 import type { Profile, UcJourneyState } from "../types";
-import { ArrowRightIcon, CheckIcon, ExternalIcon, PixelMapIcon, XIcon } from "../components/icons";
+import { ArrowRightIcon, CheckIcon, ExternalIcon, PixelMapIcon } from "../components/icons";
 import {
   computeJourney,
   journeyOf,
-  PIQ_WORD_LIMIT,
   UC_APPLY_URL,
   type Checkpoint,
   type CheckpointId,
 } from "./logic";
-import { daysUntilUcDeadline, entryYear } from "../agent/logic";
+import { daysUntilUcDeadline, nextUcEntryYear } from "../agent/logic";
 import { mentorById } from "../game/characters";
 import { STAGE_GUIDE } from "./guides";
 import { GRID, mapLayout, planetPixels, routeLegs } from "./planets";
@@ -60,17 +58,11 @@ export function JourneyMap({
   userId,
   onBack,
   embedded = false,
-  selected = null,
-  onSelect,
 }: {
   userId: string;
   onBack?: () => void;
-  /** Story-mode side panel: same map and progress, no full-page chrome. */
+  /** Popup / side panel: same map and progress, no full-page chrome. */
   embedded?: boolean;
-  /** The stop whose person the student chose to talk to (Story mode), shown as selected. */
-  selected?: CheckpointId | null;
-  /** Story mode: clicking a stop switches the chat on the right to that stop's person. */
-  onSelect?: (id: CheckpointId) => void;
 }) {
   const { profile, update } = useProfile();
   const { transcripts } = usePlanning();
@@ -78,8 +70,6 @@ export function JourneyMap({
   const academicStarted = academicHistoryStatus(profile, transcripts).started;
   const journey = useMemo(() => computeJourney(profile, sections, academicStarted), [profile, sections, academicStarted]);
   const { checkpoints, completeCount, current, finished } = journey;
-  const [open, setOpen] = useState<number | null>(null);
-  const opener = useRef<HTMLButtonElement | null>(null);
 
   // When a stage is completed since the student last looked, draw the new stretch of route.
   // Progress itself always comes from computeJourney.
@@ -97,8 +87,13 @@ export function JourneyMap({
     return () => window.clearTimeout(done);
   }, [reached, seenKey]);
 
-  // Story mode always shows whose chat is open: the clicked stop, else the current chapter's.
-  const active = onSelect ? (selected ?? checkpoints[finished ? checkpoints.length - 1 : current].id) : null;
+  // Browsing a stop only changes the task list below — never switches the chat mentor.
+  const defaultFocus = checkpoints[finished ? checkpoints.length - 1 : current]?.id ?? "profile";
+  const [focusId, setFocusId] = useState<CheckpointId>(defaultFocus);
+  useEffect(() => {
+    setFocusId(defaultFocus);
+  }, [defaultFocus]);
+  const active = focusId;
 
   // Wide: six campus buildings in a straight line from the start pad on the left to the flag
   // on the right. Narrow: a vertical list with labels beside each building.
@@ -123,16 +118,6 @@ export function JourneyMap({
 
   const setJourney = useCallback((change: (j: UcJourneyState) => UcJourneyState) => update((p) => ({ ...p, ucJourney: change(journeyOf(p)) })), [update]);
 
-  const close = useCallback(() => {
-    setOpen(null);
-    opener.current?.focus();
-  }, []);
-
-  const openChapter = (i: number, from: HTMLButtonElement) => {
-    opener.current = from;
-    setOpen(i);
-  };
-
   const progress = (
     <div className="jm-overall" aria-live="polite">
       <strong>
@@ -144,18 +129,11 @@ export function JourneyMap({
     </div>
   );
 
-  const activeIndex = checkpoints.findIndex((c) => c.id === active);
+  const focusIndex = Math.max(0, checkpoints.findIndex((c) => c.id === active));
+  const focusCheckpoint = checkpoints[focusIndex];
 
   const mapBoard = (
     <div className="jm-sky-fit" data-layout={layout} ref={fitRef}>
-      {/* Story mode: the selected chapter's full to-do list, always in this corner. */}
-      {activeIndex >= 0 && (
-        <button type="button" className="jm-explore" onClick={(e) => openChapter(activeIndex, e.currentTarget)}>
-          See tasks
-          <span className="jm-sr"> for {MAP_LABEL[checkpoints[activeIndex].id]}</span>
-          <ArrowRightIcon width={12} height={12} aria-hidden="true" />
-        </button>
-      )}
       {box.width > 0 && (
         <span className="jm-stars" aria-hidden="true">
           {DETAILS.map(([left, top, kind], i) => (
@@ -204,9 +182,9 @@ export function JourneyMap({
                   <button
                     type="button"
                     className="jm-planet-btn"
-                    onClick={(e) => (onSelect ? onSelect(c.id) : openChapter(i, e.currentTarget))}
-                    aria-pressed={onSelect ? isActive : undefined}
-                    aria-label={`${MAP_LABEL[c.id]}, chapter ${i + 1}${status ? `: ${status}` : ""}. ${onSelect ? `Talk to ${person.name}.` : "Open chapter."}`}
+                    onClick={() => setFocusId(c.id)}
+                    aria-pressed={isActive}
+                    aria-label={`${MAP_LABEL[c.id]}, chapter ${i + 1}${status ? `: ${status}` : ""}. Show tasks${person.name ? ` (${person.name})` : ""}.`}
                   >
                     <span className="jm-orbit" aria-hidden="true" />
                     <span className="jm-planet-art" data-anchor>
@@ -261,27 +239,24 @@ export function JourneyMap({
       )}
 
       <div className="jm-scroll">
-        {mapBoard}
+        <div className="jm-board-split">
+          <div className="jm-board-map">{mapBoard}</div>
+          {focusCheckpoint && (
+            <StageTasksPanel
+              checkpoint={focusCheckpoint}
+              index={focusIndex}
+              state={focusCheckpoint.complete ? "Complete" : focusIndex === current && !finished ? "Current" : "Upcoming"}
+              profile={profile}
+              setJourney={setJourney}
+            />
+          )}
+        </div>
         {finished && (
           <p className="jm-finished">
             You've submitted your UC application and your financial aid application. Keep an eye on your follow-ups in Review &amp; Apply.
           </p>
         )}
       </div>
-
-      {/* Portaled to <body> so it sits above everything, including Story mode's stacking contexts. */}
-      {open !== null &&
-        createPortal(
-          <CheckpointPanel
-            checkpoint={checkpoints[open]}
-            index={open}
-            state={checkpoints[open].complete ? "Complete" : open === current ? "Current" : "Upcoming"}
-            profile={profile}
-            setJourney={setJourney}
-            onClose={close}
-          />,
-          document.body,
-        )}
     </div>
   );
 }
@@ -292,7 +267,7 @@ function DeadlineSign({ profile }: { profile: Profile }) {
   return (
     <div className="jm-sign" role="note" aria-label={days < 0 ? "The UC application deadline has passed" : days === 0 ? "UC application due today" : `${days} days left to apply`}>
       <div className={`jm-sign-board${days <= 7 && days >= 0 ? " is-urgent" : ""}`} aria-hidden="true">
-        <span className="jm-sign-head">UC app · Fall {entryYear(profile)}</span>
+        <span className="jm-sign-head">UC app · Fall {nextUcEntryYear()}</span>
         <span className="jm-sign-count">
           {days > 0 ? (
             <>
@@ -354,18 +329,7 @@ interface PanelProps {
   state: string;
   profile: Profile;
   setJourney: (change: (j: UcJourneyState) => UcJourneyState) => void;
-  onClose: () => void;
 }
-
-/** One line on what each step is for. */
-const OVERVIEW: Record<CheckpointId, string> = {
-  profile: "The basics every UC application builds on.",
-  ucs: "Where you're applying, and the one major for all of them.",
-  activities: "What you do outside of class, so your essays have real stories.",
-  essays: `Four short essays, up to ${PIQ_WORD_LIMIT} words each.`,
-  review: "Final checks, then you submit on the official UC site.",
-  aid: "Apply for grants and scholarships to help pay for college.",
-};
 
 /** Where each step's answers can be changed. */
 const PROFILE_SECTION: Partial<Record<CheckpointId, string>> = {
@@ -376,110 +340,64 @@ const PROFILE_SECTION: Partial<Record<CheckpointId, string>> = {
   aid: "finances",
 };
 
-function CheckpointPanel({ checkpoint: c, index, state, profile, setJourney, onClose }: PanelProps) {
-  const ref = useRef<HTMLDivElement>(null);
-  const headingId = `jm-panel-${c.id}`;
-
-  useEffect(() => {
-    ref.current?.querySelector<HTMLElement>("h2")?.focus();
-  }, [c.id]);
-
-  // Esc closes; Tab stays inside the dialog.
-  const onKeyDown = (e: ReactKeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      onClose();
-      return;
-    }
-    if (e.key !== "Tab" || !ref.current) return;
-    const items = [...ref.current.querySelectorAll<HTMLElement>("button, a[href], input, select, textarea, [tabindex='0']")].filter(
-      (el) => !el.hasAttribute("disabled"),
-    );
-    if (!items.length) return;
-    const first = items[0];
-    const last = items[items.length - 1];
-    if (e.shiftKey && (document.activeElement === first || document.activeElement === ref.current.querySelector("h2"))) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  };
-
+/** Bottom half of the map: tasks for the focused stop. */
+function StageTasksPanel({ checkpoint: c, index, state, profile, setJourney }: PanelProps) {
+  const headingId = `jm-stage-${c.id}`;
   const section = PROFILE_SECTION[c.id];
   const submittedAt = journeyOf(profile).submittedAt;
 
   return (
-    <div className="jm-panel-wrap" onKeyDown={onKeyDown}>
-      <button className="jm-scrim" onClick={onClose} tabIndex={-1} aria-label="Close checkpoint" />
-      <div className="jm-panel" role="dialog" aria-modal="true" aria-labelledby={headingId} ref={ref}>
-        <header className="jm-panel-head">
-          <div>
-            <span className="jm-panel-kicker">
-              Step {index + 1} · {state}
-            </span>
-            <h2 id={headingId} tabIndex={-1}>
-              {c.title}
-            </h2>
-          </div>
-          <button className="icon-btn" onClick={onClose} aria-label="Close">
-            <XIcon width={16} height={16} />
-          </button>
-        </header>
+    <section className="jm-stage-panel" aria-labelledby={headingId}>
+      <header className="jm-stage-head">
+        <span className="jm-panel-kicker">
+          Step {index + 1} · {state}
+        </span>
+        <h2 id={headingId}>{c.title}</h2>
+      </header>
 
-        <div className="jm-panel-body">
-          <p className="jm-note">{OVERVIEW[c.id]}</p>
-
-          <div className="jm-progress">
-            <span>{c.summary}</span>
-            <span className="jm-bar" aria-hidden="true">
-              <span style={{ width: `${(c.done / c.total) * 100}%` }} />
-            </span>
-          </div>
-
-          <ul className="jm-tasks">
-            {c.tasks
-              .filter((t) => !t.optional)
-              .map((t) => (
-                <li key={t.id} className={t.done ? "done" : ""}>
-                  <span className="jm-check" aria-hidden="true">
-                    {t.done ? <CheckIcon width={17} height={17} /> : null}
-                  </span>
-                  <span className="jm-task-label">
-                    {t.label}
-                    <span className="jm-sr">{t.done ? " — done" : " — not done"}</span>
-                  </span>
-                </li>
-              ))}
-          </ul>
-
-          {section && (
-            <button
-              className="btn-ghost jm-cta"
-              onClick={() => {
-                onClose();
-                navigate("profile", section);
-              }}
-            >
-              Open in Profile <ArrowRightIcon width={15} height={15} />
-            </button>
-          )}
-
-          {c.id === "review" && (
-            <a className="btn-ghost jm-cta" href={UC_APPLY_URL} target="_blank" rel="noreferrer noopener">
-              Open the official UC application <ExternalIcon width={14} height={14} />
-            </a>
-          )}
-
-          {c.id === "review" && submittedAt !== null && (
-            <button className="jm-link" onClick={() => setJourney((j) => ({ ...j, submittedAt: null }))}>
-              I haven't actually submitted
-            </button>
-          )}
-        </div>
+      <div className="jm-progress">
+        <span>{c.summary}</span>
+        <span className="jm-bar" aria-hidden="true">
+          <span style={{ width: `${(c.done / Math.max(c.total, 1)) * 100}%` }} />
+        </span>
       </div>
-    </div>
+
+      <ul className="jm-tasks">
+        {c.tasks
+          .filter((t) => !t.optional)
+          .map((t) => (
+            <li key={t.id} className={t.done ? "done" : ""}>
+              <span className="jm-check" aria-hidden="true">
+                {t.done ? <CheckIcon width={17} height={17} /> : null}
+              </span>
+              <span className="jm-task-label">
+                {t.label}
+                <span className="jm-sr">{t.done ? " — done" : " — not done"}</span>
+              </span>
+            </li>
+          ))}
+      </ul>
+
+      <div className="jm-stage-actions">
+        {section && (
+          <button className="btn-ghost jm-cta" onClick={() => navigate("profile", section)}>
+            Open in Profile <ArrowRightIcon width={15} height={15} />
+          </button>
+        )}
+
+        {c.id === "review" && (
+          <a className="btn-ghost jm-cta" href={UC_APPLY_URL} target="_blank" rel="noreferrer noopener">
+            Open the official UC application <ExternalIcon width={14} height={14} />
+          </a>
+        )}
+
+        {c.id === "review" && submittedAt !== null && (
+          <button className="jm-link" onClick={() => setJourney((j) => ({ ...j, submittedAt: null }))}>
+            I haven't actually submitted
+          </button>
+        )}
+      </div>
+    </section>
   );
 }
 

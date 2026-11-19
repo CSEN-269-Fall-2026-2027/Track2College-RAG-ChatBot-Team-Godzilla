@@ -340,6 +340,8 @@ export interface Transcript {
   storagePath: string | null;
   studentName: string;
   school: string;
+  /** School's US state (2-letter code) when the transcript lists it. */
+  state?: string;
   reportedGpa: { unweighted: string; weighted: string };
   courses: TranscriptCourse[];
   summary: string;

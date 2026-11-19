@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { blankProfile } from "./fixtures";
-import { applyDrafts, currentEssay, editDraft, PERSONAL_ANSWER, piqRequest, setPiqAnswer } from "../journey/piqs";
+import { applyDrafts, autoPickPiqs, currentEssay, editDraft, piqRequest } from "../journey/piqs";
 import { mentorById } from "../game/characters";
 import { openerFor } from "../game/openers";
 import { completeness } from "../profile";
@@ -104,12 +104,10 @@ describe("nextGuidedTurn", () => {
       }
       const choice = turn.choices.find((c) => !HANDOFFS.includes(c.effect.type));
       let effect: GuidedEffect;
-      if (turn.id.startsWith("generate-")) {
-        // Each essay is offered as soon as its own follow-ups are done; stand in for the Groq call.
-        const gen = turn.choices[0]!.effect;
-        expect(gen.type).toBe("generatePiqs");
-        const ids = gen.type === "generatePiqs" ? gen.piqIds : [];
-        expect(ids).toEqual([turn.id.slice("generate-".length)]);
+      if (turn.id === "confirm-piq-chat" || turn.id === "draft-piq-chat") {
+        // Chat opener owns confirm + draft-all; stand in for Sounds good + Groq.
+        const ids = turn.id === "confirm-piq-chat" ? autoPickPiqs(p) : Object.keys(journeyOf(p).piqs);
+        if (turn.id === "confirm-piq-chat") p = applyGuidedEffect(p, { type: "setPiqs", piqIds: ids }, () => `id-${n}`);
         const req = piqRequest(p, ids);
         p = applyDrafts(p, req.map((r) => ({ id: r.id, question: "", essay: "word ".repeat(300).trim(), wordCount: 300 })));
         continue;
@@ -230,7 +228,7 @@ describe("nextGuidedTurn", () => {
     expect(essays.speaker).toBe("quill");
   });
 
-  it("offers a 4-of-8 PIQ checkbox picker before essay follow-ups", () => {
+  it("holds essays in chat-only mode until the opener confirms the four picks", () => {
     const sections = { basics: 1, academics: 1, campuses: 1, finances: 0 };
     const turn = nextGuidedTurn(
       blankProfile({
@@ -243,8 +241,9 @@ describe("nextGuidedTurn", () => {
       }),
       sections,
     );
-    expect(turn.id).toBe("pick-piq");
-    expect(turn.piqPicker).toBe(true);
+    expect(turn.id).toBe("confirm-piq-chat");
+    expect(turn.chatOnly).toBe(true);
+    expect(turn.piqPicker).toBeUndefined();
   });
 
   describe("essays chapter", () => {
@@ -265,78 +264,52 @@ describe("nextGuidedTurn", () => {
 
     const listed = { id: "s", name: "Soccer", role: "Captain", hoursPerWeek: "", weeksPerYear: "", years: "", description: "", category: "extracurricular" as const };
 
-    const NOTE = '*Essay generation would improve with more information. Please select "Add more information" in the chat.';
-
-    it("adds a note, and no question or answer box, only when no activity is left for the essay", () => {
-      const none = nextGuidedTurn(base(), sections, "");
-      expect(none.prompt).toBe("Essay 1 of 4: Leadership. Want me to write it?");
-      expect(none.note).toBe(NOTE);
-      expect(none.input).toBeUndefined();
-      expect(none.choices.map((c) => c.label)).toEqual(["Generate my essay", "I already wrote my essay", "Skip this essay for now"]);
-
-      // Soccer is free for two essays, then the third essay gets the note.
-      let p: ReturnType<typeof applyDrafts> = { ...base(), activities: [listed] };
-      expect(nextGuidedTurn(p, sections, "").note).toBeUndefined();
-      p = applyDrafts(p, [{ id: "leadership", question: "", essay: "Soccer one.", wordCount: 0 }]);
-      expect(nextGuidedTurn(p, sections, "").note).toBeUndefined();
-      p = applyDrafts(p, [{ id: "opportunity", question: "", essay: "Soccer two.", wordCount: 0 }]);
-      expect(nextGuidedTurn(p, sections, "").note).toBe(NOTE);
-    });
-
-    it("offers the question in Quill's chat, and drops the note and button once it's answered", () => {
-      const quill = (p: ReturnType<typeof base>) => openerFor(mentorById("quill"), p, "").actions.map((a) => a.label);
-      expect(quill(base())).toEqual(["Analyze my readiness for this essay", "How can I write this essay well?", "Add more information", "Brainstorm my essay"]);
-      const answered = setPiqAnswer(base(), "leadership", PERSONAL_ANSWER, "Quill: What's a time?\nStudent: I organized a bake sale");
-      expect(quill(answered)).not.toContain("Add more information");
-      expect(nextGuidedTurn(answered, sections, "").note).toBeUndefined();
-      expect(piqRequest(answered, ["leadership"])[0].answers[0].answer).toContain("bake sale");
-    });
-
-    it("offers to generate or skip each essay, including personal-life ones, with no typed question", () => {
+    it("keeps a chat-only placeholder while drafts are still missing", () => {
       const turn = nextGuidedTurn({ ...base(), activities: [listed] }, sections, "Darren");
-      expect(turn.id).toBe("generate-leadership");
-      expect(turn.prompt).toBe("Darren, essay 1 of 4: Leadership. Want me to write it?");
-      expect(turn.choices.map((c) => c.label)).toEqual(["Generate my essay", "I already wrote my essay", "Skip this essay for now"]);
-      expect(turn.choices[0].effect).toEqual({ type: "generatePiqs", piqIds: ["leadership"] });
-      expect(turn.choices[1].effect).toEqual({ type: "pasteEssay", piqId: "leadership" });
-      expect(turn.input).toBeUndefined();
-      expect(turn.chapter).toBe("PIQs · 4 questions left");
+      expect(turn.id).toBe("draft-piq-chat");
+      expect(turn.chatOnly).toBe(true);
+      expect(turn.chapter).toBe("PIQs · 1 question left");
+      expect(openerFor(mentorById("quill"), base(), "Darren").actions.map((a) => a.label)).toEqual(["Draft my essays"]);
     });
 
-    it("starts from the beginning when the only draft is one the app wrote on its own", () => {
+    it("opens the topic picker when choose-piqs is set", () => {
+      const p = blankProfile({
+        academics: { ...blankProfile().academics, gpaUnweighted: "3.7", exams: "None yet" },
+        colleges: [{ id: "1", name: "UCLA", status: "researching", plan: "UC", deadline: "", notes: "", major: "Biology" }],
+        goals: { ...blankProfile().goals, intendedMajor: "Biology" },
+        ucJourney: {
+          activitiesReviewed: true,
+          piqs: {},
+          checks: { "choose-piqs": true },
+          submittedAt: null,
+          followUps: {},
+        },
+      });
+      const turn = nextGuidedTurn(p, sections, "");
+      expect(turn.id).toBe("pick-piq");
+      expect(turn.piqPicker).toBe(true);
+    });
+
+    it("treats an unrequested auto-draft as unfinished until the student keeps it", () => {
       const p = {
         ...base(),
         activities: [listed],
         piqWork: { leadership: { answers: {}, draft: { text: "Auto draft.", words: 2, generatedAt: 1 } } },
       };
-      const turn = nextGuidedTurn(p, sections, "");
-      expect(turn.id).toBe("generate-leadership");
-      expect(turn.choices[0].label).toBe("Generate my essay");
-      expect(openerFor(mentorById("quill"), p, "").actions.map((a) => a.label)).toEqual([
-        "Analyze my readiness for this essay",
-        "How can I write this essay well?",
-        "Brainstorm my essay",
-      ]);
-      expect(nextGuidedTurn(editDraft(p, "leadership", "My own words."), sections, "").id).toBe("generate-opportunity");
+      expect(nextGuidedTurn(p, sections, "").id).toBe("draft-piq-chat");
+      expect(openerFor(mentorById("quill"), p, "").actions[0]).toMatchObject({ kind: "draftPiqs" });
+      expect(nextGuidedTurn(editDraft(p, "leadership", "My own words."), sections, "").id).toBe("draft-piq-chat");
+      expect(currentEssay(editDraft(p, "leadership", "My own words."))).toBe("opportunity");
     });
 
-    it("skipping moves on to the next essay, and it can be brought back", () => {
-      let p = applyGuidedEffect(base(), { type: "skipPiq", piqId: "leadership" }, () => "x");
-      const next = nextGuidedTurn(p, sections, "");
-      expect(next.id).toBe("generate-opportunity");
-      expect(next.chapter).toBe("PIQs · 3 questions left");
-      p = applyGuidedEffect(p, { type: "unskipPiqs" }, () => "x");
-      expect(nextGuidedTurn(p, sections, "").id).toBe("generate-leadership");
-    });
-
-    it("moves straight to the next essay once one is written, saved, or pasted in", () => {
+    it("leaves the essays chapter once every chosen essay has a requested draft", () => {
       const written = applyDrafts(base(), [{ id: "leadership", question: "", essay: "An essay.", wordCount: 0 }]);
-      expect(nextGuidedTurn(written, sections, "").id).toBe("generate-opportunity");
+      expect(nextGuidedTurn(written, sections, "").id).toBe("draft-piq-chat");
       expect(currentEssay(written)).toBe("opportunity");
       const pasted = editDraft(base(), "leadership", "My own essay, pasted in.");
-      expect(nextGuidedTurn(pasted, sections, "").id).toBe("generate-opportunity");
+      expect(nextGuidedTurn(pasted, sections, "").id).toBe("draft-piq-chat");
       // Clearing the box doesn't count as filling it out.
-      expect(nextGuidedTurn(editDraft(pasted, "leadership", "  "), sections, "").id).toBe("generate-leadership");
+      expect(nextGuidedTurn(editDraft(pasted, "leadership", "  "), sections, "").id).toBe("draft-piq-chat");
     });
 
     it("finishes the chapter once all four are filled out, without marking anything ready", () => {

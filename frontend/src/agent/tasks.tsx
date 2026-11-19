@@ -109,24 +109,11 @@ export function SchoolCounselor({ agent, change }: TaskProps) {
   const [manual, setManual] = useState({ name: "", email: "" });
   const [busy, setBusy] = useState<"find" | "draft" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [autoStarted, setAutoStarted] = useState(false);
   const counselor = agent.counselor;
   const draft = agent.counselorEmail;
   // A call with the virtual counselor, if there was one, helps the email say what the student wants to talk about.
   const callTranscript = (agent.counselorCall?.lines ?? []).map((l) => `${l.role === "student" ? "Student" : "Counselor"}: ${l.text}`).join("\n");
-
-  const find = async () => {
-    setBusy("find");
-    setError(null);
-    try {
-      const list = await findCounselors({ highSchool: school.trim(), city: b.city, state: b.state, lastName: b.lastName });
-      setFound(list);
-      setPicked(list.length ? 0 : "manual");
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : message(e));
-    } finally {
-      setBusy(null);
-    }
-  };
 
   const writeEmail = async (name: string) => {
     setBusy("draft");
@@ -141,13 +128,51 @@ export function SchoolCounselor({ agent, change }: TaskProps) {
     }
   };
 
+  const confirmChosen = (chosen: { name: string; email: string; title: string; serves: string; sourceUrl: string }) => {
+    change((a) => ({ ...a, counselor: { ...chosen, confirmedAt: Date.now() }, counselorEmail: undefined }));
+    void writeEmail(chosen.name);
+  };
+
+  const find = async (autoPick = false) => {
+    setBusy("find");
+    setError(null);
+    try {
+      const list = await findCounselors({ highSchool: school.trim(), city: b.city, state: b.state, lastName: b.lastName });
+      setFound(list);
+      const matched = list.filter((c) => c.email && c.match);
+      const withEmail = list.filter((c) => c.email);
+      if (autoPick && matched.length === 1) {
+        const { match: _m, ...c } = matched[0];
+        confirmChosen(c);
+        return;
+      }
+      if (autoPick && matched.length === 0 && withEmail.length === 1) {
+        const { match: _m, ...c } = withEmail[0];
+        confirmChosen(c);
+        return;
+      }
+      setPicked(list.length ? 0 : "manual");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : message(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Auto-search (and auto-confirm when there's a single clear match) when the tool opens.
+  useEffect(() => {
+    if (counselor || autoStarted || !school.trim()) return;
+    setAutoStarted(true);
+    void find(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on open
+  }, [counselor, autoStarted, school]);
+
   const confirm = () => {
     const chosen =
       picked === "manual"
         ? { name: manual.name.trim(), email: manual.email.trim(), title: "", serves: "", sourceUrl: "" }
-        : (({ match: _match, ...c }) => c)(found![picked]);
-    change((a) => ({ ...a, counselor: { ...chosen, confirmedAt: Date.now() }, counselorEmail: undefined }));
-    void writeEmail(chosen.name);
+        : (({ match: _match, ...c }) => c)(found![picked as number]);
+    confirmChosen(chosen);
   };
 
   const errorBox = error && (
@@ -156,9 +181,9 @@ export function SchoolCounselor({ agent, change }: TaskProps) {
     </p>
   );
 
-  // Step 1 of 3: find and confirm the counselor.
+  // Step 1 of 3: find and confirm the counselor (auto-runs on open).
   if (!counselor) {
-    const pickedOne = picked === "manual" ? !!manual.name.trim() && EMAIL_OK.test(manual.email.trim()) : !!found?.[picked]?.email;
+    const pickedOne = picked === "manual" ? !!manual.name.trim() && EMAIL_OK.test(manual.email.trim()) : !!found?.[picked as number]?.email;
     return (
       <>
         <CounselorSteps at={0} />
@@ -167,19 +192,25 @@ export function SchoolCounselor({ agent, change }: TaskProps) {
             className="agent-find"
             onSubmit={(e) => {
               e.preventDefault();
-              if (school.trim()) void find();
+              if (school.trim()) void find(true);
             }}
           >
             <label className="field">
               <span className="field-label">Your high school</span>
               <input value={school} onChange={(e) => setSchool(e.target.value)} placeholder="e.g. Lincoln High School" />
               <span className="field-hint">
-                We search your school's website for its counselors{b.lastName ? ` and match yours by your last name (${b.lastName})` : ""}.
+                Searching your school's site for counselors{b.lastName ? ` (matching last name ${b.lastName})` : ""}…
               </span>
             </label>
-            <button type="submit" className="btn-primary" disabled={!school.trim() || busy === "find"}>
-              {busy === "find" ? "Searching your school's site…" : "Find my counselor"}
-            </button>
+            {busy === "find" ? (
+              <p className="agent-lead" aria-busy="true">
+                Searching your school's site…
+              </p>
+            ) : (
+              <button type="submit" className="btn-primary" disabled={!school.trim()}>
+                Find my counselor
+              </button>
+            )}
           </form>
         ) : (
           <form
@@ -835,8 +866,8 @@ function ucPiqs(profile: Profile): UcPiq[] {
 const YOUR_TURN = new Set(["waiting", "needs_code", "login_failed", "needs_you"]);
 
 /**
- * Cloud mode: the real UC page from the Browserbase session, live, inside the modal. The student can
- * click into it to sign in or enter UC's code, and the assistant picks up again once the page moves on.
+ * Cloud mode: Browserbase session. Hidden by default — status only — unless the student opts in
+ * to watch, or an error / login failure / your-turn moment needs the live view.
  */
 function CloudBrowserPanel({
   popup,
@@ -853,6 +884,7 @@ function CloudBrowserPanel({
   onClose: () => void;
   closing: boolean;
 }) {
+  const [watching, setWatching] = useState(false);
   const failed = !!run && !run.open && (run.status === "error" || run.status === "disconnected" || run.status === "login_failed");
   const failedTitle = run?.status === "login_failed" ? "Wrong email or password" : run?.status === "disconnected" ? "The cloud browser disconnected" : "The cloud browser couldn't start";
   const ended = !!run && !run.open && !failed;
@@ -860,6 +892,7 @@ function CloudBrowserPanel({
   const yourTurn = !!liveUrl && !run?.finished && YOUR_TURN.has(run?.status ?? "");
   // The code popup asks for this itself, so nothing should point the student at the browser instead.
   const askingCode = run?.status === "needs_code" || run?.status === "checking_code";
+  const forceShow = watching || failed || yourTurn || askingCode || !!popup;
 
   let pill: { text: string; tone: "busy" | "turn" | "bad" | "idle" } | null;
   if (!run) pill = { text: "Not started", tone: "idle" };
@@ -873,8 +906,18 @@ function CloudBrowserPanel({
   const address = run?.page_url || (liveUrl ? "apply.universityofcalifornia.edu" : "");
 
   let screen: ReactNode;
-  if (liveUrl) {
+  if (liveUrl && forceShow) {
     screen = <iframe src={liveUrl} title="UC application in the cloud browser" sandbox="allow-same-origin allow-scripts" allow="clipboard-read; clipboard-write" />;
+  } else if (liveUrl && !forceShow) {
+    screen = (
+      <div className="cloud-browser-empty">
+        <strong>Working in the background</strong>
+        <span>{run?.detail || "Filling in your UC application. You won't see the browser unless something needs you."}</span>
+        <button type="button" className="btn-ghost" onClick={() => setWatching(true)}>
+          Watch browser
+        </button>
+      </div>
+    );
   } else if (run && failed) {
     screen = (
       <div className="cloud-browser-empty">
@@ -913,8 +956,8 @@ function CloudBrowserPanel({
   } else {
     screen = (
       <div className="cloud-browser-empty">
-        <strong>The UC application will show here</strong>
-        <span>Start below and watch the assistant fill it in. You can click in and take over any time.</span>
+        <strong>Ready when you are</strong>
+        <span>Start below. The assistant fills the application in the background — open the live view only if you want to watch or something goes wrong.</span>
       </div>
     );
   }
@@ -928,13 +971,18 @@ function CloudBrowserPanel({
           <i />
         </span>
         <span className="cloud-browser-url" title={address}>
-          {address || "about:blank"}
+          {forceShow ? address || "about:blank" : "Working in background"}
         </span>
         {pill && (
           <span className={`cloud-browser-pill is-${pill.tone}`} role="status" aria-live="polite">
             {pill.tone === "busy" && <span className="uc-run-dot" aria-hidden="true" />}
             {pill.text}
           </span>
+        )}
+        {liveUrl && (
+          <button type="button" className="cloud-browser-close" onClick={() => setWatching((w) => !w)} title={watching ? "Hide the live view" : "Watch the browser"}>
+            {watching ? "Hide view" : "Watch"}
+          </button>
         )}
         <button
           type="button"
@@ -970,11 +1018,16 @@ function CloudBrowserPanel({
         {!closing && popup}
       </div>
 
-      {liveUrl && (
+      {liveUrl && forceShow && (
         <div className="cloud-browser-foot">
           <a href={liveUrl} target="_blank" rel="noreferrer">
             Open in a new tab <ExternalIcon width={12} height={12} />
           </a>
+          {watching && (
+            <button type="button" className="btn-ghost" onClick={() => setWatching(false)}>
+              Hide browser
+            </button>
+          )}
         </div>
       )}
     </section>

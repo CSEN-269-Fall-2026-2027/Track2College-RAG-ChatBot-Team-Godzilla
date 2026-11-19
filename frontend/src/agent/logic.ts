@@ -159,16 +159,38 @@ export function addDays(date: string, days: number) {
   return d.toISOString().slice(0, 10);
 }
 
-/** Year the student starts college: their graduation year, else the next one to come. */
+/** Today's date in California, where UC's deadline is set, as YYYY-MM-DD. */
+const pacificToday = (now: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(now);
+
+const dayNumber = (date: string) => Date.parse(`${date}T00:00:00Z`) / 86_400_000;
+
+/**
+ * Next UC filing deadline (Nov 30, 11:59 PM Pacific) on or after today.
+ * Always the closest real deadline — not derived from graduation year.
+ * Standard user is a 12th grader applying in the current cycle.
+ */
+export function nextUcDeadlineDate(now = new Date()) {
+  const today = pacificToday(now);
+  const year = Number(today.slice(0, 4));
+  const thisCycle = iso(year, 11, 30);
+  return today <= thisCycle ? thisCycle : iso(year + 1, 11, 30);
+}
+
+/** Fall college-start year for the nearest UC application cycle (deadline year + 1). */
+export function nextUcEntryYear(now = new Date()) {
+  return Number(nextUcDeadlineDate(now).slice(0, 4)) + 1;
+}
+
+/** Year the student starts college: their graduation year, else the nearest cycle's Fall year. */
 export function entryYear(profile: Profile, now = new Date()) {
   const year = Number.parseInt(profile.basics.graduationYear, 10);
   if (year >= 2000 && year < 2100) return year;
-  return now.getMonth() >= 7 ? now.getFullYear() + 1 : now.getFullYear();
+  return nextUcEntryYear(now);
 }
 
-/** UC's filing deadline (Nov 30, 11:59 PM Pacific) for the student's application cycle, as YYYY-MM-DD. */
-export function ucDeadlineDate(profile: Profile, now = new Date()) {
-  return iso(entryYear(profile, now) - 1, 11, 30);
+/** UC filing deadline used in the app UI — always the nearest Nov 30. */
+export function ucDeadlineDate(_profile: Profile | null | undefined, now = new Date()) {
+  return nextUcDeadlineDate(now);
 }
 
 /** FAFSA / CA Dream Act priority deadline for Cal Grant (Mar 2 of the year the student starts college). */
@@ -177,20 +199,15 @@ export const aidDeadlineDate = (profile: Profile, now = new Date()) => iso(entry
 /** UC Statement of Intent to Register deadline (May 1 of the year the student starts college). */
 export const sirDeadlineDate = (profile: Profile, now = new Date()) => iso(entryYear(profile, now), 5, 1);
 
-/** Today's date in California, where UC's deadline is set, as YYYY-MM-DD. */
-const pacificToday = (now: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(now);
-
-const dayNumber = (date: string) => Date.parse(`${date}T00:00:00Z`) / 86_400_000;
-
-/** Whole days until UC's deadline, counted by California calendar date: 0 means it's due tonight, negative means it passed. */
-export function daysUntilUcDeadline(profile: Profile, now = new Date()) {
-  return Math.round(dayNumber(ucDeadlineDate(profile, now)) - dayNumber(pacificToday(now)));
+/** Whole days until the nearest UC deadline (California calendar). 0 = due tonight. */
+export function daysUntilUcDeadline(_profile: Profile | null | undefined, now = new Date()) {
+  return Math.round(dayNumber(nextUcDeadlineDate(now)) - dayNumber(pacificToday(now)));
 }
 
-/** UC's filing period (Oct 1 – Nov 30) and how far through it today is, from 0 (not open yet) to 1 (closed). */
-export function filingPeriod(profile: Profile, now = new Date()) {
-  const closes = ucDeadlineDate(profile, now);
-  const opens = iso(entryYear(profile, now) - 1, 10, 1);
+/** UC's filing period (Oct 1 – Nov 30) for the nearest cycle, and progress through it. */
+export function filingPeriod(_profile: Profile | null | undefined, now = new Date()) {
+  const closes = nextUcDeadlineDate(now);
+  const opens = iso(Number(closes.slice(0, 4)), 10, 1);
   const total = dayNumber(closes) - dayNumber(opens) + 1;
   const elapsed = dayNumber(pacificToday(now)) - dayNumber(opens) + 1;
   return { opens, closes, progress: Math.min(1, Math.max(0, elapsed / total)) };

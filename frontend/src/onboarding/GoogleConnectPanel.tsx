@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, getGoogleStatus, startGoogleOAuth, type GoogleConnectionStatus } from "../api";
+import { useGoogleActivities } from "../googleActivities";
 
 interface GoogleConnectPanelProps {
   onContinue: () => void;
@@ -15,6 +16,7 @@ function clearGoogleQueryParams() {
 }
 
 export function GoogleConnectPanel({ onContinue, onBack }: GoogleConnectPanelProps) {
+  const { scan } = useGoogleActivities();
   const [status, setStatus] = useState<GoogleConnectionStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -48,14 +50,15 @@ export function GoogleConnectPanel({ onContinue, onBack }: GoogleConnectPanelPro
       if (ac.signal.aborted) return;
       if (result === "connected") {
         setJustConnected(true);
-        if (!next?.connected) await refresh(ac.signal);
+        const connected = next?.connected ? next : await refresh(ac.signal);
+        if (!ac.signal.aborted && connected?.connected) void scan({ force: true });
       } else if (result === "error") {
         setError(detail || "Google connect didn't finish. You can try again or skip.");
       }
       setLoading(false);
     })();
     return () => ac.abort();
-  }, [refresh]);
+  }, [refresh, scan]);
 
   const connect = async () => {
     setBusy(true);
@@ -74,12 +77,8 @@ export function GoogleConnectPanel({ onContinue, onBack }: GoogleConnectPanelPro
 
   return (
     <>
-      <p className="ob-section-tag">Step 4 · Optional</p>
+      <p className="ob-section-tag">Step 2 · Optional</p>
       <h1 id="ob-heading">Connect Google</h1>
-      <p className="ob-hint">
-        Optionally link Gmail, Calendar, and Drive so Track2College can read them later for deadlines and documents.
-        You can skip this and connect anytime later. Your Track2College login stays email and password.
-      </p>
 
       <div className="ob-google">
         {loading ? (
@@ -93,19 +92,13 @@ export function GoogleConnectPanel({ onContinue, onBack }: GoogleConnectPanelPro
             <p className="ob-google-note">Readonly access only — we won’t send mail or change files.</p>
           </div>
         ) : (
-          <div className="ob-google-card">
-            <p className="ob-google-title">What we can read later</p>
+          <div className="ob-google-scopes">
+            <p className="ob-google-scopes-title">What we will access</p>
             <ul className="ob-google-list">
-              <li>Gmail (readonly)</li>
-              <li>Google Calendar (readonly)</li>
-              <li>Google Drive (readonly)</li>
+              <li>Gmail (Read Only)</li>
+              <li>Google Calendar (Read Only)</li>
+              <li>Google Drive (Read Only)</li>
             </ul>
-            {!configured && (
-              <p className="ob-google-note">
-                Connect Google isn’t configured on this server yet. Skip for now, or ask your admin to add the Google
-                env keys.
-              </p>
-            )}
           </div>
         )}
 

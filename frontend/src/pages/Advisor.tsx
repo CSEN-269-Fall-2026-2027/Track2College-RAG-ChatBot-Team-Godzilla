@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, clearSession, sendChat } from "../api";
+import { useGoogleActivities } from "../googleActivities";
+import { applyGoogleActivitySuggestions, googleActivitiesConfirmMessage, withGoogleActivitiesReviewed } from "../journey/googleActivities";
 import { parseAssistantResponse } from "../parse";
 import { completeness, displayName, profileSummary, useProfile, summaryForGuide, usesProgress } from "../profile";
 import { makeTitle, newId } from "../storage";
@@ -7,10 +9,10 @@ import type { Handoff, Health } from "../App";
 import type { ActivitySectionId, AidMode, Conversation, Message, PersonalInfo, ReviewMode, StoryMode } from "../types";
 import { ChatView } from "../components/ChatView";
 import { Composer } from "../components/Composer";
-import { Character } from "../components/story/Character";
 import { Markdown } from "../components/Markdown";
 import { RetryIcon } from "../components/icons";
 import { GuidedView } from "../components/story/GuidedView";
+import { GuidedTurnBubble } from "../components/story/GuidedTurnBubble";
 import { useAuth } from "../auth";
 import { getStore } from "../data";
 import { mentorById, specialistFor, type Mentor } from "../game/characters";
@@ -18,25 +20,30 @@ import { STAGE_GUIDE, stageFor, useCurrentStage } from "../journey/guides";
 import { navigate } from "../router";
 import { activitiesStatus, clearOpenActivityAnswer, journeyOf, type CheckpointId } from "../journey/logic";
 import { applyGuidedEffect, storyComplete } from "../journey/guided";
-import { activityReportMessage, applyDrafts, currentEssay, fillInProfileMessage, ESSAY_FOLLOW_UPS, FOLLOW_UP_THANKS, usedActivities, essayNotesFrom, miloNotes, PERSONAL_ANSWER, piqAboutAsk, piqWorkOf, setPiqAnswer, suggestedPiqTitles } from "../journey/piqs";
+import { useGuidedStory } from "../journey/useGuidedStory";
+import { activityReportMessage, applyDrafts, chosenPiqs, currentEssay, fillInProfileMessage, ESSAY_FOLLOW_UPS, FOLLOW_UP_THANKS, usedActivities, essayNotesFrom, miloNotes, PERSONAL_ANSWER, piqAboutAsk, piqWorkOf, setPiqAnswer, suggestedPiqTitles } from "../journey/piqs";
 import { miloNextLine } from "../journey/miloScript";
 import { usePiqDrafts } from "../journey/usePiqDrafts";
+import { WHAT_COUNTS_ANSWER } from "../game/campusBlurbs";
 import { openerFor, type OpenerAction, type ReviewTool } from "../game/openers";
 import { ReviewToolDialog } from "../components/story/ReviewApply";
 import { virtualCounselorDone } from "../agent/callState";
-import { agentOf, applyProgressSummary, cleanTranscriptLine } from "../agent/logic";
+import { agentOf, applyProgressSummary, cleanTranscriptLine, setAgent } from "../agent/logic";
 
 interface AdvisorProps {
   userId: string;
   visible: boolean;
   onHealth: (health: Health) => void;
   handoff: Handoff | null;
+  /** Topbar can open the journey map drawer. */
+  mapOpen?: boolean;
+  onMapOpenChange?: (open: boolean) => void;
 }
 
 type Chats = Record<string, Conversation>;
 
 /** Each advisor keeps its own chat, saved to the account so it survives logout and reloads. */
-export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
+export function Advisor({ userId, visible, onHealth, handoff, mapOpen, onMapOpenChange }: AdvisorProps) {
   const { account } = useAuth();
   const { profile, update } = useProfile();
   const piqDrafts = usePiqDrafts();
@@ -46,6 +53,17 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
   const [pendingFor, setPendingFor] = useState<string | null>(null);
   const pending = pendingFor !== null;
   const [freshId, setFreshId] = useState<string | null>(null);
+  const [localMapOpen, setLocalMapOpen] = useState(false);
+  const drawerOpen = mapOpen ?? localMapOpen;
+  const setDrawerOpen = useCallback(
+    (open: boolean) => {
+      onMapOpenChange?.(open);
+      if (mapOpen === undefined) setLocalMapOpen(open);
+    },
+    [mapOpen, onMapOpenChange],
+  );
+  const { suggestions: googleSuggestions } = useGoogleActivities();
+  const [googleConfirmDismissed, setGoogleConfirmDismissed] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const profileRef = useRef(profile);
@@ -379,11 +397,14 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
   sendRef.current = send;
   retryRef.current = retry;
 
-  // The chat is with the current chapter's guide, or with the person whose planet the student
-  // clicked. Moving on to a new chapter returns the chat to that chapter's guide.
+  // Chat follows the current chapter's guide until Financial Aid, when any guide can be picked.
+  const mentorPickOpen = currentStage === "aid";
   const [selectedStage, setSelectedStage] = useState<CheckpointId | null>(null);
   useEffect(() => setSelectedStage(null), [currentStage]);
-  const stage = selectedStage ?? currentStage;
+  useEffect(() => {
+    if (!mentorPickOpen) setSelectedStage(null);
+  }, [mentorPickOpen]);
+  const stage = mentorPickOpen ? (selectedStage ?? currentStage) : currentStage;
   // Application Assistant (and Counselor tools) unlock only after earlier journey steps are done.
   const applyUnlocked = storyComplete(profile, completeness(profile).sections);
   const effectiveStage = stage === "review" && !applyUnlocked ? currentStage : stage;
@@ -396,18 +417,21 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
   const guideRef = useRef(guide.id);
   guideRef.current = guide.id;
 
-  /** Ask a guide (the one on screen by default); a different guide brings their planet into focus. */
-  /** Sends a ready-made question (a button, or a hand-off from another page) to a guide. */
+  /** Ask a guide (the one on screen by default). Other guides only when Financial Aid unlocks free picking. */
   const askGuide = useCallback((prompt: string, mentorId: Mentor["id"] = guideRef.current, preset = true, display?: string) => {
-    if (mentorId !== guideRef.current) setSelectedStage(stageFor(mentorId, currentStageRef.current));
-    const hasHistory = (chatsRef.current[mentorId]?.messages.length ?? 0) > 0;
-    sendRef.current(prompt, !hasHistory, mentorId, preset, display);
+    const locked = currentStageRef.current !== "aid";
+    const targetId = locked ? guideRef.current : mentorId;
+    if (!locked && targetId !== guideRef.current) setSelectedStage(stageFor(targetId, currentStageRef.current));
+    const hasHistory = (chatsRef.current[targetId]?.messages.length ?? 0) > 0;
+    sendRef.current(prompt, !hasHistory, targetId, preset, display);
   }, []);
   /** Starts a guide's chat over with this as the first message, dropping any reply still on its way. */
   const restartWith = useCallback((prompt: string, mentorId: Mentor["id"]) => {
-    if (mentorId !== guideRef.current) setSelectedStage(stageFor(mentorId, currentStageRef.current));
+    const locked = currentStageRef.current !== "aid";
+    const targetId = locked ? guideRef.current : mentorId;
+    if (!locked && targetId !== guideRef.current) setSelectedStage(stageFor(targetId, currentStageRef.current));
     stopRef.current();
-    sendRef.current(prompt, true, mentorId, true);
+    sendRef.current(prompt, true, targetId, true);
   }, []);
   /** 3 or more of something: Milo starts over and says to add them on the Profile page, without asking the model. */
   const sendToProfile = useCallback((section: ActivitySectionId) => {
@@ -553,7 +577,6 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
     [askGuide],
   );
   const onGuideRetry = useCallback(() => retryRef.current(guideRef.current), []);
-  const onGuideSend = useCallback((text: string) => sendRef.current(text, false, guideRef.current), []);
 
   // Questions sent from other pages (Profile, Essays, Transcript) go to the guide who covers them.
   const handled = useRef<string | null>(null);
@@ -575,16 +598,70 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
 
   const name = displayName(profile, account?.name ?? "");
   nameRef.current = name;
+
+  const guidedHandlers = useMemo(
+    () => ({
+      onAsk: (prompt: string, mentorId?: Mentor["id"], display?: string) => askGuide(prompt, mentorId, true, display),
+      onRestartAsk: restartWith,
+      onSendToProfile: sendToProfile,
+      miloMessages: chats.milo?.messages ?? [],
+    }),
+    [askGuide, restartWith, sendToProfile, chats.milo?.messages],
+  );
+  const guided = useGuidedStory(name, guidedHandlers);
+
+  // On Financial Aid, auto-follow the turn's speaker when the student hasn't picked another planet.
+  useEffect(() => {
+    if (!mentorPickOpen || selectedStage) return;
+    const speaker = guided.turn.speaker;
+    if (speaker === "counselor" || speaker === "assistant") return;
+    const target = stageFor(speaker, currentStage);
+    if (target) setSelectedStage(target);
+  }, [guided.turn.speaker, guided.turn.id, selectedStage, currentStage, mentorPickOpen]);
+
+  const selectMentor = useCallback(
+    (mentorId: Mentor["id"]) => {
+      if (!mentorPickOpen) return;
+      if (mentorId === "counselor" || mentorId === "assistant") {
+        const prev = agentOf(profileRef.current).reviewMode ?? "counselor";
+        update((p) => setAgent(p, (a) => ({ ...a, reviewMode: mentorId })));
+        setSelectedStage("review");
+        if (prev !== mentorId) onModeChange(mentorId);
+        return;
+      }
+      if (STAGE_GUIDE[currentStageRef.current] === mentorId) {
+        setSelectedStage(null);
+        return;
+      }
+      const target = stageFor(mentorId, currentStageRef.current);
+      if (target) setSelectedStage(target);
+    },
+    [update, onModeChange, mentorPickOpen],
+  );
+
+  const onGuideSend = useCallback(
+    (text: string) => {
+      if (guided.tryGuidedText(text, guideRef.current)) return;
+      sendRef.current(text, false, guideRef.current);
+    },
+    [guided],
+  );
+
   const guideChat = chats[guide.id] ?? null;
   const guideBusy = pendingFor === guide.id;
   // Before the first message, the guide opens with a line (and quick actions) based on the profile.
   const guideMode = guide.id === "penny" ? aidMode : null;
   const reviewGuide = guide.id === "counselor" || guide.id === "assistant";
   const started = !!guideChat?.messages.length;
-  // Theo, Quill, Milo once activities are done, and the Review & Apply personas keep their buttons under the first message for the whole chat.
   const miloDone = guide.id === "milo" && activitiesStatus(profile).done;
-  const showActions = reviewGuide || guide.id === "theo" || guide.id === "quill" || miloDone || (!started && !guideBusy);
   const opener = useMemo(() => openerFor(guide, profile, name, guideMode), [guide, profile, name, guideMode]);
+  // Suggested prompt chips stay under the greeting for every guide.
+  const showActions = opener.actions.length > 0;
+  const turnActive =
+    guided.turn.speaker === guide.id ||
+    (guided.turn.checkpointId === "review" && reviewGuide) ||
+    (guided.turn.checkpointId === "aid" && guide.id === "penny") ||
+    (guided.turn.checkpointId === "done" && guide.id === "sage");
   /** A button whose answer is the same for everyone: shows it right away, for no tokens. */
   const answerWithoutModel = (question: string, answer: string, mentorId: Mentor["id"]) => {
     const now = Date.now();
@@ -606,6 +683,15 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
     );
     setFreshId(reply.id);
   };
+  const pendingDraftIds = useRef<string[] | null>(null);
+  useEffect(() => {
+    const ids = pendingDraftIds.current;
+    if (!ids?.length) return;
+    if (!ids.every((id) => chosenPiqs(profile).includes(id))) return;
+    pendingDraftIds.current = null;
+    void piqDrafts.generate(ids);
+  }, [profile, piqDrafts]);
+
   const runOpener = (action: OpenerAction) => {
     if (action.kind === "tool") {
       // Don't open Apply until a full virtual-counselor run-through is done.
@@ -615,6 +701,33 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
     }
     if (action.kind === "profile") {
       navigate("profile", action.section);
+      return;
+    }
+    if (action.kind === "confirmPiqs") {
+      update((p) => applyGuidedEffect(p, { type: "setPiqs", piqIds: action.piqIds }, newId));
+      pendingDraftIds.current = action.piqIds;
+      return;
+    }
+    if (action.kind === "swapPiqs") {
+      update((p) => {
+        const j = journeyOf(p);
+        return { ...p, ucJourney: { ...j, checks: { ...j.checks, "choose-piqs": true } } };
+      });
+      return;
+    }
+    if (action.kind === "draftPiqs") {
+      void piqDrafts.generate(action.piqIds);
+      return;
+    }
+    if (action.kind === "confirmGoogle") {
+      update((p) => applyGoogleActivitySuggestions(p, googleSuggestions, newId));
+      setGoogleConfirmDismissed(true);
+      return;
+    }
+    if (action.kind === "declineGoogle") {
+      update(withGoogleActivitiesReviewed);
+      setGoogleConfirmDismissed(true);
+      navigate("profile", "activities");
       return;
     }
     if (action.kind === "followUp") {
@@ -640,40 +753,49 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
     askGuide(action.prompt, guide.id, true, action.kind === "ask" ? (action.display ?? action.label) : undefined);
   };
 
+  const speakerMentor = mentorById(guided.turn.speaker);
+  const googleReviewed = !!journeyOf(profile).checks?.["google-activities-reviewed"];
+  const showGoogleConfirm =
+    guide.id === "milo" &&
+    !googleConfirmDismissed &&
+    !googleReviewed &&
+    !activitiesStatus(profile).done &&
+    googleSuggestions.length > 0;
+  const openerActions: OpenerAction[] = showGoogleConfirm
+    ? [
+        { kind: "confirmGoogle", label: "Confirm" },
+        { kind: "declineGoogle", label: "Decline" },
+        {
+          kind: "ask",
+          label: "What counts as an activity?",
+          prompt: "What counts as an activity on the UC application?",
+          answer: WHAT_COUNTS_ANSWER,
+        },
+      ]
+    : opener.actions;
+
   return (
     <div className="advisor" hidden={!visible}>
       <div className="main">
         <GuidedView
           visible={visible}
-          studentName={name}
           userId={userId}
-          onAsk={(prompt, mentorId, display) => askGuide(prompt, mentorId, true, display)}
-          onRestartAsk={restartWith}
-          onSendToProfile={sendToProfile}
-          miloMessages={chats.milo?.messages ?? []}
           guideName={guide.name}
-          selectedStage={selectedStage}
-          onSelectStage={setSelectedStage}
-          onModeChange={onModeChange}
-          onAidModeChange={onAidModeChange}
+          mentor={guide}
+          mentorMood={guideBusy ? "thinking" : "happy"}
+          applyUnlocked={applyUnlocked}
+          mentorPickOpen={mentorPickOpen}
+          onSelectMentor={selectMentor}
+          switcherBusy={pending}
+          mapOpen={drawerOpen}
+          onMapOpenChange={setDrawerOpen}
           chat={
             <>
               <ChatView
                 intro={
                   <>
-                    <div className="guided-chat-head" title={guide.specialty}>
-                      <Character
-                        key={guide.id}
-                        mentor={guide}
-                        mood={guideBusy ? "thinking" : "happy"}
-                        size={120}
-                        className="guided-speaker-avatar"
-                      />
-                      <span>
-                        <strong>{guide.name}</strong>
-                        <small>{guide.title}</small>
-                      </span>
-                      {(started || (guide.id === "milo" && clearOpenActivityAnswer(profile) !== profile)) && (
+                    {(started || (guide.id === "milo" && clearOpenActivityAnswer(profile) !== profile)) && (
+                      <div className="guided-chat-head guided-chat-head-tools">
                         <button
                           type="button"
                           className="chat-restart"
@@ -687,23 +809,56 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
                           <RetryIcon width={14} height={14} />
                           <span>Restart</span>
                         </button>
+                      </div>
+                    )}
+                    {/* Guided prompt under greeting; Google confirm is a second chat bubble instead. */}
+                    <div className="guided-prompt-slot">
+                      {showGoogleConfirm || guided.turn.chatOnly ? null : (
+                        <GuidedTurnBubble
+                          turn={guided.turn}
+                          active={turnActive}
+                          saved={guided.saved}
+                          draft={guided.draft}
+                          setDraft={guided.setDraft}
+                          pickedCampuses={guided.pickedCampuses}
+                          setPickedCampuses={guided.setPickedCampuses}
+                          pickedPiqs={guided.pickedPiqs}
+                          setPickedPiqs={guided.setPickedPiqs}
+                          piqDrafts={guided.piqDrafts}
+                          savingActivities={guided.savingActivities}
+                          activityError={guided.activityError}
+                          canFinish={guided.canFinish}
+                          pick={guided.pick}
+                          run={guided.run}
+                          submitDraft={guided.submitDraft}
+                          onModeChange={onModeChange}
+                          onAidModeChange={onAidModeChange}
+                          speakerName={speakerMentor.name}
+                          onContinueWithSpeaker={() => selectMentor(guided.turn.speaker)}
+                        />
                       )}
                     </div>
                     <div className="row row-assistant">
-                      {/* Their opening line stays in step with their buttons, which follow what the student has picked. */}
                       <div className="bubble bubble-assistant">
                         <Markdown
                           text={
                             started && guide.id !== "theo" && guide.id !== "quill" && !miloDone
-                              ? (guideChat?.intro ?? guide.greeting(name))
+                              ? (guideChat?.intro ?? opener.text)
                               : opener.text
                           }
                         />
                       </div>
                     </div>
-                    {showActions && opener.actions.length > 0 && (
+                    {showGoogleConfirm && (
+                      <div className="row row-assistant">
+                        <div className="bubble bubble-assistant">
+                          <Markdown text={googleActivitiesConfirmMessage(googleSuggestions)} />
+                        </div>
+                      </div>
+                    )}
+                    {(showGoogleConfirm || showActions) && (
                       <div className="story-opener-actions" role="group" aria-label={`${guide.name}'s suggestions`}>
-                        {opener.actions.map((a) => {
+                        {openerActions.map((a) => {
                           const open = a.kind === "tool" && reviewTool === a.tool;
                           return (
                             <button
@@ -711,10 +866,18 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
                               type="button"
                               className={`story-opener-action${open ? " on" : ""}`}
                               onClick={() => runOpener(a)}
-                              disabled={(a.kind !== "tool" && pending) || (a.kind === "write" && piqDrafts.busy)}
+                              disabled={
+                                (a.kind !== "tool" && pending) ||
+                                (a.kind === "write" && piqDrafts.busy) ||
+                                ((a.kind === "confirmPiqs" || a.kind === "draftPiqs") && piqDrafts.busy)
+                              }
                               aria-pressed={a.kind === "tool" ? open : undefined}
                             >
-                              {a.kind === "write" && piqDrafts.isBrainstorming(a.piqId) ? "Brainstorming your essay…" : a.label}
+                              {a.kind === "write" && piqDrafts.isBrainstorming(a.piqId)
+                                ? "Brainstorming your essay…"
+                                : (a.kind === "confirmPiqs" || a.kind === "draftPiqs") && piqDrafts.busy
+                                  ? "Drafting…"
+                                  : a.label}
                             </button>
                           );
                         })}
@@ -734,6 +897,7 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
                     )}
                   </>
                 }
+                footer={null}
                 messages={guideChat?.messages ?? []}
                 pending={guideBusy}
                 busy={pending}
@@ -748,7 +912,11 @@ export function Advisor({ userId, visible, onHealth, handoff }: AdvisorProps) {
                 onSend={onGuideSend}
                 onStop={stop}
                 focusKey={visible ? (guideChat?.id ?? `story-${guide.id}`) : "hidden"}
-                placeholder={`Message ${guide.name}…`}
+                placeholder={
+                  turnActive && guided.turn.input
+                    ? guided.turn.input.placeholder
+                    : `Message ${guide.name}…`
+                }
               />
             </>
           }

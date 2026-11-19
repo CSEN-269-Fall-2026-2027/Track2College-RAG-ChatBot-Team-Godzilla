@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth";
 import { Logo, LogoutIcon, MoonIcon, SunIcon } from "../components/icons";
+import { usePlanning } from "../planning";
 import { useProfile, type SaveState } from "../profile";
 import type { Theme } from "../App";
 import type { Profile } from "../types";
 import { JourneyPath } from "./JourneyPath";
 import { GoogleConnectPanel } from "./GoogleConnectPanel";
-import { QuestionFields, SummaryList } from "./QuestionFields";
+import { QuestionFields } from "./QuestionFields";
 import {
+  ABOUT_YOU_CHECKPOINT,
   CHECKPOINT_COUNT,
   CHECKPOINTS,
+  applyTranscriptBasics,
   checkpointErrors,
   markComplete,
   questionErrors,
@@ -18,7 +21,7 @@ import {
   setCheckpoint,
 } from "./logic";
 
-type OnboardingPhase = "questions" | "google" | "summary";
+type OnboardingPhase = "questions" | "google";
 
 interface OnboardingPageProps {
   theme: Theme;
@@ -33,46 +36,82 @@ function saveLabel(state: SaveState) {
   return "";
 }
 
+function stepTag(checkpoint: number, questionId?: string) {
+  if (questionId === "transcript" || checkpoint === 0) return "Step 1";
+  if (checkpoint === ABOUT_YOU_CHECKPOINT) return "Step 3";
+  return CHECKPOINTS[checkpoint]?.title ?? "About you";
+}
+
+/**
+ * Flow: transcript → Connect Google → confirm details → start.
+ * Transcript is required; Google is optional.
+ */
 export function OnboardingPage({ theme, onToggleTheme, onFinished }: OnboardingPageProps) {
   const { account, signOut } = useAuth();
   const { profile, update, saveState } = useProfile();
-  const [checkpoint, setCp] = useState(() => resumeCheckpoint(profile));
+  const { transcripts } = usePlanning();
+  const [checkpoint, setCp] = useState(() => {
+    const saved = resumeCheckpoint(profile);
+    // Path index 1 is Google (no questions) — resume into the Google phase instead.
+    return saved === 1 ? 0 : saved;
+  });
   const [qIndex, setQIndex] = useState(0);
   const [phase, setPhase] = useState<OnboardingPhase>(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get("google") === "connected" || params.get("google") === "error" ? "google" : "questions";
+    if (params.get("google") === "connected" || params.get("google") === "error") return "google";
+    return resumeCheckpoint(profile) === 1 ? "google" : "questions";
   });
   const [errors, setErrors] = useState<string[]>([]);
   const [celebrate, setCelebrate] = useState(false);
   const [finishedAnim, setFinishedAnim] = useState(false);
 
-  const summary = phase === "summary";
   const googleStep = phase === "google";
-  const qs = useMemo(() => questionsForCheckpoint(checkpoint), [checkpoint]);
+  const qs = useMemo(() => questionsForCheckpoint(checkpoint, profile), [checkpoint, profile]);
   const question = qs[Math.min(qIndex, Math.max(0, qs.length - 1))];
+  const hasTranscript = transcripts.length > 0;
 
   /** During celebrate, show the runner already moving toward the next mark. */
-  const pathCheckpoint = summary || googleStep || finishedAnim
+  const pathCheckpoint = finishedAnim
     ? CHECKPOINT_COUNT
-    : celebrate
-      ? checkpoint >= CHECKPOINT_COUNT - 1
-        ? CHECKPOINT_COUNT
-        : checkpoint + 1
-      : checkpoint;
+    : googleStep
+      ? 1
+      : celebrate
+        ? checkpoint === 0
+          ? 1
+          : CHECKPOINT_COUNT
+        : checkpoint;
 
   useEffect(() => {
     document.title = "Onboarding · Track2College";
   }, []);
 
   useEffect(() => {
-    if (summary || googleStep || profile.onboarding.completed) return;
+    if (googleStep || profile.onboarding.completed) return;
     if (profile.onboarding.checkpoint === checkpoint) return;
     update((p) => setCheckpoint(p, checkpoint));
-  }, [checkpoint, summary, googleStep, profile.onboarding.checkpoint, profile.onboarding.completed, update]);
+  }, [checkpoint, googleStep, profile.onboarding.checkpoint, profile.onboarding.completed, update]);
 
   useEffect(() => {
     setQIndex((i) => Math.min(i, Math.max(0, qs.length - 1)));
   }, [qs.length]);
+
+  // If the transcript was uploaded before grade/year prefill existed, fill blanks once on Step 3.
+  useEffect(() => {
+    if (phase !== "questions" || checkpoint !== ABOUT_YOU_CHECKPOINT) return;
+    const latest = transcripts[0];
+    if (!latest) return;
+    update((p) => {
+      const next = applyTranscriptBasics(p, latest);
+      const same =
+        next.basics.firstName === p.basics.firstName &&
+        next.basics.highSchool === p.basics.highSchool &&
+        next.basics.gradeLevel === p.basics.gradeLevel &&
+        next.basics.graduationYear === p.basics.graduationYear &&
+        next.academics.gpaUnweighted === p.academics.gpaUnweighted &&
+        next.academics.gpaWeighted === p.academics.gpaWeighted;
+      return same ? p : next;
+    });
+  }, [phase, checkpoint, transcripts, update]);
 
   const patch = useCallback(
     (next: Profile) => {
@@ -82,28 +121,43 @@ export function OnboardingPage({ theme, onToggleTheme, onFinished }: OnboardingP
     [update],
   );
 
-  const advanceAfterCheckpoint = useCallback(() => {
-    setCelebrate(false);
-    if (checkpoint >= CHECKPOINT_COUNT - 1) {
-      // Additive step 4: Connect Google (skippable), then the existing summary.
-      setPhase("google");
-      update((p) => setCheckpoint(p, CHECKPOINT_COUNT));
+  const finish = useCallback(() => {
+    const errs = checkpointErrors(profile);
+    if (errs.length) {
+      setPhase("questions");
+      setCp(ABOUT_YOU_CHECKPOINT);
+      setQIndex(0);
+      setErrors(errs);
+      setCelebrate(false);
       return;
     }
-    setCp((c) => c + 1);
-    setQIndex(0);
-  }, [checkpoint, update]);
+    setFinishedAnim(true);
+    onFinished();
+    update((p) => markComplete(p));
+  }, [profile, onFinished, update]);
+
+  const advanceAfterCheckpoint = useCallback(() => {
+    setCelebrate(false);
+    // After transcript: Connect Google next.
+    if (checkpoint === 0) {
+      setPhase("google");
+      update((p) => setCheckpoint(p, 1));
+      return;
+    }
+    // After confirm: start the plan (no extra summary step).
+    finish();
+  }, [checkpoint, update, finish]);
 
   const completeQuestion = (opts?: { skipped?: boolean }) => {
-    if (!question || celebrate) return;
+    if (!question || celebrate || finishedAnim) return;
     if (!opts?.skipped) {
-      const errs = questionErrors(profile, question.id);
+      const errs = questionErrors(profile, question.id, { hasTranscript });
       if (errs.length) {
         setErrors(errs);
         return;
       }
     } else if (question.required) {
-      const errs = questionErrors(profile, question.id);
+      const errs = questionErrors(profile, question.id, { hasTranscript });
       setErrors(errs.length ? errs : ["This step is required."]);
       return;
     }
@@ -117,47 +171,21 @@ export function OnboardingPage({ theme, onToggleTheme, onFinished }: OnboardingP
   };
 
   const goBack = () => {
-    if (celebrate) return;
+    if (celebrate || finishedAnim) return;
     setErrors([]);
-    if (summary) {
-      setPhase("google");
-      return;
-    }
     if (googleStep) {
       setPhase("questions");
-      setCp(CHECKPOINT_COUNT - 1);
-      setQIndex(Math.max(0, questionsForCheckpoint(CHECKPOINT_COUNT - 1).length - 1));
+      setCp(0);
+      setQIndex(0);
       return;
     }
     if (qIndex > 0) {
       setQIndex((i) => i - 1);
       return;
     }
-    if (checkpoint > 0) {
-      const prev = checkpoint - 1;
-      setCp(prev);
-      setQIndex(Math.max(0, questionsForCheckpoint(prev).length - 1));
+    if (checkpoint === ABOUT_YOU_CHECKPOINT) {
+      setPhase("google");
     }
-  };
-
-  const finish = () => {
-    const errs = checkpointErrors(profile, 0);
-    if (errs.length) {
-      setPhase("questions");
-      setCp(0);
-      setQIndex(0);
-      setErrors(errs);
-      return;
-    }
-    // Summary only appears after the three question steps (+ optional Google) — refuse finish if they somehow skip ahead.
-    if (!summary) {
-      setErrors(["Keep going — finish the earlier steps first."]);
-      return;
-    }
-    setFinishedAnim(true);
-    // Route to Advisor before marking complete so the gated app doesn't open on an empty hash.
-    onFinished();
-    update((p) => markComplete(p));
   };
 
   return (
@@ -191,32 +219,17 @@ export function OnboardingPage({ theme, onToggleTheme, onFinished }: OnboardingP
           )}
 
           {googleStep ? (
-            <GoogleConnectPanel onContinue={() => setPhase("summary")} onBack={goBack} />
-          ) : summary ? (
-            <>
-              <h1 id="ob-heading">Your starting line</h1>
-              <p className="ob-hint">Glance over your answers, edit anything, then start your plan.</p>
-              <SummaryList
-                profile={profile}
-                onJump={(i) => {
-                  setPhase("questions");
-                  setCp(i);
-                  setQIndex(0);
-                  setErrors([]);
-                }}
-              />
-              <div className="ob-actions">
-                <button type="button" className="btn-ghost" onClick={goBack}>
-                  Back
-                </button>
-                <button type="button" className="btn-primary" onClick={finish}>
-                  Start my plan
-                </button>
-              </div>
-            </>
+            <GoogleConnectPanel
+              onContinue={() => {
+                setPhase("questions");
+                setCp(ABOUT_YOU_CHECKPOINT);
+                setQIndex(0);
+              }}
+              onBack={goBack}
+            />
           ) : question ? (
             <>
-              <p className="ob-section-tag">{CHECKPOINTS[checkpoint].title}</p>
+              <p className="ob-section-tag">{stepTag(checkpoint, question.id)}</p>
               <h1 id="ob-heading">{question.prompt}</h1>
               {question.hint && <p className="ob-hint">{question.hint}</p>}
 
@@ -233,17 +246,17 @@ export function OnboardingPage({ theme, onToggleTheme, onFinished }: OnboardingP
               )}
 
               <div className="ob-actions">
-                <button type="button" className="btn-ghost" onClick={goBack} disabled={(checkpoint === 0 && qIndex === 0) || celebrate}>
+                <button type="button" className="btn-ghost" onClick={goBack} disabled={(checkpoint === 0 && qIndex === 0) || celebrate || finishedAnim}>
                   Back
                 </button>
                 <div className="ob-actions-right">
                   {!question.required && (
-                    <button type="button" className="ob-skip" onClick={() => completeQuestion({ skipped: true })} disabled={celebrate}>
+                    <button type="button" className="ob-skip" onClick={() => completeQuestion({ skipped: true })} disabled={celebrate || finishedAnim}>
                       Skip question
                     </button>
                   )}
-                  <button type="button" className="btn-primary" onClick={() => completeQuestion()} disabled={celebrate}>
-                    {qIndex >= qs.length - 1 && checkpoint >= CHECKPOINT_COUNT - 1 ? "Review answers" : "Continue"}
+                  <button type="button" className="btn-primary" onClick={() => completeQuestion()} disabled={celebrate || finishedAnim}>
+                    {checkpoint === ABOUT_YOU_CHECKPOINT ? "Start my plan" : "Continue"}
                   </button>
                 </div>
               </div>

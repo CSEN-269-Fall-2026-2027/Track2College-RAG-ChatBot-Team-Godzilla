@@ -98,6 +98,7 @@ export function PlanningProvider({ userId, children }: { userId: string; childre
       storagePath: null,
       studentName: "",
       school: profileRef.current.basics.highSchool || "",
+      state: profileRef.current.basics.state || "",
       reportedGpa: { unweighted: "", weighted: "" },
       courses: [],
       summary: "",

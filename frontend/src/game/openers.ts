@@ -2,8 +2,8 @@ import { virtualCounselorDone } from "../agent/callState";
 import { agentOf } from "../agent/logic";
 import { COLLEGE_NAMES } from "../colleges";
 import { OTHER_MAJOR, UC_MAJORS } from "../constants";
-import { activitiesStatus, PIQ_ONE_LINERS, PIQ_PROMPTS, PIQ_REQUIRED } from "../journey/logic";
-import { ADD_INFO_LABEL, chosenPiqs, currentEssay, essayNeedsFollowUp, piqWorkOf, suggestEssaysPrompt } from "../journey/piqs";
+import { activitiesStatus, journeyOf, PIQ_PROMPTS, PIQ_REQUIRED } from "../journey/logic";
+import { autoPickPiqLabels, autoPickPiqs, chosenPiqs, essayDone, piqWorkOf } from "../journey/piqs";
 import type { AidMode, Profile, ReviewMode, StoryMode } from "../types";
 import { CAMPUS_BLURBS, CAMPUS_TOUR, WHAT_COUNTS_ANSWER } from "./campusBlurbs";
 import type { Mentor } from "./characters";
@@ -17,6 +17,16 @@ export type OpenerAction =
   | { kind: "followUp"; label: string; piqId: string }
   /** Has Quill write this essay. */
   | { kind: "write"; label: string; piqId: string }
+  /** Confirm Quill's four picks and draft them all. */
+  | { kind: "confirmPiqs"; label: string; piqIds: string[] }
+  /** Open the essay-topic picker to swap Quill's picks. */
+  | { kind: "swapPiqs"; label: string }
+  /** Draft the listed PIQs (after topics are already chosen). */
+  | { kind: "draftPiqs"; label: string; piqIds: string[] }
+  /** Milo: save all Google-scanned activities. */
+  | { kind: "confirmGoogle"; label: string }
+  /** Milo: skip Google suggestions and open Profile activities. */
+  | { kind: "declineGoogle"; label: string }
   /** Opens one of the application tools (agent/tasks) inside the chat (Review & Apply). */
   | { kind: "tool"; label: string; tool: ReviewTool };
 
@@ -40,25 +50,37 @@ export function financesUnknown(p: Profile): boolean {
 }
 
 /** The first thing the Review & Apply persona says (its buttons stay under this message). */
-export function reviewModeLine(mode: ReviewMode, name: string, callDone = true): string {
+export function reviewModeLine(mode: ReviewMode, name: string, callDone = true, emailDone = false): string {
   const hi = `Hey${name ? ` ${name}` : ""}!`;
   if (mode === "counselor") {
-    return `${hi} Want to email your school counselor or meet with Jordan, your virtual counselor?`;
+    if (!emailDone) {
+      return `${hi} First we'll email your school counselor — I'll find them and draft the message. Then you'll meet Jordan, your virtual counselor.`;
+    }
+    if (!callDone) {
+      return `${hi} Email's done. Next, meet with Jordan, your virtual counselor.`;
+    }
+    return `${hi} You've emailed your counselor and met Jordan. Switch to the Application assistant when you're ready to apply.`;
   }
-  // Application assistant: only offer apply after a full call with Jordan.
+  // Application assistant: email → virtual counselor → apply.
+  if (!emailDone) {
+    return `${hi} First email your school counselor (Counselor tab), then meet Jordan — then I can fill in your UC application.`;
+  }
   return callDone
-    ? `${hi} Want me to fill in your UC application from your profile?`
+    ? `${hi} Want me to fill in your UC application from your profile? I'll work in the background unless you want to watch.`
     : `${hi} First finish a full meeting with Jordan, your virtual counselor — then I can fill in your UC application.`;
 }
 
-/** The buttons under the Review & Apply persona's first message. */
-export function reviewActions(mode: ReviewMode, callDone = true): OpenerAction[] {
+/** The buttons under the Review & Apply persona's first message. Forced order: email → call → apply. */
+export function reviewActions(mode: ReviewMode, callDone = true, emailDone = false): OpenerAction[] {
   if (mode === "counselor") {
+    if (!emailDone) return [{ kind: "tool", label: "Email my counselor", tool: "email" }];
+    if (!callDone) return [{ kind: "tool", label: "Meet with my virtual counselor", tool: "call" }];
     return [
-      { kind: "tool", label: "Help me email my counselor", tool: "email" },
-      { kind: "tool", label: "Meet with my virtual counselor", tool: "call" },
+      { kind: "tool", label: "Email my counselor again", tool: "email" },
+      { kind: "tool", label: "Meet with my virtual counselor again", tool: "call" },
     ];
   }
+  if (!emailDone) return [{ kind: "tool", label: "Email my counselor first", tool: "email" }];
   return callDone
     ? [{ kind: "tool", label: "Yes, help me apply", tool: "apply" }]
     : [{ kind: "tool", label: "Meet with my virtual counselor", tool: "call" }];
@@ -97,56 +119,93 @@ export function openerFor(mentor: Mentor, profile: Profile, name: string, mode?:
   }
 
   if (mentor.id === "counselor" || mentor.id === "assistant") {
-    const callDone = virtualCounselorDone(agentOf(profile).counselorCall);
-    return { text: reviewModeLine(mentor.id, name, callDone), actions: reviewActions(mentor.id, callDone) };
+    const agent = agentOf(profile);
+    const callDone = virtualCounselorDone(agent.counselorCall);
+    const emailDone = !!agent.counselorEmail?.sentAt || !!agent.counselorEmail?.openedAt;
+    return { text: reviewModeLine(mentor.id, name, callDone, emailDone), actions: reviewActions(mentor.id, callDone, emailDone) };
   }
 
   if (mentor.id === "quill") {
     const chosen = chosenPiqs(profile);
+    const picking = !!journeyOf(profile).checks?.["choose-piqs"];
     if (chosen.length < PIQ_REQUIRED) {
+      if (picking) {
+        return {
+          text: `${hi} Pick any four essay topics in the panel above.`,
+          actions: [],
+        };
+      }
+      const labels = autoPickPiqLabels(profile);
+      const picks = labels.join("\n");
+      const piqIds = autoPickPiqs(profile);
       return {
-        text: `${hi} Do you want to learn more about each essay question?`,
+        text: `${hi} I'll be writing about these four essays:\n\n${picks}`,
         actions: [
-          { kind: "ask", label: "Suggest four essays for me", prompt: suggestEssaysPrompt(profile) },
-          ...PIQ_PROMPTS.map((q): OpenerAction => ({ kind: "ask", label: q.title, prompt: `Tell me about the "${q.title}" question: ${q.prompt}`, display: `Tell me about the ${q.title} question.` })),
+          {
+            kind: "ask",
+            label: "Why?",
+            prompt:
+              `Why did you select these four essays for me?\n\nThe four you picked:\n${picks}\n\n` +
+              "Explain briefly, in plain language, how they fit my activities and major.",
+          },
+          { kind: "confirmPiqs", label: "Sounds good", piqIds },
+          { kind: "swapPiqs", label: "I want to swap" },
         ],
       };
     }
-    const id = currentEssay(profile);
-    const piq = PIQ_PROMPTS.find((q) => q.id === id);
-    if (!id || !piq) {
-      const written = chosen.flatMap((essayId) => {
-        const q = PIQ_PROMPTS.find((x) => x.id === essayId);
-        const text = piqWorkOf(profile, essayId).draft?.text.trim();
-        return q && text ? [{ q, text }] : [];
-      });
+
+    const pending = chosen.filter((id) => !essayDone(profile, id));
+    if (pending.length) {
       return {
-        text: `${hi} All four of your essays are done. Nice work!`,
-        actions: written.map(({ q, text }) => ({
-          kind: "ask",
-          label: `Analyze my ${q.title.toLowerCase()} essay`,
-          prompt: `Please analyze my essay about ${q.title}. The question is: ${q.prompt}\n\nMy essay:\n${text}`,
-        })),
+        text: `${hi} I'll draft all four essays now — they'll land in Profile → Essays.`,
+        actions: [{ kind: "draftPiqs", label: pending.length === PIQ_REQUIRED ? "Draft my essays" : "Finish drafting", piqIds: pending }],
       };
     }
-    const promptNumber = PIQ_PROMPTS.findIndex((q) => q.id === id) + 1;
+
+    const written = chosen.flatMap((essayId) => {
+      const q = PIQ_PROMPTS.find((x) => x.id === essayId);
+      const text = piqWorkOf(profile, essayId).draft?.text.trim();
+      return q && text ? [{ q, text }] : [];
+    });
     return {
-      text: `${hi} You selected Prompt #${promptNumber}: **${piq.title}**. ${PIQ_ONE_LINERS[id]}`,
+      text: `${hi} Your four essay drafts are ready. Would you like to add anything to the essays?`,
       actions: [
-        { kind: "ask", label: "Analyze my readiness for this essay", prompt: `Analyze my readiness for my "${piq.title}" essay. The question is: ${piq.prompt}` },
-        { kind: "ask", label: "How can I write this essay well?", prompt: `How can I write my "${piq.title}" essay well? The question is: ${piq.prompt}` },
-        ...(essayNeedsFollowUp(profile, id) ? [{ kind: "followUp" as const, label: ADD_INFO_LABEL, piqId: id }] : []),
-        { kind: "write", label: "Brainstorm my essay", piqId: id },
+        {
+          kind: "ask",
+          label: "Yes, add something",
+          prompt:
+            "I'd like to add something to my essays. Ask me what I want to change or add, then help me revise.",
+        },
+        { kind: "profile", label: "Open essays in Profile", section: "essays" },
+        ...written.map(({ q, text }) => ({
+          kind: "ask" as const,
+          label: `Analyze ${q.title}`,
+          prompt: `Please analyze my essay about ${q.title}. The question is: ${q.prompt}\n\nMy essay:\n${text}`,
+        })),
       ],
     };
   }
 
-  if (mentor.id === "milo" && activitiesStatus(profile).done) {
+  if (mentor.id === "milo") {
+    if (activitiesStatus(profile).done) {
+      return {
+        text: `${hi} Do you want to add more activities?`,
+        actions: [
+          { kind: "ask", label: "What counts as an activity?", prompt: "What counts as an activity on the UC application?", answer: WHAT_COUNTS_ANSWER },
+          { kind: "profile", label: "Add an activity", section: "activities" },
+        ],
+      };
+    }
     return {
-      text: `${hi} Do you want to add more activities?`,
+      text: `${hi} I'm Milo — I'll help you build your activities list.`,
       actions: [
         { kind: "ask", label: "What counts as an activity?", prompt: "What counts as an activity on the UC application?", answer: WHAT_COUNTS_ANSWER },
-        { kind: "profile", label: "Add an activity", section: "activities" },
+        {
+          kind: "ask",
+          label: "How many should I list?",
+          prompt: "How many activities should I list on the UC application, and what matters most to include?",
+        },
+        { kind: "profile", label: "Open activities in Profile", section: "activities" },
       ],
     };
   }

@@ -9,6 +9,7 @@ import { AuthPage } from "./pages/AuthPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { Advisor } from "./pages/Advisor";
 import { PlanningProvider } from "./planning";
+import { GoogleActivitiesProvider } from "./googleActivities";
 import { GameProvider } from "./game/GameProvider";
 import { AppTopbar } from "./components/AppTopbar";
 import { Logo } from "./components/icons";
@@ -94,8 +95,9 @@ function GatedApp({
   const { profile } = useProfile();
   const { route, param } = useLocation();
   const [handoff, setHandoff] = useState<Handoff | null>(null);
+  const [mapOpen, setMapOpen] = useState(false);
   const complete = isOnboardingComplete(profile);
-  // Where the map's Back button returns to.
+  // Where the map's Back button returns to (legacy full-page map route).
   const lastRoute = useRef<Route>("advisor");
   if (route !== "map") lastRoute.current = route;
 
@@ -108,6 +110,10 @@ function GatedApp({
     if (!complete) return;
     if (route !== "advisor") document.title = `${TITLES[route]} · Track2College`;
   }, [route, complete]);
+
+  useEffect(() => {
+    if (route !== "advisor") setMapOpen(false);
+  }, [route]);
 
   if (!complete) {
     return (
@@ -127,7 +133,14 @@ function GatedApp({
         <AppTopbar route={route} health={health} theme={theme} onToggleTheme={toggleTheme} />
         {route === "map" && <JourneyMap userId={userId} onBack={() => navigate(lastRoute.current)} />}
         {route === "profile" && <ProfilePage section={param} onAsk={askAdvisor} />}
-        <Advisor userId={userId} visible={route === "advisor"} onHealth={setHealth} handoff={handoff} />
+        <Advisor
+          userId={userId}
+          visible={route === "advisor"}
+          onHealth={setHealth}
+          handoff={handoff}
+          mapOpen={mapOpen}
+          onMapOpenChange={setMapOpen}
+        />
       </main>
     </div>
   );
@@ -144,11 +157,13 @@ function Shell() {
   return (
     <ProfileProvider key={account.id} userId={account.id} name={account.name} fallback={<LoadingScreen />}>
       <PlanningProvider userId={account.id}>
-        <GameProvider userId={account.id}>
-          <PiqDraftsProvider>
-            <GatedApp userId={account.id} theme={theme} toggleTheme={toggleTheme} health={health} setHealth={setHealth} />
-          </PiqDraftsProvider>
-        </GameProvider>
+        <GoogleActivitiesProvider userId={account.id}>
+          <GameProvider userId={account.id}>
+            <PiqDraftsProvider>
+              <GatedApp userId={account.id} theme={theme} toggleTheme={toggleTheme} health={health} setHealth={setHealth} />
+            </PiqDraftsProvider>
+          </GameProvider>
+        </GoogleActivitiesProvider>
       </PlanningProvider>
     </ProfileProvider>
   );

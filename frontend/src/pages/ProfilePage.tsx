@@ -24,6 +24,7 @@ import { newId } from "../storage";
 import type { ActivityCategory, Award, PersonalInfo, Profile, TranscriptCourse } from "../types";
 import { MAJOR_CHOICES } from "../constants";
 import { ProgressRing, Segmented, SelectField, TextArea, TextField, type Option } from "../components/Form";
+import { GoogleGrabPanel } from "../components/GoogleGrabPanel";
 import { AlertIcon, CheckIcon, PlusIcon, TrashIcon } from "../components/icons";
 import { EssayTab } from "./EssayTab";
 import { InterviewTab, interviewProgress } from "./InterviewTab";
@@ -313,6 +314,7 @@ export function ProfilePage({ section: param, onAsk }: { section: string | null;
 
             {section === "activities" && (
               <Panel {...panelProps("activities")}>
+                <GoogleGrabPanel />
                 {isEditing("activities") ? <ActivitiesWorkspace profile={profile} update={update} /> : <ActivitiesSummary profile={profile} onAdd={() => setEdit("activities", true)} />}
                 <ActivitiesDone profile={profile} update={update} canReset={!isEditing("activities")} />
               </Panel>

@@ -13,14 +13,13 @@ import {
   isUc,
   journeyOf,
   withActivitySection,
-  PIQ_PROMPTS,
   PIQ_REQUIRED,
   toggleCampus,
   togglePiq,
   type Checkpoint,
   type CheckpointId,
 } from "./logic";
-import { ADD_INFO_LABEL, chosenPiqs, essayDone, essayNeedsFollowUp } from "./piqs";
+import { chosenPiqs, essayDone } from "./piqs";
 
 /** Rough unweighted GPA choices (4.0 scale). */
 export const GPA_RANGES = [
@@ -128,6 +127,8 @@ export interface GuidedTurn {
   campusPicker?: boolean;
   /** Show all 8 PIQs as checkboxes; submit fires setPiqs with exactly 4. */
   piqPicker?: boolean;
+  /** Hold the essays chapter without a guided bubble — Quill's chat opener owns the UI. */
+  chatOnly?: boolean;
   finished: boolean;
 }
 
@@ -209,6 +210,24 @@ export function nextGuidedTurn(
         { id: "manual", label: "Ask my own question", effect: { type: "focusChat" } },
       ],
       finished: true,
+    };
+  }
+
+  // Onboarding prefills all nine UCs — ask Theo to confirm before moving on (even if the UC step is otherwise done).
+  const ucCount = profile.colleges.filter(isUc).length;
+  if (ucCount >= 9 && !journeyOf(profile).checks?.["ucs-confirmed"] && !skipIds.has("confirm-ucs")) {
+    return {
+      id: "confirm-ucs",
+      checkpointId: "ucs",
+      speaker: "theo",
+      chapter: "Choose UCs",
+      prompt: hi("we'll apply to all nine UCs. You can unselect any in Profile anytime — sound good?"),
+      choices: [
+        { id: "confirm", label: "Yes, all nine", highlight: true, effect: { type: "toggleCheck", checkId: "ucs-confirmed" } },
+        { id: "edit", label: "Let me pick which ones", effect: { type: "ask", mentorId: "theo", prompt: "I want to change which UC campuses I'm applying to. What should I consider?" } },
+        { id: "later", label: "Ask me later", effect: DEFER },
+      ],
+      finished: false,
     };
   }
 
@@ -363,6 +382,16 @@ function turnsFor(
         choices: [],
         campusPicker: true,
       });
+    } else if (ucs.length >= 9 && !(journeyOf(profile).checks?.["ucs-confirmed"])) {
+      out.push({
+        id: "confirm-ucs",
+        speaker: "theo",
+        prompt: hi("we'll apply to all nine UCs. You can unselect any in Profile anytime — sound good?"),
+        choices: [
+          { id: "confirm", label: "Yes, all nine", highlight: true, effect: { type: "toggleCheck", checkId: "ucs-confirmed" } },
+          { id: "edit", label: "Let me pick which ones", effect: { type: "ask", mentorId: "theo", prompt: "I want to change which UC campuses I'm applying to. What should I consider?" } },
+        ],
+      });
     }
     // Onboarding usually sets the major already. It's the same one at every campus, so it's asked once.
     if (!profile.goals.intendedMajor) {
@@ -413,32 +442,37 @@ function turnsFor(
     const j = journeyOf(profile);
     const chosen = Object.keys(j.piqs);
     if (chosen.length < PIQ_REQUIRED) {
-      out.push({
-        id: "pick-piq",
-        speaker: "quill",
-        prompt: hi("please choose 4 essay topics."),
-        choices: [],
-        piqPicker: true,
-      });
+      if (j.checks?.["choose-piqs"]) {
+        out.push({
+          id: "pick-piq",
+          speaker: "quill",
+          prompt: hi("please choose 4 essay topics."),
+          choices: [],
+          piqPicker: true,
+        });
+      } else {
+        // Quill's chat opener lists the four picks + Why / Sounds good / Swap.
+        out.push({
+          id: "confirm-piq-chat",
+          speaker: "quill",
+          prompt: "",
+          choices: [],
+          chatOnly: true,
+        });
+      }
+    } else {
+      const pending = chosenPiqs(profile).filter((id) => !essayDone(profile, id));
+      if (pending.length) {
+        // Drafting happens from Quill's chat chips — keep the chapter from skipping ahead.
+        out.push({
+          id: "draft-piq-chat",
+          speaker: "quill",
+          prompt: "",
+          choices: [],
+          chatOnly: true,
+        });
+      }
     }
-
-    // One essay at a time, in order. Once one is filled out, the next comes up. Skipped essays wait.
-    const skipped = j.skippedPiqs ?? [];
-    chosenPiqs(profile).forEach((piqId, i) => {
-      const meta = PIQ_PROMPTS.find((q) => q.id === piqId);
-      if (!meta || essayDone(profile, piqId) || skipped.includes(piqId)) return;
-      out.push({
-        id: `generate-${piqId}`,
-        speaker: "quill",
-        prompt: hi(`essay ${i + 1} of ${PIQ_REQUIRED}: ${meta.title}. Want me to write it?`),
-        ...(essayNeedsFollowUp(profile, piqId) ? { note: `*Essay generation would improve with more information. Please select "${ADD_INFO_LABEL}" in the chat.` } : {}),
-        choices: [
-          { id: "generate", label: "Generate my essay", highlight: true, effect: { type: "generatePiqs", piqIds: [piqId] } },
-          { id: "paste", label: "I already wrote my essay", effect: { type: "pasteEssay", piqId } },
-          { id: "skip", label: "Skip this essay for now", effect: { type: "skipPiq", piqId } },
-        ],
-      });
-    });
   }
 
   if (cp.id === "review") {
@@ -545,10 +579,13 @@ export function applyGuidedEffect(profile: Profile, effect: GuidedEffect, newId:
       return { ...profile, ucJourney: togglePiq(journeyOf(profile), effect.piqId) };
     case "setPiqs": {
       const ids = effect.piqIds.slice(0, PIQ_REQUIRED);
-      const prev = journeyOf(profile).piqs;
+      const cur = journeyOf(profile);
+      const prev = cur.piqs;
       const piqs: Record<string, "not-started" | "drafting" | "ready"> = {};
       for (const id of ids) piqs[id] = prev[id] ?? "not-started";
-      return { ...profile, ucJourney: { ...journeyOf(profile), piqs } };
+      const checks = { ...cur.checks };
+      delete checks["choose-piqs"];
+      return { ...profile, ucJourney: { ...cur, piqs, checks } };
     }
     case "toggleCheck": {
       const cur = journeyOf(profile);

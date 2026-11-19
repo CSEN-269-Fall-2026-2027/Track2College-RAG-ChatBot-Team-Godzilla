@@ -7,6 +7,8 @@ import { ArrowUpIcon } from "./icons";
 interface ChatViewProps {
   /** Shown above the first message (e.g. the guide's opening line). */
   intro?: ReactNode;
+  /** In-thread guided turn (choices / pickers) pinned under messages. */
+  footer?: ReactNode;
   messages: Message[];
   pending: boolean;
   busy: boolean;
@@ -19,7 +21,7 @@ interface ChatViewProps {
 
 const STICK_THRESHOLD = 96;
 
-export function ChatView({ intro, messages, pending, busy, freshId, onFollowup, onRetry, onSaveEssay, onFillInProfile }: ChatViewProps) {
+export function ChatView({ intro, footer, messages, pending, busy, freshId, onFollowup, onRetry, onSaveEssay, onFillInProfile }: ChatViewProps) {
   const major = useProfile().profile.goals.intendedMajor;
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -83,6 +85,7 @@ export function ChatView({ intro, messages, pending, busy, freshId, onFollowup, 
           ),
         )}
           {pending && <ThinkingMessage />}
+          {footer}
         </div>
       </div>
       {showJump && (

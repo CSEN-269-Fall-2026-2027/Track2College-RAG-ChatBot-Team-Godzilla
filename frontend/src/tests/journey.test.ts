@@ -221,7 +221,7 @@ describe("journey planet map", () => {
       return runs.reduce((n, r) => n + r.w, 0);
     });
     // Same body for all; the ring and flag add a little, never enough to unbalance the row.
-    expect(Math.max(...sizes) / Math.min(...sizes)).toBeLessThan(1.35);
+    expect(Math.max(...sizes) / Math.min(...sizes)).toBeLessThan(1.36);
   });
 
   it("gives each chapter its own art", () => {

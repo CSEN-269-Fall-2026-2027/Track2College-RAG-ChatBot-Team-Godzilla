@@ -83,7 +83,7 @@ const TOOL_COPY: Record<ReviewTool, ToolCopy> = {
   email: {
     title: "Email your school counselor",
     guide: "counselor",
-    steps: ["Find your counselor on your school's website", "Review and edit the draft", "Open it in Gmail and click Send"],
+    steps: ["We search for your counselor", "We draft the message", "Open Gmail and click Send"],
     note: "Nothing is sent until you click Send in Gmail.",
   },
   call: {

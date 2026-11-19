@@ -1,4 +1,6 @@
-import type { GradeLevel, Profile } from "../types";
+import { COLLEGES } from "../colleges";
+import type { GradeLevel, HighSchoolGrade, Profile, Transcript, TranscriptCourse } from "../types";
+import { newId } from "../storage";
 
 export const CHECKPOINT_COUNT = 3;
 
@@ -9,11 +11,15 @@ export interface CheckpointDef {
   label: string;
 }
 
+/** Path marks: transcript → Google → confirm what we know. */
 export const CHECKPOINTS: CheckpointDef[] = [
-  { id: "guide", title: "About you", label: "Info" },
-  { id: "school", title: "Your academic history", label: "History" },
-  { id: "interests", title: "Your interests", label: "Interests" },
+  { id: "transcript", title: "Your transcript", label: "Transcript" },
+  { id: "google", title: "Connect Google", label: "Google" },
+  { id: "you", title: "Confirm details", label: "Confirm" },
 ];
+
+/** Question-checkpoint index for the confirm step (Google is a path mark / phase, not a question). */
+export const ABOUT_YOU_CHECKPOINT = 2;
 
 export interface QuestionDef {
   id: string;
@@ -22,36 +28,98 @@ export interface QuestionDef {
   hint?: string;
   /** Must answer before Continue (Skip disabled). */
   required?: boolean;
+  /** Hide when already filled (e.g. from transcript). */
+  skipIfFilled?: (profile: Profile) => boolean;
 }
 
 /**
- * Three checkpoints to start. About you is required; history and interests
- * questions can be skipped one-by-one, but every checkpoint must be visited
- * before "Start my plan". Activities, UC picks, essays, and aid come later.
+ * Transcript is step 1 (required). Google connect is step 2.
+ * Step 3 is one confirm screen of everything we already have (editable).
  */
 export const QUESTIONS: QuestionDef[] = [
-  { id: "name", checkpoint: 0, prompt: "What should we call you?", hint: "A first name or nickname is perfect.", required: true },
-  { id: "grade", checkpoint: 0, prompt: "What grade are you in?", required: true },
-  { id: "year", checkpoint: 0, prompt: "When do you expect to graduate high school?", required: true },
-  { id: "school", checkpoint: 0, prompt: "What’s the name of your high school?", required: true },
-  { id: "state", checkpoint: 0, prompt: "Where do you go to school?", hint: "State or outside the U.S. — not a residency determination.", required: true },
   {
     id: "transcript",
-    checkpoint: 1,
-    prompt: "Have a transcript handy?",
-    hint: "Optional — upload if you want, or enter courses later. An unofficial copy from your school portal works.",
+    checkpoint: 0,
+    prompt: "Upload your transcript",
+    required: true,
   },
-  { id: "gpa", checkpoint: 1, prompt: "What’s your school-reported GPA, if you know it?" },
-  { id: "subjects", checkpoint: 2, prompt: "What subjects do you enjoy?" },
-  { id: "majors", checkpoint: 2, prompt: "Which major do you plan to apply for?", hint: "Pick one for all your UC campuses. You can change it anytime." },
+  {
+    id: "confirm",
+    checkpoint: ABOUT_YOU_CHECKPOINT,
+    prompt: "Does this look right?",
+    required: true,
+  },
 ];
 
-export function questionsForCheckpoint(checkpoint: number): QuestionDef[] {
-  return QUESTIONS.filter((q) => q.checkpoint === checkpoint);
+export function questionsForCheckpoint(checkpoint: number, profile?: Profile): QuestionDef[] {
+  return QUESTIONS.filter((q) => {
+    if (q.checkpoint !== checkpoint) return false;
+    if (profile && q.skipIfFilled?.(profile)) return false;
+    return true;
+  });
 }
 
-export function questionErrors(profile: Profile, questionId: string): string[] {
+const HS_GRADES: HighSchoolGrade[] = ["9", "10", "11", "12"];
+
+/**
+ * Current grade from transcript years: courses through N mean the student is in N+1
+ * (capped at 12). e.g. grades through 11 → 12th grader.
+ */
+export function inferGradeFromCourses(courses: TranscriptCourse[]): GradeLevel | "" {
+  let best = 0;
+  for (const course of courses) {
+    if (!HS_GRADES.includes(course.gradeLevel as HighSchoolGrade)) continue;
+    const n = Number(course.gradeLevel);
+    if (n > best) best = n;
+  }
+  if (!best) return "";
+  return String(Math.min(best + 1, 12)) as GradeLevel;
+}
+
+/** Spring year that ends the current school year (July–June). */
+export function schoolYearEndYear(now = new Date()): number {
+  const year = now.getFullYear();
+  return now.getMonth() >= 6 ? year + 1 : year;
+}
+
+/** Expected HS graduation year from current grade (12 → this school year, 11 → +1, …). */
+export function inferGraduationYear(grade: GradeLevel | "", now = new Date()): string {
+  if (!grade || !HS_GRADES.includes(grade as HighSchoolGrade)) return "";
+  const yearsLeft = 12 - Number(grade);
+  return String(schoolYearEndYear(now) + yearsLeft);
+}
+
+/** Prefill profile basics/GPA from a transcript without overwriting edits the student already made. */
+export function applyTranscriptBasics(profile: Profile, transcript: Transcript): Profile {
+  const first = transcript.studentName.trim().split(/\s+/)[0] ?? "";
+  const grade = inferGradeFromCourses(transcript.courses);
+  const year = inferGraduationYear(grade);
+  const state = (transcript.state || "").trim().toUpperCase();
+  const knownState = state && US_STATES.includes(state) ? state : "";
+  return {
+    ...profile,
+    basics: {
+      ...profile.basics,
+      firstName: profile.basics.firstName || first,
+      highSchool: profile.basics.highSchool || transcript.school,
+      state: profile.basics.state || knownState,
+      gradeLevel: profile.basics.gradeLevel || grade || profile.basics.gradeLevel,
+      graduationYear: profile.basics.graduationYear || year,
+    },
+    academics: {
+      ...profile.academics,
+      gpaUnweighted: profile.academics.gpaUnweighted || transcript.reportedGpa.unweighted,
+      gpaWeighted: profile.academics.gpaWeighted || transcript.reportedGpa.weighted,
+    },
+  };
+}
+
+export function questionErrors(profile: Profile, questionId: string, opts?: { hasTranscript?: boolean }): string[] {
   switch (questionId) {
+    case "transcript":
+      return opts?.hasTranscript ? [] : ["Upload your transcript to continue."];
+    case "confirm":
+      return checkpointErrors(profile);
     case "name":
       return profile.basics.firstName.trim() ? [] : ["Add the name you’d like us to use."];
     case "grade":
@@ -71,15 +139,13 @@ export function questionErrors(profile: Profile, questionId: string): string[] {
 }
 
 /** Required fields across the whole journey (used before “Start my plan”). */
-export function checkpointErrors(profile: Profile, checkpoint: number): string[] {
+export function checkpointErrors(profile: Profile, _checkpoint = ABOUT_YOU_CHECKPOINT): string[] {
   const errors: string[] = [];
-  if (checkpoint === 0) {
-    errors.push(...questionErrors(profile, "name"));
-    errors.push(...questionErrors(profile, "grade"));
-    errors.push(...questionErrors(profile, "year"));
-    errors.push(...questionErrors(profile, "school"));
-    errors.push(...questionErrors(profile, "state"));
-  }
+  errors.push(...questionErrors(profile, "name"));
+  errors.push(...questionErrors(profile, "grade"));
+  errors.push(...questionErrors(profile, "year"));
+  errors.push(...questionErrors(profile, "school"));
+  errors.push(...questionErrors(profile, "state"));
   return errors;
 }
 
@@ -114,11 +180,30 @@ export function toggleList(list: string[], value: string): string[] {
   return list.includes(value) ? list.filter((x) => x !== value) : [...list, value];
 }
 
-export function markComplete(profile: Profile): Profile {
+/** Prefill every UC campus (student can unselect later in Profile). */
+export function withAllUcs(profile: Profile): Profile {
+  const hasUc = profile.colleges.some((c) => COLLEGES.some((u) => u.name.toLowerCase() === c.name.toLowerCase()));
+  if (hasUc) return profile;
   return {
     ...profile,
+    colleges: COLLEGES.map((c) => ({
+      id: newId(),
+      name: c.name,
+      status: "researching" as const,
+      plan: "UC" as const,
+      deadline: "",
+      notes: "",
+      major: "",
+    })),
+  };
+}
+
+export function markComplete(profile: Profile): Profile {
+  const withUcs = withAllUcs(profile);
+  return {
+    ...withUcs,
     onboarding: {
-      ...profile.onboarding,
+      ...withUcs.onboarding,
       completed: true,
       checkpoint: CHECKPOINT_COUNT,
       completedAt: Date.now(),

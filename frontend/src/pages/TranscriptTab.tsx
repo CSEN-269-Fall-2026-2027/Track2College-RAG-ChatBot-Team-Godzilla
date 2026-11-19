@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { AG_AREAS, AREA_LABEL, LEVEL_LABEL, agProgress } from "../academics";
 import { formatDate } from "../format";
+import { applyTranscriptBasics } from "../onboarding/logic";
 import { TRANSCRIPT_TYPES, usePlanning } from "../planning";
 import { useProfile } from "../profile";
 import { newId } from "../storage";
@@ -171,27 +172,31 @@ function TranscriptView({ transcript, transcripts, onSelect, onChange, onRemove,
   const { update } = useProfile();
   const progress = useMemo(() => agProgress(transcript.courses), [transcript.courses]);
 
-  // What the transcript says fills the profile's blanks on its own (school, school-reported GPA);
+  // What the transcript says fills the profile's blanks on its own (school, state, school-reported GPA);
   // anything the student already typed stays.
   useEffect(() => {
-    const { school, reportedGpa } = transcript;
     update((p) => {
-      const next = {
-        ...p,
-        basics: { ...p.basics, highSchool: p.basics.highSchool || school },
-        academics: {
-          ...p.academics,
-          gpaUnweighted: p.academics.gpaUnweighted || reportedGpa.unweighted,
-          gpaWeighted: p.academics.gpaWeighted || reportedGpa.weighted,
-        },
-      };
+      const next = applyTranscriptBasics(p, transcript);
       const same =
         next.basics.highSchool === p.basics.highSchool &&
+        next.basics.state === p.basics.state &&
+        next.basics.firstName === p.basics.firstName &&
+        next.basics.gradeLevel === p.basics.gradeLevel &&
+        next.basics.graduationYear === p.basics.graduationYear &&
         next.academics.gpaUnweighted === p.academics.gpaUnweighted &&
         next.academics.gpaWeighted === p.academics.gpaWeighted;
       return same ? p : next;
     });
-  }, [transcript.id, transcript.school, transcript.reportedGpa.unweighted, transcript.reportedGpa.weighted, update]);
+  }, [
+    transcript.id,
+    transcript.school,
+    transcript.state,
+    transcript.studentName,
+    transcript.reportedGpa.unweighted,
+    transcript.reportedGpa.weighted,
+    transcript.courses,
+    update,
+  ]);
 
   // Older uploads can hold rows the reader repeated word for word; keep one of each.
   // Blank manual rows share an empty name key — leave them alone so "Add a course" works.

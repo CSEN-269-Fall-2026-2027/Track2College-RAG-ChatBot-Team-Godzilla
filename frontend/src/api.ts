@@ -136,6 +136,7 @@ function fileToBase64(file: File): Promise<string> {
 interface TranscriptResponse {
   student_name: string;
   school: string;
+  state?: string;
   reported_gpa: { unweighted: string; weighted: string };
   courses: { name: string; grade_level: TranscriptCourse["gradeLevel"]; term: string; grade: string; level: CourseLevel; area: AgArea; semesters: number }[];
   summary: string;
@@ -155,6 +156,7 @@ export async function analyzeTranscript(
   return {
     studentName: result.student_name,
     school: result.school,
+    state: (result.state || "").trim().toUpperCase(),
     reportedGpa: result.reported_gpa,
     courses: result.courses.map((c) => ({
       id: crypto.randomUUID(),
@@ -246,6 +248,19 @@ export async function generatePiqDrafts(
 export async function extractActivities(notes: string, section: string, signal?: AbortSignal): Promise<{ name: string; role: string; description: string; level: string }[]> {
   const result = await post<{ activities: { name: string; role: string; description: string; level: string }[] }>("/activities/extract", { notes, section }, signal);
   return result.activities;
+}
+
+export interface GoogleActivitySuggestion {
+  name: string;
+  role: string;
+  description: string;
+  level: string;
+  section: string;
+}
+
+/** Suggests activities from the student's connected Gmail + Calendar. */
+export function suggestGoogleActivities(signal?: AbortSignal): Promise<GoogleActivitySuggestion[]> {
+  return get<{ activities: GoogleActivitySuggestion[] }>("/google/activities", signal).then((r) => r.activities);
 }
 
 export interface FoundCounselor {

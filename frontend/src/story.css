@@ -35,7 +35,7 @@
 .story-chat-thread .bubble {
   font-size: 16.5px;
   line-height: 1.55;
-  max-width: min(86%, 640px);
+  max-width: min(94%, 820px);
 }
 
 /* Match the bubble size — default assistant prose is smaller for the main Advisor chat. */
@@ -49,7 +49,7 @@
 
 /* Message box sits centered under the conversation, apart from the guide panel. */
 .story-chat-thread .composer-wrap {
-  max-width: 760px;
+  max-width: 920px;
   margin: 8px auto 0;
   padding-inline: 8px;
 }
@@ -480,10 +480,114 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  /* Map + reply card on the left 2/5, the guide's chat on the right 3/5. */
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  /* Character ~28% (70% of the prior 2/5), chat the rest. Map opens as a popup. */
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 3.6fr);
   gap: 16px;
   padding: 6px 16px 16px;
+}
+
+.guided-character-col {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 10px 8px 12px;
+  border-radius: 20px;
+  background: var(--story-panel);
+  border: 1px solid var(--story-panel-border);
+  box-shadow: var(--shadow-card);
+  overflow: auto;
+}
+
+.guided-map-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 22px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  font: inherit;
+  font-size: 18px;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transition: color 0.15s, border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.guided-map-btn:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+  color: var(--text);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.guided-character-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding-top: 36px;
+}
+
+.guided-stage-avatar {
+  width: 88% !important;
+  height: auto !important;
+  max-height: min(48vh, 400px);
+  object-fit: contain;
+  object-position: bottom center;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.12));
+}
+
+.guided-stage-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 4px;
+  padding: 0 8px 4px;
+}
+
+.guided-stage-meta strong {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.guided-stage-meta small {
+  color: var(--text-muted);
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+/* Mentor picker sits under the character in the narrow column. */
+.guided-character-col .mentor-switcher {
+  flex-wrap: wrap;
+  justify-content: center;
+  margin: 0;
+  padding: 8px 0 0;
+  border-bottom: 0;
+  border-top: 1px solid var(--story-panel-border);
+}
+
+.guided-character-col .mentor-switcher-btn {
+  width: calc(50% - 4px);
+  min-width: 56px;
 }
 
 /* Left half: Journey Map on top, the current turn's choices underneath. */
@@ -538,11 +642,22 @@
 .guided-chat {
   min-width: 0;
   min-height: 0;
-  padding: 14px 14px 8px;
+  padding: 12px 10px 8px;
   border-radius: 20px;
   background: var(--story-panel);
   border: 1px solid var(--story-panel-border);
   box-shadow: var(--shadow-card);
+}
+
+.guided-chat .chat-content {
+  max-width: none;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px 20px;
+}
+
+.guided-chat .bubble {
+  max-width: 100%;
 }
 
 .guided-chat .bubble-assistant {
@@ -559,12 +674,21 @@
 
 .story-guided .story-chat-thread .composer-wrap {
   width: 100%;
+  max-width: none;
   margin-top: 6px;
-  padding-inline: 0;
+  padding-inline: 4px;
 }
 
 .guided-chat .story-opener-actions {
   margin: 4px 0 8px;
+}
+
+.guided-prompt-slot {
+  margin: 4px 0 10px;
+}
+
+.guided-prompt-slot:empty {
+  display: none;
 }
 
 .guided-chat-head {
@@ -572,6 +696,171 @@
   align-items: center;
   gap: 10px;
   margin-bottom: 6px;
+}
+
+.guided-chat-head-tools {
+  justify-content: flex-end;
+  margin-bottom: 2px;
+}
+
+.mentor-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 4px 0 8px;
+  border-bottom: 1px solid var(--story-panel-border);
+}
+
+.mentor-switcher-btn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.mentor-switcher-btn:hover {
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+
+.mentor-switcher-btn.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.mentor-switcher-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mentor-switcher-art {
+  pointer-events: none;
+}
+
+.mentor-switcher-name {
+  max-width: 4.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guided-turn-bubble {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--story-panel-border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: pop-in 0.28s var(--ease);
+}
+
+.guided-turn-bubble.is-other {
+  align-items: flex-start;
+}
+
+.guided-turn-handoff {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.map-modal-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.map-modal-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(10, 12, 18, 0.45);
+  cursor: default;
+  animation: fade-in 0.2s;
+}
+
+.map-modal {
+  position: relative;
+  z-index: 1;
+  width: min(1180px, 96vw);
+  height: min(92vh, 920px);
+  max-height: min(92vh, 920px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  animation: pop-in 0.22s var(--ease);
+}
+
+.map-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.map-modal-head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.map-modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.map-modal-close:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.map-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.map-modal-body .jm-embedded {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
 }
 
 .guided-chat-head span {
@@ -935,6 +1224,36 @@
   align-content: stretch;
 }
 
+/* After campus tile rules so these win — one full-width row per suggestion. */
+.guided-campus-list.google-activities-list {
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: auto;
+  align-content: start;
+}
+
+.guided-campus-list.google-activities-list .guided-campus-row {
+  width: 100%;
+  max-width: none;
+  padding: 12px 14px;
+  gap: 12px;
+}
+
+.guided-campus-list.google-activities-list .guided-campus-row span {
+  flex: 1;
+  min-width: 0;
+}
+
+.guided-campus-list.google-activities-list .guided-campus-row strong {
+  white-space: normal;
+  font-size: 15px;
+}
+
+.guided-campus-list.google-activities-list .guided-campus-row small {
+  white-space: normal;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
 /* Just a question and a text box: centered, so the space is even above and below. */
 .guided-select:has(.guided-input):not(:has(.guided-choices)) {
   justify-content: center;
@@ -972,7 +1291,7 @@
 .guided-choices-stacked .guided-choice {
   flex: none;
   width: 100%;
-  font-size: 20px;
+  font-size: 16px;
   text-align: center;
 }
 
@@ -986,9 +1305,39 @@
   left: 100%;
 }
 
+/* Keep highlight the same size as sibling stacked choices (never smaller). */
 .guided-choices-stacked .guided-choice-highlight {
   flex-basis: auto;
+  font-size: inherit;
+}
+
+/* Essay confirm: tighter copy + equal side-by-side actions. */
+.guided-turn-compact {
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.guided-turn-compact .guided-question {
+  font-size: 14px;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.guided-turn-compact .guided-choices {
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+.guided-turn-compact .guided-choice,
+.guided-turn-compact .guided-choice-highlight {
+  flex: 1 1 0;
+  flex-basis: 0;
+  margin-top: 0;
+  min-height: 38px;
+  padding: 8px 12px;
   font-size: 14.5px;
+  font-weight: 650;
+  text-align: center;
 }
 
 .guided-choice.on {
@@ -1052,6 +1401,14 @@
     align-content: start;
     overflow: auto;
     padding: 6px 12px 12px;
+  }
+
+  .guided-character-col {
+    max-height: 38vh;
+  }
+
+  .guided-stage-avatar {
+    max-height: min(22vh, 200px);
   }
 
   /* Stacked: the map at its natural size (a list on phones), then the reply card, then the chat. */

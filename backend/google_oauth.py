@@ -171,9 +171,20 @@ def _require_configured() -> None:
         )
 
 
+def _flow() -> Flow:
+    # Confidential web client (client_secret). Disable PKCE so start/callback
+    # can use separate Flow instances without a shared code_verifier.
+    return Flow.from_client_config(
+        _client_config(),
+        scopes=SCOPES,
+        redirect_uri=_env("GOOGLE_REDIRECT_URI"),
+        autogenerate_code_verifier=False,
+    )
+
+
 def authorization_url(user_id: str) -> str:
     _require_configured()
-    flow = Flow.from_client_config(_client_config(), scopes=SCOPES, redirect_uri=_env("GOOGLE_REDIRECT_URI"))
+    flow = _flow()
     url, _ = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
@@ -264,7 +275,7 @@ def complete_oauth(code: str, state: str) -> str:
     """Exchange the auth code, store the encrypted refresh token, return user_id."""
     _require_configured()
     user_id = parse_state(state)
-    flow = Flow.from_client_config(_client_config(), scopes=SCOPES, redirect_uri=_env("GOOGLE_REDIRECT_URI"))
+    flow = _flow()
     try:
         flow.fetch_token(code=code)
     except Exception as exc:  # noqa: BLE001

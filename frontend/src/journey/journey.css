@@ -47,9 +47,67 @@
 .jm-embedded .jm-scroll {
   padding: 0;
   place-items: stretch;
-  align-content: start;
-  gap: 10px;
+  align-content: stretch;
+  gap: 0;
   height: 100%;
+  overflow: hidden;
+}
+
+/* Map on top, stage tasks on the bottom half. */
+.jm-board-split {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+  width: 100%;
+  height: min(82vh, 900px);
+}
+
+.jm-board-map {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.jm-board-map .jm-sky-fit {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+.jm-stage-panel {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.jm-stage-head h2 {
+  margin: 4px 0 0;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.jm-stage-panel .jm-tasks {
+  gap: 8px;
+}
+
+.jm-stage-panel .jm-tasks li {
+  padding: 12px 14px;
+  font-size: 15px;
+}
+
+.jm-stage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
 }
 
 .jm-embedded .jm-overall strong {
@@ -222,6 +280,10 @@
 .jm-embedded .jm-sky-fit {
   height: 100%;
   min-height: 0;
+}
+
+.jm-embedded .jm-board-split {
+  height: 100%;
 }
 
 .jm-sky {
@@ -535,46 +597,6 @@
     animation: none;
     stroke-dasharray: none;
     stroke-dashoffset: 0;
-  }
-}
-
-/* Selected chapter: a quiet link to its full to-do list. */
-.jm-explore {
-  position: absolute;
-  top: 10px;
-  right: 12px;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 4px;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--cn-sage-deep);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-  cursor: pointer;
-  text-decoration: underline;
-  text-decoration-color: transparent;
-  text-underline-offset: 3px;
-  transition: text-decoration-color 0.15s;
-}
-
-.jm-explore:hover {
-  text-decoration-color: currentColor;
-}
-
-.jm-explore:focus-visible {
-  outline: 2px solid var(--cn-sage-deep);
-  outline-offset: 1px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .jm-explore {
-    transition: none;
   }
 }
 

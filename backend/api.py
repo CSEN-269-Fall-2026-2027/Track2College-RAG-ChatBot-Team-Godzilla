@@ -24,6 +24,7 @@ from course_plan import build_course_plan
 from essay import generate_essay
 from piq import generate_piqs
 from activities import extract_activities
+import google_activities
 import uc_account
 from auth import Student, current_student
 from fastapi import Header
@@ -537,6 +538,32 @@ def activities_extract(request: ActivityExtractRequest, student: Student = Depen
         raise HTTPException(status_code=502, detail=str(error))
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Saving activities failed: {error}")
+
+
+class GoogleActivityItem(BaseModel):
+    name: str
+    role: str = ""
+    description: str = ""
+    level: str = ""
+    section: str = "activities"
+
+
+class GoogleActivitiesResponse(BaseModel):
+    activities: List[GoogleActivityItem]
+
+
+@app.get("/google/activities", response_model=GoogleActivitiesResponse)
+def google_activities_suggest(student: Student = Depends(current_student)) -> GoogleActivitiesResponse:
+    """Suggest activities from connected Gmail + Calendar for the student to confirm."""
+    try:
+        items = google_activities.suggest_activities(student.id)
+    except google_oauth.GoogleOAuthError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error))
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Couldn't scan Google for activities: {error}")
+    return GoogleActivitiesResponse(activities=[GoogleActivityItem(**item) for item in items])
 
 
 @app.post("/agent/counselor/find", response_model=CounselorFindResponse)

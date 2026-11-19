@@ -122,6 +122,50 @@ export function usedActivities(profile: Profile, exceptId?: string): string[] {
   });
 }
 
+/**
+ * Deterministic Top 4 PIQs from activities + major (no model call).
+ * Prefer leadership/community when clubs or volunteering exist, subject when a major is set, etc.
+ */
+export function autoPickPiqs(profile: Profile): string[] {
+  const names = activityNames(profile).join(" ").toLowerCase();
+  const major = profile.goals.intendedMajor.trim().toLowerCase();
+  const scores = new Map<string, number>(PIQ_PROMPTS.map((q) => [q.id, 0]));
+
+  const bump = (id: string, n: number) => scores.set(id, (scores.get(id) ?? 0) + n);
+
+  if (/\b(captain|president|officer|lead|founder|mentor|coach)\b/.test(names)) bump("leadership", 3);
+  if (/\b(art|music|band|theater|theatre|design|code|robot|maker|write|creat)\b/.test(names)) bump("creativity", 3);
+  if (/\b(piano|violin|swim|soccer|chess|debate|martial|dance|talent)\b/.test(names)) bump("talent", 2);
+  if (/\b(volunteer|community|tutoring|nonprofit|food bank|habitat)\b/.test(names)) bump("community", 3);
+  if (/\b(job|work|internship|employed|cashier|barista)\b/.test(names)) bump("challenge", 2);
+  if (/\b(award|honor|olympiad|all-?state|ap scholar)\b/.test(names)) bump("talent", 1);
+
+  if (major) {
+    bump("subject", 4);
+    if (/\b(cs|computer|engineer|bio|chem|physics|math)\b/.test(major)) bump("creativity", 1);
+    if (/\b(politic|govern|business|econ)\b/.test(major)) bump("leadership", 1);
+  }
+
+  // Always leave room for a standout / opportunity style essay.
+  bump("standout", 1);
+  bump("opportunity", 1);
+
+  const ranked = [...scores.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const picked = ranked.slice(0, PIQ_REQUIRED).map(([id]) => id);
+  // Keep official PIQ order in the chosen set for Quill's essay queue.
+  return PIQ_PROMPTS.filter((q) => picked.includes(q.id)).map((q) => q.id);
+}
+
+/** Labels for Quill's "I'll write about these — confirm?" turn (official UC prompt numbers). */
+export function autoPickPiqLabels(profile: Profile): string[] {
+  const ids = autoPickPiqs(profile);
+  return ids.map((id) => {
+    const index = PIQ_PROMPTS.findIndex((q) => q.id === id);
+    const meta = index >= 0 ? PIQ_PROMPTS[index] : undefined;
+    return `Essay #${index + 1}: ${meta?.title ?? id}`;
+  });
+}
+
 /** What "Suggest four essays" asks for: the limit is spelled out in the message, where the model follows it best. */
 export function suggestEssaysPrompt(profile: Profile): string {
   const names = [...new Set(activityNames(profile))];
