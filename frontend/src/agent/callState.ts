@@ -50,6 +50,17 @@ export const PRESENCE_LABEL: Record<Presence, string> = {
   error: "Couldn't connect",
 };
 
+/** ElevenLabs quota / billing failures shown on Jordan's call panel. */
+export const ELEVENLABS_CREDITS_MESSAGE =
+  "ElevenLabs is out of credits, so Jordan can't take calls right now. Try again later.";
+
+export function isCreditsError(text: string | null | undefined): boolean {
+  if (!text) return false;
+  return /elevenlabs is out of credits|out of credits|out of tokens|quota|credit|character limit|billing|payment/i.test(
+    text,
+  );
+}
+
 /** Mouth frame for the current output level: 0 closed, 1 half open, 2 open. */
 export function mouthFrame(level: number): 0 | 1 | 2 {
   if (level < 0.035) return 0;
@@ -117,7 +128,7 @@ export function isWrapUpLine(text: string): boolean {
  */
 /**
  * The meeting task is done: a full call with Jordan, and the student clicked "Done with counselor"
- * (like "I've sent the email", the stop only moves on when they say so).
+ * (like "I am done with the email", the stop only moves on when they say so).
  */
 export function counselorMeetingDone(agent?: { counselorCall?: { lines: CallLine[] } | null; counselorDoneAt?: number } | null): boolean {
   return virtualCounselorDone(agent?.counselorCall) && !!agent?.counselorDoneAt;
@@ -128,4 +139,12 @@ export function virtualCounselorDone(call?: { lines: CallLine[] } | null): boole
   const studentSpoke = call.lines.some((l) => l.role === "student");
   const finished = call.lines.some((l) => l.role === "counselor" && isWrapUpLine(l.text));
   return studentSpoke && finished;
+}
+
+/**
+ * Persist Jordan's call only when it finished all the way through (student spoke + wrap-up).
+ * Incomplete calls never overwrite a saved complete log, and never create the first log.
+ */
+export function shouldSaveCounselorCall(lines: CallLine[] | null | undefined): boolean {
+  return virtualCounselorDone(lines ? { lines } : null);
 }

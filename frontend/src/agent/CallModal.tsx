@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import type { CallLine } from "../types";
-import { PRESENCE_LABEL, nearBottom, type CallPhase, type Presence } from "./callState";
+import { PRESENCE_LABEL, isCreditsError, nearBottom, type CallPhase, type Presence } from "./callState";
 import { cleanTranscriptLine } from "./logic";
 import { JordanAvatar } from "./JordanAvatar";
 import { ArrowUpIcon, MicIcon, PhoneOffIcon, RetryIcon, TranscriptIcon, VolumeIcon, XIcon } from "../components/icons";
@@ -23,9 +23,9 @@ interface CallModalProps {
   onToggleMic: () => void;
   onToggleSpeaker: () => void;
   onToggleTranscript: () => void;
-  /** Hangs up through the existing session cleanup, then closes. Escape and ✕ use it too. */
+  /** Hangs up and returns to the chatbot. Escape and ✕ use it too. */
   onLeave: () => void;
-  /** Starts the call again (same as the old "Talk again"). */
+  /** Starts the call again after an error. */
   onRejoin: () => void;
   /** Shown under "The call has ended": whether this call's conversation was saved. */
   endedNote: string;
@@ -36,7 +36,7 @@ interface CallModalProps {
 
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-/** The video-call window around the Jordan voice session. */
+/** The meeting-room popup for Jordan's voice call (opens directly — no join/steps screen). */
 export function CallModal(props: CallModalProps) {
   const {
     phase,
@@ -65,12 +65,10 @@ export function CallModal(props: CallModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const live = phase === "live";
 
-  // Focus lands on the call's first control; the opener restores focus when it closes.
   useEffect(() => {
     dialogRef.current?.querySelector<HTMLElement>(".call-toolbar button")?.focus();
   }, []);
 
-  // When an overlay button that had focus goes away (phase change), keep focus in the call.
   useEffect(() => {
     const dialog = dialogRef.current;
     if (dialog && !dialog.contains(document.activeElement)) {
@@ -78,7 +76,6 @@ export function CallModal(props: CallModalProps) {
     }
   }, [phase]);
 
-  // No page scroll behind the call.
   useEffect(() => {
     const root = document.documentElement;
     const before = root.style.overflow;
@@ -88,8 +85,6 @@ export function CallModal(props: CallModalProps) {
     };
   }, []);
 
-  // Escape and the Tab trap listen on the document, so they still work when the focused control
-  // disappears (e.g. "Try again" swapping to the connecting overlay drops focus to <body>).
   const onLeaveRef = useRef(onLeave);
   onLeaveRef.current = onLeave;
   useEffect(() => {
@@ -183,7 +178,9 @@ export function CallModal(props: CallModalProps) {
             )}
             {phase === "error" && (
               <div className="call-overlay call-overlay-panel">
-                <p className="call-overlay-title">Couldn't start the call</p>
+                <p className="call-overlay-title">
+                  {isCreditsError(error) ? "ElevenLabs is out of credits" : "Couldn't start the call"}
+                </p>
                 <p role="alert">{error}</p>
                 <button type="button" className="btn-primary" onClick={onRejoin}>
                   <RetryIcon width={15} height={15} /> Try again

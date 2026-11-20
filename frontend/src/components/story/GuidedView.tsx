@@ -64,11 +64,11 @@ export function GuidedView({
             type="button"
             className="guided-map-btn"
             onClick={() => setMapOpen(true)}
-            aria-label="Open journey map"
-            title="Journey map"
+            aria-label="Open progress"
+            title="Progress"
           >
+            <span>Progress</span>
             <PixelMapIcon size={28} />
-            <span>Map</span>
           </button>
           <div className={`guided-character-stage${writing ? " is-writing" : ""}`}>
             <div className="guided-stage-figure">

@@ -2,8 +2,13 @@ import { describe, expect, it } from "vitest";
 import { COLLEGE_NAMES } from "../colleges";
 import { MENTORS, REVIEW_GUIDES, mentorById } from "../game/characters";
 import { callLogMessage } from "../agent/logic";
-import { doneOpener, openerFor, reviewModeLine } from "../game/openers";
+import { doneOpener, keepThroughEmailDone, openerFor, reviewModeLine } from "../game/openers";
+import type { Message } from "../types";
 import { blankProfile } from "./fixtures";
+
+function msg(role: Message["role"], content: string, id: string): Message {
+  return { id, role, content, createdAt: 1 };
+}
 
 describe("guide openers", () => {
   it("Quill lists the four picks with Why / Sounds good / Swap before confirm", () => {
@@ -163,7 +168,19 @@ describe("Counselor and Application assistant stops", () => {
     expect(unlocked.actions).toEqual([{ kind: "tool", label: "Help me apply", tool: "apply" }]);
   });
 
-  it("after Gmail opens, the Counselor waits for \"I've sent the email\" before moving on", () => {
+  it("Restart after email keeps the I-am-done exchange and drops Jordan call text", () => {
+    const done = reviewModeLine("counselor", "Darren", false, true);
+    const thread = [
+      msg("user", "I am done with the email", "1"),
+      msg("assistant", done, "2"),
+      msg("assistant", "Here's the log from your call with Jordan:\n\n**Jordan:** Hi", "3"),
+      msg("user", "Done with counselor", "4"),
+    ];
+    expect(keepThroughEmailDone(thread, "Darren")?.map((m) => m.id)).toEqual(["1", "2"]);
+    expect(keepThroughEmailDone([msg("assistant", "Hi", "a")], "Darren")).toBeNull();
+  });
+
+  it("after Gmail opens, the Counselor waits for \"I am done with the email\" before moving on", () => {
     const opened = blankProfile({
       ucJourney: {
         piqs: {},
@@ -177,7 +194,7 @@ describe("Counselor and Application assistant stops", () => {
     expect(o.text).toMatch(/clicked Send/);
     expect(o.actions).toEqual([
       { kind: "tool", label: "Open the email again", tool: "email" },
-      { kind: "markEmailSent", label: "I've sent the email" },
+      { kind: "markEmailSent", label: "I am done with the email" },
     ]);
     expect(openerFor(mentorById("assistant"), opened, "Maya").actions).toEqual([]);
   });

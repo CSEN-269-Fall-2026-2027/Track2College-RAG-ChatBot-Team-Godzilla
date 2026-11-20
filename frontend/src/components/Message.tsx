@@ -166,14 +166,15 @@ export const AssistantMessage = memo(function AssistantMessage({
             </section>
           )}
 
-          <div className="message-actions">
-            <button className="icon-btn" onClick={copy} aria-label={copied ? "Copied" : "Copy answer"} title="Copy">
-              {copied ? <CheckIcon width={16} height={16} /> : <CopyIcon width={16} height={16} />}
-            </button>
-            {message.responseTimeMs !== undefined && (
+          {/* Copy + timing only on model replies; canned story notes (email done, call log, …) stay clean. */}
+          {message.responseTimeMs !== undefined && (
+            <div className="message-actions">
+              <button className="icon-btn" onClick={copy} aria-label={copied ? "Copied" : "Copy answer"} title="Copy">
+                {copied ? <CheckIcon width={16} height={16} /> : <CopyIcon width={16} height={16} />}
+              </button>
               <span className="meta">{(message.responseTimeMs / 1000).toFixed(1)}s</span>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
     </div>

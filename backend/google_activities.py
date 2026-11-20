@@ -89,7 +89,10 @@ Other rules:
   one from another email.
 - Skip classes, homework, doctors/dentists, shopping, random social plans.
 - name: short title case (e.g. "Soccer Team"). role: title if clear, else "".
-- description: one short sentence from the evidence, or "".
+- description: one short UC-style sentence about the student in that activity, paraphrased from
+  the evidence (e.g. "Dedicated member who attends meetings consistently", "Named team captain
+  after the championship season"). Never copy or lightly rephrase email wording — no greetings,
+  thank-yous, "congrats", or sign-offs. Facts only from that one email, or "".
 - section: activities | volunteering | job | awards.
 - One underlying thing = one row (don't split the same evidence into activity + award). Prefer
   section "activities" and put role/win in role or description.

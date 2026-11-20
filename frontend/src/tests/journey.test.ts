@@ -123,7 +123,7 @@ describe("UC journey progress", () => {
     expect(stops({ counselorCall: { endedAt: 1, lines: [{ role: "student", text: "I'm good" }] } }).counselor.tasks[1].done).toBe(false);
     expect(stops({ counselorCall: doneCall }).counselor.tasks[1].done).toBe(false);
     expect(stops({ counselorCall: doneCall, counselorDoneAt: 2 }).counselor.tasks[1].done).toBe(true);
-    // Only "I've sent the email" (sentAt) counts; opening Gmail doesn't.
+    // Only "I am done with the email" (sentAt) counts; opening Gmail doesn't.
     expect(stops({ counselorEmail: { subject: "", body: "", sentAt: 1 } }).counselor.tasks[0].done).toBe(true);
     expect(stops({ counselorEmail: { subject: "", body: "", openedAt: 1 } }).counselor.tasks[0].done).toBe(false);
     expect(stops({ counselorCall: doneCall, counselorDoneAt: 2, counselorEmail: { subject: "", body: "", sentAt: 1 } }).counselor.complete).toBe(true);

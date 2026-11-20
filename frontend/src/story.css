@@ -666,14 +666,19 @@
   transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 
-.guided-chat-head .chat-restart:hover {
+.guided-chat-head .chat-restart:hover:not(:disabled) {
   border-color: var(--border-strong);
   background: var(--bg-hover);
   color: var(--text);
 }
 
-.guided-chat-head .chat-restart:hover svg {
+.guided-chat-head .chat-restart:hover:not(:disabled) svg {
   transform: rotate(-120deg);
+}
+
+.guided-chat-head .chat-restart:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .guided-chat-head .chat-restart svg {
@@ -1369,6 +1374,76 @@
   cursor: default;
 }
 
+/* Live "Help me apply" status in the chatbot (not under the character). */
+.apply-status-box {
+  margin: 10px 0 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-elevated, #fff);
+  color: var(--text);
+}
+
+.apply-status-box-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.apply-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.apply-status-dot.is-live {
+  background: var(--accent, #2f6fed);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #2f6fed) 25%, transparent);
+  animation: apply-status-pulse 1.4s ease-in-out infinite;
+}
+
+.apply-status-dot.is-bad {
+  background: #c44;
+}
+
+.apply-status-dot.is-good {
+  background: #2a9b5a;
+}
+
+.apply-status-box-body {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.apply-status-box-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+@keyframes apply-status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .apply-status-dot.is-live {
+    animation: none;
+  }
+}
+
 /* ---------------------------------------------------------------- Review & Apply: Counselor / Application assistant */
 
 .review-personas {
@@ -1655,24 +1730,6 @@
 .tool-dialog-card {
   max-width: 780px;
   margin: 0 auto;
-}
-
-/* The call pop-up fills its height so the last conversation can use all of it. */
-.tool-dialog-call .tool-dialog-main {
-  display: flex;
-  flex-direction: column;
-}
-
-.tool-dialog-call .tool-dialog-card {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-  max-width: none; /* room for Jordan's column beside the last conversation */
-}
-
-/* The call has no sidebar: Jordan's own card carries the steps, so the body is one column. */
-.tool-dialog-call .tool-dialog-body {
-  grid-template-columns: minmax(0, 1fr);
 }
 
 /* Phones and narrow windows: the whole screen, steps above the tool. */

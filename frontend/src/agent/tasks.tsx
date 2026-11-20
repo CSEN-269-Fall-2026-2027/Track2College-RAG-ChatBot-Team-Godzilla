@@ -3,6 +3,7 @@ import { useState, type ReactNode } from "react";
 import { type UcPiq, type UcRun } from "../api";
 import { useAuth } from "../auth";
 import { getStore } from "../data";
+import { shouldSaveCounselorCall } from "./callState";
 import { VoiceCounselor } from "./VoiceCounselor";
 import { entryYear, ucDeadlineDate } from "./logic";
 import { ExternalIcon, RetryIcon, XIcon } from "../components/icons";
@@ -10,7 +11,6 @@ import { PIQ_PROMPTS } from "../journey/logic";
 import { chosenPiqs, piqWorkOf } from "../journey/piqs";
 import { profileSummary, useProfile } from "../profile";
 import type { AgentState, CallLine, PersonalInfo, Profile } from "../types";
-
 
 export interface TaskProps {
   agent: AgentState;
@@ -32,14 +32,12 @@ function useStudentName() {
   );
 }
 
-/** A voice call with Jordan, the AI counselor. */
+/** A voice call with Jordan: meeting-room popup that starts as soon as Meet is clicked. */
 export function VirtualCounselor({
-  agent,
   change,
   onCallEnd,
-  variant,
-  details,
-}: TaskProps & { onCallEnd?: (lines: CallLine[]) => void; variant?: "page" | "popup"; details?: ReactNode }) {
+  onClose,
+}: TaskProps & { onCallEnd?: (lines: CallLine[]) => void; onClose: () => void }) {
   const { profile } = useProfile();
   const { account } = useAuth();
   const studentName = useStudentName();
@@ -50,10 +48,10 @@ export function VirtualCounselor({
       profileSummary={profileSummary(profile)}
       ucDeadline={deadline.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
       entryYear={entryYear(profile)}
-      lastCall={agent.counselorCall}
-      variant={variant}
-      details={details}
+      onClose={onClose}
       onEnd={(lines) => {
+        // Only keep a finished call (wrap-up goodbye). Never replace a saved log with a partial one.
+        if (!shouldSaveCounselorCall(lines)) return;
         change((a) => ({ ...a, counselorCall: { endedAt: Date.now(), lines } }));
         onCallEnd?.(lines);
       }}

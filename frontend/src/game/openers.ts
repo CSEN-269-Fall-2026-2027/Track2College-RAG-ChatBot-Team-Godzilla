@@ -4,7 +4,7 @@ import { COLLEGE_NAMES } from "../colleges";
 import { OTHER_MAJOR } from "../constants";
 import { activitiesStatus, PIQ_PROMPTS, PIQ_REQUIRED, UC_APPLY_URL } from "../journey/logic";
 import { autoPickPiqLabels, autoPickPiqs, chosenPiqs, essayDone, piqWorkOf } from "../journey/piqs";
-import type { Profile, ReviewMode } from "../types";
+import type { Message, Profile, ReviewMode } from "../types";
 import { CAMPUS_BLURBS, CAMPUS_TOUR, WHAT_COUNTS_ANSWER } from "./campusBlurbs";
 import type { Mentor } from "./characters";
 
@@ -73,6 +73,34 @@ export function reviewModeLine(mode: ReviewMode, name: string, callDone = true, 
     : `${hi} Finish the Counselor stop first: email your counselor and meet Jordan. Then I can fill in your UC application.`;
 }
 
+/** User labels that finish the counselor-email step (posted into chat). */
+const EMAIL_DONE_USER = new Set(["I am done with the email", "I've sent the email"]);
+
+/**
+ * For Counselor Restart after the email is marked sent: keep through the "I am done…" exchange
+ * (and the "Email's done. Next, meet with Jordan…" reply). Returns null if that exchange isn't
+ * in the thread (caller should do a normal full restart).
+ */
+export function keepThroughEmailDone(messages: Message[], name: string): Message[] | null {
+  const doneReply = reviewModeLine("counselor", name, false, true);
+  let end = -1;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role === "user" && EMAIL_DONE_USER.has(m.content.trim())) {
+      end = i;
+      if (messages[i + 1]?.role === "assistant") end = i + 1;
+    }
+    if (
+      m.role === "assistant" &&
+      (m.content === doneReply || m.content.includes("Email's done. Next, meet with Jordan"))
+    ) {
+      end = i;
+    }
+  }
+  if (end < 0) return null;
+  return messages.slice(0, end + 1);
+}
+
 /** The buttons under the Counselor's / Application assistant's first message. Forced order: email → call → apply. */
 export function reviewActions(mode: ReviewMode, callDone = true, emailDone = false): OpenerAction[] {
   if (mode === "counselor") {
@@ -117,13 +145,14 @@ export function openerFor(mentor: Mentor, profile: Profile, name: string): Opene
         ],
       };
     }
-    // Gmail was opened but the student hasn't said they sent it: ask before moving on.
+    // Gmail was opened but the student hasn't said they're done: ask before moving on.
+    // Clicking the button posts their "I am done…" line and the counselor's Jordan reply in chat.
     if (mentor.id === "counselor" && !emailDone && agent.counselorEmail?.openedAt) {
       return {
         text: `${hi} Your email is open in Gmail. Once you've clicked Send, let me know and we'll move on.`,
         actions: [
           { kind: "tool", label: "Open the email again", tool: "email" },
-          { kind: "markEmailSent", label: "I've sent the email" },
+          { kind: "markEmailSent", label: "I am done with the email" },
         ],
       };
     }
