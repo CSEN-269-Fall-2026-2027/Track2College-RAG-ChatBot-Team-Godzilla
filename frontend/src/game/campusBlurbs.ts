@@ -16,4 +16,4 @@ export const CAMPUS_TOUR = Object.entries(CAMPUS_BLURBS)
   .join("\n");
 
 export const WHAT_COUNTS_ANSWER =
-  "Sports, clubs, arts, volunteering, jobs, family responsibilities like caring for siblings, personal projects, and honors or awards all count. Anything you regularly do outside of class that shows your interests and commitments can go on your list. To add one, click **Add an activity** above.";
+  "Sports, clubs, arts, volunteering, jobs, family responsibilities (like caring for siblings), personal projects, educational prep programs, and honors or awards all count — anything you regularly do outside of class that shows your interests and commitments.\n\nIf the list I found looks right, hit **Confirm**. To fix or add anything first, hit **Edit**.";

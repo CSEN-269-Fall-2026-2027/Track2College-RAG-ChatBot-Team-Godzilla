@@ -4,22 +4,11 @@ import { computeGpa, formatGpa } from "../academics";
 import { useAuth } from "../auth";
 import { COLLEGES } from "../colleges";
 import { getStore } from "../data";
-import { activitiesStatus, journeyOf, PIQ_REQUIRED, resetActivitiesStep, toggleCampus } from "../journey/logic";
+import { activitiesStatus, PIQ_REQUIRED, toggleCampus } from "../journey/logic";
 import { usePlanning } from "../planning";
-import {
-  ACTIVITY_CATEGORY_LABELS,
-  PROFILE_SECTIONS,
-  PROFILE_WORKSPACES,
-  academicHistoryStatus,
-  completeness,
-  emptyActivity,
-  useProfile,
-  type ProfileRouteId,
-  type SaveState,
-  type SectionId,
-} from "../profile";
+import { ACTIVITY_CATEGORY_LABELS, PROFILE_SECTIONS, PROFILE_WORKSPACES, academicHistoryStatus, completeness, emptyActivity, useProfile, type ProfileRouteId, type SaveState, type SectionId } from "../profile";
 import { essaysDoneCount } from "../journey/piqs";
-import { href, navigate } from "../router";
+import { href } from "../router";
 import { newId } from "../storage";
 import type { ActivityCategory, Award, PersonalInfo, Profile, TranscriptCourse } from "../types";
 import { MAJOR_CHOICES } from "../constants";
@@ -313,11 +302,14 @@ export function ProfilePage({ section: param, onAsk }: { section: string | null;
             )}
 
             {section === "activities" && (
-              <Panel {...panelProps("activities")}>
-                <GoogleGrabPanel />
-                {isEditing("activities") ? <ActivitiesWorkspace profile={profile} update={update} /> : <ActivitiesSummary profile={profile} onAdd={() => setEdit("activities", true)} />}
-                <ActivitiesDone profile={profile} update={update} canReset={!isEditing("activities")} />
-              </Panel>
+              <>
+                <Panel {...panelProps("activities")}>
+                  {isEditing("activities") ? <ActivitiesWorkspace profile={profile} update={update} /> : <ActivitiesSummary profile={profile} onAdd={() => setEdit("activities", true)} />}
+                </Panel>
+                <section className="pf-google-grab-panel" aria-label="Grab activities from Google">
+                  <GoogleGrabPanel />
+                </section>
+              </>
             )}
 
             {section === "finances" && (
@@ -762,51 +754,5 @@ function ActivitiesWorkspace({ profile, update }: { profile: Profile; update: Up
       </form>
 
     </>
-  );
-}
-
-/** Finishing (or skipping) activities here passes the journey step, which starts essay drafting. */
-function ActivitiesDone({ profile, update, canReset }: { profile: Profile; update: Update; canReset: boolean }) {
-  const status = activitiesStatus(profile);
-  const reset = canReset && (
-    <button
-      className="btn-ghost"
-      onClick={() => {
-        if (!window.confirm("Start activities over? This deletes your activities, honors and awards, and what you told Milo.")) return;
-        update(resetActivitiesStep);
-        navigate("advisor");
-      }}
-    >
-      Reset
-    </button>
-  );
-  if (status.done) {
-    return (
-      <div className="pf-done pf-done-row">
-        <span className="pf-done-label">
-          <CheckIcon width={14} height={14} /> Activities step done
-        </span>
-        {reset}
-      </div>
-    );
-  }
-  return (
-    <div className="pf-finish">
-      <div className="pf-finish-actions">
-        <button
-          className="btn-primary"
-          disabled={status.answered && !status.fits}
-          onClick={() => update((p) => ({ ...p, ucJourney: { ...journeyOf(p), activitiesReviewed: true } }))}
-        >
-          {profile.activities.length ? "I'm done with activities" : "Skip activities for now"}
-        </button>
-        {reset}
-      </div>
-      <p className="field-hint">
-        {status.answered && !status.fits
-          ? "Shorten any description over 350 characters to finish this step."
-          : "Quill drafts your essays from this list."}
-      </p>
-    </div>
   );
 }

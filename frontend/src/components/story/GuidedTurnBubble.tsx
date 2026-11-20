@@ -1,11 +1,7 @@
 import type { FormEvent, ReactNode } from "react";
 import { COLLEGES } from "../../colleges";
 import type { GuidedChoice, GuidedTurn } from "../../journey/guided";
-import { PIQ_PROMPTS, PIQ_REQUIRED, PIQ_WORD_LIMIT } from "../../journey/logic";
 import type { usePiqDrafts } from "../../journey/usePiqDrafts";
-import type { AidMode, ReviewMode } from "../../types";
-import { FinancialAid } from "./FinancialAid";
-import { ReviewPersonaPicker } from "./ReviewApply";
 
 /** "3+" lines its 3 up with the numbers above it, with the + hanging off to the right. */
 function choiceLabel(label: string): ReactNode {
@@ -28,17 +24,10 @@ export interface GuidedTurnBubbleProps {
   setDraft: (v: string) => void;
   pickedCampuses: string[];
   setPickedCampuses: (v: string[] | ((prev: string[]) => string[])) => void;
-  pickedPiqs: string[];
-  setPickedPiqs: (v: string[] | ((prev: string[]) => string[])) => void;
   piqDrafts: ReturnType<typeof usePiqDrafts>;
-  savingActivities: boolean;
-  activityError: string | null;
-  canFinish: boolean;
   pick: (choice: GuidedChoice) => void;
   run: (effect: import("../../journey/guided").GuidedEffect) => void;
   submitDraft: () => void;
-  onModeChange: (mode: ReviewMode) => void;
-  onAidModeChange: (mode: AidMode) => void;
   /** Jump to the turn's speaker when the student is viewing someone else. */
   onContinueWithSpeaker?: () => void;
   speakerName?: string;
@@ -55,21 +44,13 @@ export function GuidedTurnBubble({
   setDraft,
   pickedCampuses,
   setPickedCampuses,
-  pickedPiqs,
-  setPickedPiqs,
   piqDrafts,
-  savingActivities,
-  activityError,
-  canFinish,
   pick,
   run,
   submitDraft,
-  onModeChange,
-  onAidModeChange,
   onContinueWithSpeaker,
   speakerName,
 }: GuidedTurnBubbleProps) {
-  const aidModes = turn.checkpointId === "aid" && turn.id !== "aid-needs";
   const fillChoices = turn.choices.length >= 2 && turn.choices.length <= 5;
 
   if (!active) {
@@ -107,17 +88,11 @@ export function GuidedTurnBubble({
         )}
       </div>
 
-      {turn.checkpointId !== "review" && !aidModes && (
-        <p className={`guided-question${turn.prompt.length <= 90 ? " is-short" : ""}`} role="status">
-          {turn.prompt}
-        </p>
-      )}
+      <p className={`guided-question${turn.prompt.length <= 90 ? " is-short" : ""}`} role="status">
+        {turn.prompt}
+      </p>
 
-      {turn.checkpointId === "review" ? (
-        <ReviewPersonaPicker onModeChange={onModeChange} />
-      ) : aidModes ? (
-        <FinancialAid turn={turn} onPick={pick} onModeChange={onAidModeChange} />
-      ) : turn.campusPicker ? (
+      {turn.campusPicker ? (
         <form
           className="guided-campus-picker"
           onSubmit={(e) => {
@@ -157,57 +132,10 @@ export function GuidedTurnBubble({
             </button>
           </div>
         </form>
-      ) : turn.piqPicker ? (
-        <form
-          className="guided-campus-picker"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (pickedPiqs.length !== PIQ_REQUIRED) return;
-            run({ type: "setPiqs", piqIds: pickedPiqs });
-          }}
-        >
-          <div className="guided-campus-list guided-piq-list" role="group" aria-label="Personal Insight Questions">
-            {PIQ_PROMPTS.map((q, i) => {
-              const on = pickedPiqs.includes(q.id);
-              const lockedOut = !on && pickedPiqs.length >= PIQ_REQUIRED;
-              return (
-                <label
-                  key={q.id}
-                  className={`guided-campus-row guided-piq-row${on ? " on" : ""}${lockedOut ? " locked" : ""}`}
-                  title={q.prompt}
-                >
-                  <input
-                    type="checkbox"
-                    checked={on}
-                    disabled={lockedOut}
-                    onChange={() =>
-                      setPickedPiqs((prev) => (on ? prev.filter((id) => id !== q.id) : prev.length < PIQ_REQUIRED ? [...prev, q.id] : prev))
-                    }
-                  />
-                  <span>
-                    <strong>
-                      {i + 1}. {q.title}
-                    </strong>
-                    <small>{q.prompt}</small>
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-          <div className="guided-picker-footer">
-            <p className="guided-piq-count" aria-live="polite">
-              {pickedPiqs.length}/{PIQ_REQUIRED} selected · up to {PIQ_WORD_LIMIT} words each
-            </p>
-            <button type="submit" className="guided-campus-submit" disabled={pickedPiqs.length !== PIQ_REQUIRED}>
-              Submit 4 questions
-            </button>
-          </div>
-        </form>
       ) : (
         <div className={`guided-choices${turn.stackedChoices ? " guided-choices-stacked" : ""}${fillChoices ? " guided-choices-fill" : ""}`} role="group" aria-label="Your reply">
           {turn.choices.map((choice) => {
             const busy = choice.effect.type === "generatePiqs" && choice.effect.piqIds.some(piqDrafts.isGenerating);
-            const savingThis = savingActivities && choice.effect.type === "finishActivities";
             return (
               <button
                 key={choice.id}
@@ -215,9 +143,9 @@ export function GuidedTurnBubble({
                 className={`guided-choice${choice.effect.type === "generatePiqs" && !choice.highlight ? " guided-choice-primary" : ""}${choice.highlight ? " guided-choice-highlight" : ""}${choice.selected ? " on" : ""}`}
                 aria-pressed={choice.selected}
                 onClick={() => pick(choice)}
-                disabled={piqDrafts.busy || savingActivities || (choice.effect.type === "finishActivities" && !canFinish)}
+                disabled={piqDrafts.busy}
               >
-                {busy ? "Generating…" : savingThis ? "Saving…" : choiceLabel(choice.label)}
+                {busy ? "Generating…" : choiceLabel(choice.label)}
               </button>
             );
           })}
@@ -230,12 +158,6 @@ export function GuidedTurnBubble({
             *
           </span>
           {turn.note.replace(/^\*/, "")}
-        </p>
-      )}
-
-      {activityError && turn.choices.some((c) => c.effect.type === "finishActivities") && (
-        <p className="form-error" role="alert">
-          {activityError} Your chat with Milo is still here, so hit Done to try again.
         </p>
       )}
 

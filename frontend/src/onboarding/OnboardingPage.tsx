@@ -8,18 +8,7 @@ import type { Profile } from "../types";
 import { JourneyPath } from "./JourneyPath";
 import { GoogleConnectPanel } from "./GoogleConnectPanel";
 import { QuestionFields } from "./QuestionFields";
-import {
-  ABOUT_YOU_CHECKPOINT,
-  CHECKPOINT_COUNT,
-  CHECKPOINTS,
-  applyTranscriptBasics,
-  checkpointErrors,
-  markComplete,
-  questionErrors,
-  questionsForCheckpoint,
-  resumeCheckpoint,
-  setCheckpoint,
-} from "./logic";
+import { ABOUT_YOU_CHECKPOINT, CHECKPOINT_COUNT, CHECKPOINTS, applyTranscriptBasics, checkpointErrors, markComplete, questionErrors, questionsForCheckpoint, resumeCheckpoint, setCheckpoint } from "./logic";
 
 type OnboardingPhase = "questions" | "google";
 
@@ -44,7 +33,7 @@ function stepTag(checkpoint: number, questionId?: string) {
 
 /**
  * Flow: transcript → Connect Google → confirm details → start.
- * Transcript is required; Google is optional.
+ * Transcript and Google connection are required.
  */
 export function OnboardingPage({ theme, onToggleTheme, onFinished }: OnboardingPageProps) {
   const { account, signOut } = useAuth();
@@ -69,6 +58,13 @@ export function OnboardingPage({ theme, onToggleTheme, onFinished }: OnboardingP
   const qs = useMemo(() => questionsForCheckpoint(checkpoint, profile), [checkpoint, profile]);
   const question = qs[Math.min(qIndex, Math.max(0, qs.length - 1))];
   const hasTranscript = transcripts.length > 0;
+  // What still blocks Continue / Start my plan on this screen (the button stays disabled until it's empty).
+  const missing = question ? questionErrors(profile, question.id, { hasTranscript }) : [];
+
+  // The upload goes through planning, not onChange, so drop a stale "upload your transcript" error here.
+  useEffect(() => {
+    if (hasTranscript) setErrors([]);
+  }, [hasTranscript]);
 
   /** During celebrate, show the runner already moving toward the next mark. */
   const pathCheckpoint = finishedAnim
@@ -104,6 +100,7 @@ export function OnboardingPage({ theme, onToggleTheme, onFinished }: OnboardingP
       const next = applyTranscriptBasics(p, latest);
       const same =
         next.basics.firstName === p.basics.firstName &&
+        next.basics.lastName === p.basics.lastName &&
         next.basics.highSchool === p.basics.highSchool &&
         next.basics.gradeLevel === p.basics.gradeLevel &&
         next.basics.graduationYear === p.basics.graduationYear &&
@@ -250,12 +247,24 @@ export function OnboardingPage({ theme, onToggleTheme, onFinished }: OnboardingP
                   Back
                 </button>
                 <div className="ob-actions-right">
+                  {missing.length > 0 && errors.length === 0 && checkpoint === ABOUT_YOU_CHECKPOINT && (
+                    <ul className="ob-missing">
+                      {missing.map((m) => (
+                        <li key={m}>{m}</li>
+                      ))}
+                    </ul>
+                  )}
                   {!question.required && (
                     <button type="button" className="ob-skip" onClick={() => completeQuestion({ skipped: true })} disabled={celebrate || finishedAnim}>
                       Skip question
                     </button>
                   )}
-                  <button type="button" className="btn-primary" onClick={() => completeQuestion()} disabled={celebrate || finishedAnim}>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => completeQuestion()}
+                    disabled={missing.length > 0 || celebrate || finishedAnim}
+                  >
                     {checkpoint === ABOUT_YOU_CHECKPOINT ? "Start my plan" : "Continue"}
                   </button>
                 </div>

@@ -33,14 +33,33 @@ export function ChatView({ intro, footer, messages, pending, busy, freshId, onFo
     if (el) el.scrollTo({ top: el.scrollHeight, behavior });
   };
 
+  /** The arrow shows only when there's real content below the visible area. */
+  const measure = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD;
+    setShowJump(!nearBottom);
+  };
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD;
+    measure();
+  };
+
   // Follow the bottom while content grows (new messages, text reveal), unless the user scrolled up.
   useLayoutEffect(() => {
     const content = contentRef.current;
     if (!content) return;
     const observer = new ResizeObserver(() => {
       if (stickRef.current) scrollToBottom();
+      // Content can shrink or the pane can grow without a scroll event (restart, switching guides),
+      // so re-check whether the arrow is still needed.
+      measure();
     });
     observer.observe(content);
+    if (scrollRef.current) observer.observe(scrollRef.current);
     return () => observer.disconnect();
   }, []);
 
@@ -52,13 +71,6 @@ export function ChatView({ intro, footer, messages, pending, busy, freshId, onFo
     }
   }, [last?.id, last?.role]);
 
-  const onScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD;
-    stickRef.current = nearBottom;
-    setShowJump(!nearBottom);
-  };
 
   return (
     <div className="chat-area">

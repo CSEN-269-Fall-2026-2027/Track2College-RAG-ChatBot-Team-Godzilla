@@ -1,21 +1,11 @@
 import { virtualCounselorDone } from "./callState";
-import { journeyOf, ucAccountReady } from "../journey/logic";
+import { journeyOf } from "../journey/logic";
 import type { AgentState, CallLine, PersonalInfo, Profile } from "../types";
 
 /**
  * Application tools (story mode's Review & Apply and Financial Aid steps): the agent does the
  * application busywork and the student only approves it. Pure helpers here.
  */
-
-export type AgentTaskId = "virtualCounselor" | "emailCounselor" | "ucAccount" | "fafsa" | "sir";
-
-export interface AgentTask {
-  id: AgentTaskId;
-  title: string;
-  done: boolean;
-  /** Shown but not usable yet. */
-  comingSoon?: boolean;
-}
 
 export { virtualCounselorDone };
 
@@ -67,33 +57,25 @@ export function withUcRunProgress(
   return same ? a : { ...a, ucAccount: next };
 }
 
-export function agentTasks(profile: Profile): AgentTask[] {
-  const a = agentOf(profile);
-  return [
-    {
-      id: "virtualCounselor",
-      title: "Meet with the virtual counselor",
-      done: virtualCounselorDone(a.counselorCall),
+/**
+ * The student clicked "Done with application" after a finished run: record Applied (piqAt), which
+ * finishes the apply stop. A finished run means the login worked, so the account counts as created.
+ */
+export function commitApplied(a: AgentState, login: { email: string; password: string } | null, now: number): AgentState {
+  const { pendingApply: _pending, ...rest } = a;
+  if (a.ucAccount?.piqAt) return rest;
+  const uc = a.ucAccount ?? (login ? { email: login.email, password: login.password, generatedAt: now } : null);
+  if (!uc) return rest;
+  return {
+    ...rest,
+    ucAccount: {
+      ...uc,
+      ...(login ? { email: login.email, password: login.password || uc.password } : {}),
+      verifiedAt: uc.verifiedAt ?? now,
+      signedInAt: uc.signedInAt ?? now,
+      piqAt: now,
     },
-    {
-      id: "emailCounselor",
-      title: "Email your counselor",
-      done: !!a.counselorEmail?.sentAt,
-    },
-    {
-      id: "ucAccount",
-      title: "UC application",
-      // Checked off once a saved login has worked with UC.
-      done: ucAccountReady(a.ucAccount),
-    },
-    { id: "fafsa", title: "Submit the FAFSA or CA Dream Act", done: fafsaSubmitted(profile) },
-    { id: "sir", title: "Submit your Intent to Register", done: !!a.sirDoneAt },
-  ];
-}
-
-/** One answer for "is the FAFSA / CA Dream Act in?": the Financial Aid step's, or the old Apply page's flag. */
-export function fafsaSubmitted(profile: Profile): boolean {
-  return profile.preferences.fafsa === "done" || !!agentOf(profile).fafsaDoneAt;
+  };
 }
 
 /** Opens Gmail's compose window in the given account with everything filled in; the student clicks Send. */
@@ -137,10 +119,6 @@ export function cleanTranscriptLine(text: string): string {
     .replace(/\s+([,;:.!?])/g, "$1")
     .replace(/([.!?])\s*,\s*/g, "$1 ")
     .trim();
-}
-
-export function mailtoUrl(to: string, subject: string, body: string) {
-  return `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
 export interface CalendarEvent {
@@ -202,15 +180,6 @@ export const sirDeadlineDate = (profile: Profile, now = new Date()) => iso(entry
 /** Whole days until the nearest UC deadline (California calendar). 0 = due tonight. */
 export function daysUntilUcDeadline(_profile: Profile | null | undefined, now = new Date()) {
   return Math.round(dayNumber(nextUcDeadlineDate(now)) - dayNumber(pacificToday(now)));
-}
-
-/** UC's filing period (Oct 1 – Nov 30) for the nearest cycle, and progress through it. */
-export function filingPeriod(_profile: Profile | null | undefined, now = new Date()) {
-  const closes = nextUcDeadlineDate(now);
-  const opens = iso(Number(closes.slice(0, 4)), 10, 1);
-  const total = dayNumber(closes) - dayNumber(opens) + 1;
-  const elapsed = dayNumber(pacificToday(now)) - dayNumber(opens) + 1;
-  return { opens, closes, progress: Math.min(1, Math.max(0, elapsed / total)) };
 }
 
 /**

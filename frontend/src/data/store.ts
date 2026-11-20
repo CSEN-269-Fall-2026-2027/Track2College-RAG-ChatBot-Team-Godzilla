@@ -1,4 +1,3 @@
-import type { GameState } from "../game/progress";
 import type { Account, Conversation, PersonalInfo, Profile, Transcript } from "../types";
 
 export interface Session {
@@ -44,14 +43,9 @@ export interface DataStore {
     get(userId: string): Promise<PersonalInfo | null>;
     save(userId: string, info: PersonalInfo): Promise<void>;
   };
-  /** Story-mode progress (XP, achievements, mentor settings). */
-  game: {
-    get(userId: string): Promise<Partial<GameState> | null>;
-    save(userId: string, state: GameState): Promise<void>;
-  };
   /**
    * Re-checks the password, then permanently deletes all of this user's saved data
    * (every table row and uploaded file). The login itself is kept.
    */
-  resetAllData(userId: string, email: string, password: string): Promise<void>;
+  resetAllData(userId: string, email: string, password: string, beforeDelete?: () => Promise<void>): Promise<void>;
 }

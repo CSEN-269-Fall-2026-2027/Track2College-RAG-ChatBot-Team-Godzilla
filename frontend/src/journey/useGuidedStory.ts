@@ -1,20 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { ApiError, extractActivities } from "../api";
 import type { Mentor } from "../game/characters";
 import { completeness, useProfile } from "../profile";
 import { navigate } from "../router";
 import { newId } from "../storage";
-import type { ActivitySectionId, Message } from "../types";
 import { applyGuidedEffect, inputEffect, nextGuidedTurn, savedLabel, type GuidedChoice, type GuidedEffect } from "./guided";
-import { activitySection, isUc, journeyOf } from "./logic";
-import { activityNotesFrom, activityReportMessage, canFinishActivities } from "./piqs";
+import { isUc } from "./logic";
 import { usePiqDrafts } from "./usePiqDrafts";
 
 export interface GuidedStoryHandlers {
   onAsk: (prompt: string, mentorId?: Mentor["id"], display?: string) => void;
-  onRestartAsk: (prompt: string, mentorId: Mentor["id"]) => void;
-  onSendToProfile: (section: ActivitySectionId) => void;
-  miloMessages: Message[];
 }
 
 /** Story-mode turn state + effect runner for in-chat guided bubbles. */
@@ -30,10 +24,7 @@ export function useGuidedStory(studentName: string, handlers: GuidedStoryHandler
 
   const [saved, setSaved] = useState<string | null>(null);
   const [pickedCampuses, setPickedCampuses] = useState<string[]>([]);
-  const [pickedPiqs, setPickedPiqs] = useState<string[]>([]);
   const piqDrafts = usePiqDrafts();
-  const [savingActivities, setSavingActivities] = useState(false);
-  const [activityError, setActivityError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!saved) return;
@@ -45,11 +36,6 @@ export function useGuidedStory(studentName: string, handlers: GuidedStoryHandler
     if (!turn.campusPicker) return;
     setPickedCampuses(profile.colleges.filter(isUc).map((c) => c.name));
   }, [turn.id, turn.campusPicker, profile.colleges]);
-
-  useEffect(() => {
-    if (!turn.piqPicker) return;
-    setPickedPiqs(Object.keys(profile.ucJourney?.piqs ?? {}));
-  }, [turn.id, turn.piqPicker, profile.ucJourney?.piqs]);
 
   const run = (effect: GuidedEffect) => {
     setDraft("");
@@ -67,31 +53,6 @@ export function useGuidedStory(studentName: string, handlers: GuidedStoryHandler
       case "ask":
         handlers.onAsk(effect.prompt, effect.mentorId);
         return;
-      case "setActivityCount":
-        if (effect.count === activitySection(journeyOf(profile), effect.section).count) return;
-        setActivityError(null);
-        update((p) => applyGuidedEffect(p, effect, newId));
-        if (effect.count >= 3) handlers.onSendToProfile(effect.section);
-        else if (effect.count > 0) handlers.onRestartAsk(activityReportMessage(effect.section, effect.count), "milo");
-        return;
-      case "fillInProfile":
-        update((p) => applyGuidedEffect(p, effect, newId));
-        navigate("profile", "activities");
-        return;
-      case "finishActivities": {
-        const notes = activityNotesFrom(handlers.miloMessages);
-        setSavingActivities(true);
-        setActivityError(null);
-        extractActivities(notes, effect.section)
-          .then((items) => {
-            const save: GuidedEffect = { type: "saveActivitySection", section: effect.section, notes, items };
-            update((p) => applyGuidedEffect(p, save, newId));
-            setSaved(savedLabel(save));
-          })
-          .catch((error) => setActivityError(error instanceof ApiError ? error.message : "Couldn't save that. Please try again."))
-          .finally(() => setSavingActivities(false));
-        return;
-      }
       case "pasteEssay":
         piqDrafts.requestEdit(effect.piqId);
         navigate("profile", "essays");
@@ -137,12 +98,7 @@ export function useGuidedStory(studentName: string, handlers: GuidedStoryHandler
     saved,
     pickedCampuses,
     setPickedCampuses,
-    pickedPiqs,
-    setPickedPiqs,
     piqDrafts,
-    savingActivities,
-    activityError,
-    canFinish: canFinishActivities(handlers.miloMessages),
     run,
     pick,
     submitDraft,

@@ -4,12 +4,19 @@ Suggest UC activities from a connected Google account (Gmail + Calendar).
 Readonly: uses stored OAuth credentials. Returns candidate name/role/description
 rows for the student to confirm in chat — never writes to their profile by itself.
 
-Scoped for speed: newest 50 emails only, a short calendar window, no Drive scan.
+Gmail: a search of the last two years of *received* mail for activity words (teams, clubs, jobs,
+volunteering, awards), plus the newest received messages. It used to take the newest 50 messages of
+any kind, sent mail included, so an activity email quietly dropped out once 50 newer messages (or
+emails the student sent) came in. Calendar: a short window. No Drive scan.
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
+import html
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 import google_oauth
@@ -19,9 +26,36 @@ from query import complete, last_failure
 
 log = logging.getLogger("google_activities")
 
-MAX_GMAIL = 50
+# Messages matching the activity search, and the newest received ones (for anything the search misses).
+MAX_GMAIL_SEARCH = 50
+MAX_GMAIL_RECENT = 20
+# `{a b}` is Gmail's OR. Sent mail isn't excluded in the query: a message the student sends to
+# themselves (or a forward to their own address) is labelled Sent *and* Inbox, and is often exactly
+# the evidence we want. True outgoing mail (Sent, not Inbox) is dropped after fetching instead.
+# The activity search keeps every inbox tab (team apps often land in Promotions or Social).
+GMAIL_BASE = "-in:drafts -in:chats"
+GMAIL_RECENT = f"{GMAIL_BASE} -category:promotions -category:social"
+GMAIL_ACTIVITY_WORDS = (
+    "team practice game match tournament league season roster tryout tryouts varsity coach captain "
+    "club meeting officer president rehearsal concert recital band orchestra choir theater "
+    "volunteer volunteering service shift schedule internship job hired employment paycheck "
+    "award honor honors scholarship winner finalist nominated selected congratulations competition"
+)
+GMAIL_LOOKBACK = "newer_than:2y"
 MAX_CAL = 20
 MAX_SNIPPET = 280
+# Gmail's snippet is only the first ~200 characters of the body, so the key line ("you've been named
+# captain of the soccer team") is often cut off. We also read the body and keep the sentences that
+# talk about activities, up to this many characters per email.
+MAX_BODY_EVIDENCE = 600
+# Words that make a body sentence worth keeping (the search words, plus common sports and arts).
+EVIDENCE_WORDS = set(GMAIL_ACTIVITY_WORDS.split()) | {
+    "named", "made", "joined", "elected", "won", "championship", "teammates", "squad", "lead", "leader",
+    "soccer", "basketball", "football", "baseball", "softball", "volleyball", "tennis", "swim", "swimming",
+    "track", "cross", "golf", "wrestling", "lacrosse", "hockey", "water", "polo", "cheer", "dance", "debate",
+    "robotics", "piano", "violin", "guitar", "drama", "musical", "choir", "art", "newspaper", "yearbook",
+    "volunteered", "hours", "tutor", "tutoring", "mentor", "intern", "employee", "manager", "shift",
+}
 # Calendar: last 90 days + next 30 days only.
 CAL_LOOKBACK_DAYS = 90
 CAL_LOOKAHEAD_DAYS = 30
@@ -49,6 +83,10 @@ Do NOT include when it's only:
 - Mentions of basketball/soccer/club in passing with no personal involvement.
 
 Other rules:
+- Each email is its own "[Email N]" line. Every row must come from ONE email and use only what that
+  email says. Never combine details from different emails (e.g. a sport named in one email with a
+  captaincy or championship from another). If an email doesn't name the sport or club, don't guess
+  one from another email.
 - Skip classes, homework, doctors/dentists, shopping, random social plans.
 - name: short title case (e.g. "Soccer Team"). role: title if clear, else "".
 - description: one short sentence from the evidence, or "".
@@ -63,25 +101,84 @@ def _gmail_snippets(user_id: str) -> list[str]:
     from googleapiclient.discovery import build
 
     service = build("gmail", "v1", credentials=google_oauth.credentials_for(user_id), cache_discovery=False)
-    # Newest 50 messages only — no multi-year keyword search.
-    listed = service.users().messages().list(userId="me", maxResults=MAX_GMAIL).execute()
+    messages = service.users().messages()
+    ids: list[str] = []
+    for query, limit in (
+        (f"{GMAIL_BASE} {GMAIL_LOOKBACK} {{{GMAIL_ACTIVITY_WORDS}}}", MAX_GMAIL_SEARCH),
+        (GMAIL_RECENT, MAX_GMAIL_RECENT),
+    ):
+        listed = messages.list(userId="me", q=query, maxResults=limit).execute()
+        for item in listed.get("messages") or []:
+            if item["id"] not in ids:
+                ids.append(item["id"])
     out: list[str] = []
-    for item in listed.get("messages") or []:
-        msg = service.users().messages().get(
-            userId="me",
-            id=item["id"],
-            format="metadata",
-            metadataHeaders=["Subject", "From"],
-        ).execute()
-        headers = {h["name"].lower(): h.get("value", "") for h in (msg.get("payload") or {}).get("headers") or []}
+    for message_id in ids:
+        msg = messages.get(userId="me", id=message_id, format="full").execute()
+        labels = set(msg.get("labelIds") or [])
+        if "SENT" in labels and "INBOX" not in labels:
+            continue  # Mail the student sent to someone else isn't evidence of their own activity.
+        payload = msg.get("payload") or {}
+        headers = {h["name"].lower(): h.get("value", "") for h in payload.get("headers") or []}
         subject = headers.get("subject", "")
         sender = headers.get("from", "")
-        snippet = (msg.get("snippet") or "")[:MAX_SNIPPET]
-        line = f"From: {sender}. Subject: {subject}. {snippet}".strip()
-        if line:
-            out.append(line)
+        snippet = html.unescape(msg.get("snippet") or "")[:MAX_SNIPPET]
+        evidence = _evidence(_body_text(payload), snippet)
+        # Each email is its own numbered line, so the model can keep their details apart.
+        line = f"[Email {len(out) + 1}] From: {sender}. Subject: {subject}. {snippet}"
+        if evidence:
+            line += f" … {evidence}"
+        out.append(line.strip())
     log.info("gmail activity scan user_id=%s hits=%s", user_id, len(out))
     return out
+
+
+def _body_text(payload: dict) -> str:
+    """The email's plain text: the text/plain part, else the HTML part with tags removed."""
+    plain: list[str] = []
+    rich: list[str] = []
+
+    def walk(part: dict) -> None:
+        data = (part.get("body") or {}).get("data")
+        mime = part.get("mimeType", "")
+        if data and mime in ("text/plain", "text/html"):
+            try:
+                decoded = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4)).decode("utf-8", "replace")
+            except (ValueError, binascii.Error):
+                decoded = ""
+            (plain if mime == "text/plain" else rich).append(decoded)
+        for child in part.get("parts") or []:
+            walk(child)
+
+    walk(payload)
+    if plain:
+        text = "\n".join(plain)
+    else:
+        text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", "\n".join(rich), flags=re.S | re.I)
+        text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    # Drop the quoted thread under a reply ("On Tue, … wrote:" and "> " lines).
+    text = re.split(r"\n\s*On .{0,200}wrote:\s*\n", text, maxsplit=1)[0]
+    text = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith(">"))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _evidence(body: str, snippet: str) -> str:
+    """Sentences from the body that talk about activities and aren't already in the snippet."""
+    seen = re.sub(r"\s+", " ", snippet).strip().lower()
+    kept: list[str] = []
+    size = 0
+    for sentence in re.split(r"(?<=[.!?])\s+", body):
+        sentence = sentence.strip()
+        if not sentence or sentence.lower() in seen:
+            continue
+        words = set(re.findall(r"[a-z]+", sentence.lower()))
+        if not words & EVIDENCE_WORDS:
+            continue
+        if size + len(sentence) > MAX_BODY_EVIDENCE:
+            break
+        kept.append(sentence)
+        size += len(sentence) + 1
+    return " ".join(kept)
 
 
 def _calendar_lines(user_id: str) -> list[str]:

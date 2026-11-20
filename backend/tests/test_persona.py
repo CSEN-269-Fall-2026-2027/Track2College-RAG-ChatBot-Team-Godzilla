@@ -61,14 +61,6 @@ class PersonaTests(unittest.TestCase):
         self.assertIn("Join video call", mode_prompt("counselor"))
         self.assertIn("help me apply", mode_prompt("assistant"))
 
-    def test_aid_modes_set_the_task(self) -> None:
-        self.assertEqual(normalize_mode(" FAFSA "), "fafsa")
-        self.assertEqual(normalize_mode("scholarships"), "scholarships")
-        self.assertIn("California Dream Act", mode_prompt("fafsa"))
-        self.assertIn("Cal Grant", mode_prompt("fafsa"))
-        self.assertIn("never charge a fee", mode_prompt("scholarships"))
-        self.assertNotIn("Scholarships (Financial Aid step)", mode_prompt("fafsa"))
-
     def test_extracts_trailing_mood_line(self) -> None:
         text = "Answer:\nFile early.\n\nFollow-up Questions you might have:\nQ1. When?\nMood: concerned"
         mood, cleaned = extract_mood(text)

@@ -124,8 +124,11 @@ class RunOwnershipTest(unittest.TestCase):
         # Don't open any browser: the run thread does nothing.
         self.run = patch.object(uc_account, "_run")
         self.run.start()
+        self.cloud_config = patch.object(cloud_browser, "configured", return_value=True)
+        self.cloud_config.start()
 
     def tearDown(self):
+        self.cloud_config.stop()
         self.run.stop()
         _reset_runs()
 

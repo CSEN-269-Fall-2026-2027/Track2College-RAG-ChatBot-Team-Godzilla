@@ -39,12 +39,17 @@ The `transcripts` storage bucket must allow `text/markdown` (and
 `application/octet-stream`) so `.md` uploads match the Academic history UI.
 Re-running `schema.sql` updates an existing bucket's `allowed_mime_types`.
 
+The retired `profile_analyses`, `course_plans`, and `game_progress` tables are no
+longer created on new installs. Existing tables are left intact to preserve stored
+data, and Reset all data still clears them when present. No active feature reads
+or writes those tables.
+
 ## Google connect
 
-Optional. Students keep signing in with email/password. At the end of onboarding
-they can **Connect Google** (or skip). That OAuth consent grants readonly access
-to Gmail, Calendar, and Drive; refresh tokens are encrypted and stored only on
-the server (`google_connections`). The chatbot does not use this data yet.
+Students sign in with email/password, then **Connect Google** as the required second
+onboarding step. OAuth grants readonly access to Gmail, Calendar, and Drive. The
+backend uses this connection for activity suggestions and UC verification codes;
+refresh tokens are encrypted and stored only on the server (`google_connections`).
 
 ### Google Cloud Console
 

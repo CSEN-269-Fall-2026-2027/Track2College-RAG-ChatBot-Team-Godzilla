@@ -1,11 +1,12 @@
 import { createClient, type Session as SupabaseSession } from "@supabase/supabase-js";
-import type { GameState } from "../game/progress";
 import type { Conversation, PersonalInfo, Profile, Transcript } from "../types";
 import { AuthError, type DataStore, type Session } from "./store";
 
-/** Generated schema types live in `./database.types` for reference / future typed queries. */
+import type { Database, Json } from "./database.types";
+import { createWriteQueue } from "./writeQueue";
 
 /** Table and bucket names must match supabase/schema.sql. */
+// Reset also clears retired tables that still exist in deployed projects. No feature reads or writes them.
 const TABLES = {
   profiles: "profiles",
   /** Legacy Insights table — still wiped on reset; app no longer reads/writes it. */
@@ -14,6 +15,7 @@ const TABLES = {
   transcripts: "transcripts",
   /** Legacy course-plan table — still wiped on reset; app no longer reads/writes it. */
   coursePlans: "course_plans",
+  /** Retired sound/read-aloud preferences; no screen consumes them. Reset only. */
   game: "game_progress",
   personalInfo: "personal_info",
 } as const;
@@ -38,35 +40,53 @@ function check<T>({ data, error }: { data: T; error: { message: string } | null 
 }
 
 export function createSupabaseStore(url: string, anonKey: string): DataStore {
-  const client = createClient(url, anonKey);
+  const client = createClient<Database>(url, anonKey);
+  const writes = createWriteQueue();
+  const resetting = new Set<string>();
+  const write = <T>(userId: string, key: string, action: () => Promise<T>) => {
+    if (resetting.has(userId)) return Promise.reject(new Error("Your account data is being reset."));
+    return writes.run(`${userId}:${key}`, action);
+  };
 
-  // Per-user singleton rows keyed by user_id (profile, latest analysis).
-  const singleton = <T>(table: string) => ({
+  // Per-user singleton rows keyed by user_id.
+  const singleton = <T>(table: "profiles" | "game_progress" | "personal_info") => ({
     async get(userId: string): Promise<T | null> {
       const row = check(await client.from(table).select("data").eq("user_id", userId).maybeSingle());
       return (row?.data as T) ?? null;
     },
-    async save(userId: string, value: T) {
-      check(await client.from(table).upsert({ user_id: userId, data: value, updated_at: new Date().toISOString() }));
+    save(userId: string, value: T) {
+      return write(userId, table, async () => {
+        check(await client.from(table).upsert({ user_id: userId, data: value as Json, updated_at: new Date().toISOString() }));
+      });
     },
   });
 
   // Per-user collections; the full record lives in `data`, with `id` mirrored for upserts.
-  const collection = <T extends { id: string }>(table: string) => ({
+  const collection = <T extends { id: string }>(table: "conversations" | "transcripts") => ({
     async list(userId: string): Promise<T[]> {
-      const rows = check(await client.from(table).select("data").eq("user_id", userId).order("updated_at", { ascending: false }));
-      return (rows ?? []).map((row) => row.data as T);
+      const records: T[] = [];
+      const pageSize = 500;
+      for (let offset = 0; ; offset += pageSize) {
+        const rows = check(await client.from(table).select("data").eq("user_id", userId)
+          .order("updated_at", { ascending: false }).order("id", { ascending: true })
+          .range(offset, offset + pageSize - 1)) ?? [];
+        records.push(...rows.map((row) => row.data as T));
+        if (rows.length < pageSize) return records;
+      }
     },
-    async save(userId: string, value: T) {
-      check(await client.from(table).upsert({ id: value.id, user_id: userId, data: value, updated_at: new Date().toISOString() }));
+    save(userId: string, value: T) {
+      return write(userId, `${table}:${value.id}`, async () => {
+        check(await client.from(table).upsert({ id: value.id, user_id: userId, data: value as unknown as Json, updated_at: new Date().toISOString() }));
+      });
     },
-    async remove(userId: string, id: string) {
-      check(await client.from(table).delete().eq("user_id", userId).eq("id", id));
+    remove(userId: string, id: string) {
+      return write(userId, `${table}:${id}`, async () => {
+        check(await client.from(table).delete().eq("user_id", userId).eq("id", id));
+      });
     },
   });
 
   const profiles = singleton<Profile>(TABLES.profiles);
-  const game = singleton<Partial<GameState>>(TABLES.game);
   const personalInfo = singleton<PersonalInfo>(TABLES.personalInfo);
   // One row per chat thread; Advisor loads the latest non-empty chat per mentor.
   const conversations = collection<Conversation>(TABLES.conversations);
@@ -76,7 +96,8 @@ export function createSupabaseStore(url: string, anonKey: string): DataStore {
     kind: "supabase",
     auth: {
       async getSession() {
-        const { data } = await client.auth.getSession();
+        const { data, error } = await client.auth.getSession();
+        if (error) throw new AuthError(error.message);
         return data.session ? toSession(data.session) : null;
       },
       async signUp(name, email, password) {
@@ -94,7 +115,8 @@ export function createSupabaseStore(url: string, anonKey: string): DataStore {
         return toSession(data.session);
       },
       async signOut() {
-        await client.auth.signOut();
+        const { error } = await client.auth.signOut();
+        if (error) throw new AuthError(error.message);
       },
       async resetPassword(email) {
         const { error } = await client.auth.resetPasswordForEmail(email.trim(), {
@@ -108,106 +130,75 @@ export function createSupabaseStore(url: string, anonKey: string): DataStore {
       },
     },
     profiles,
-    game,
     personalInfo,
-    async resetAllData(userId, email, password) {
+    async resetAllData(userId, email, password, beforeDelete) {
       // Re-authenticate first so a stolen session alone can't wipe everything.
-      const { error: authError } = await client.auth.signInWithPassword({ email: email.trim(), password });
+      const { data: authData, error: authError } = await client.auth.signInWithPassword({ email: email.trim(), password });
       if (authError) throw new AuthError(authError.message === "Invalid login credentials" ? "That password isn't right." : authError.message);
 
-      // Uploaded transcript files live at <userId>/<transcriptId>/<file>.
-      const bucket = client.storage.from(TRANSCRIPT_BUCKET);
-      const { data: folders } = await bucket.list(userId, { limit: 1000 });
-      const paths: string[] = [];
-      for (const entry of folders ?? []) {
-        const { data: files } = await bucket.list(`${userId}/${entry.name}`, { limit: 1000 });
-        if (files?.length) paths.push(...files.map((f) => `${userId}/${entry.name}/${f.name}`));
-        else paths.push(`${userId}/${entry.name}`);
-      }
-      if (paths.length) check(await bucket.remove(paths));
+      if (authData.user?.id !== userId) throw new AuthError("Sign in to the account you want to reset.");
+      if (resetting.has(userId)) throw new Error("Your account data is already being reset.");
+      resetting.add(userId);
+      try {
+        // Stop accepting writes, and let every already queued save finish before deleting anything.
+        await writes.drain();
+        await beforeDelete?.();
+        const bucket = client.storage.from(TRANSCRIPT_BUCKET);
+        const paths: string[] = [];
+        // Storage listings are paginated; a reset must not leave files after the first page.
+        const listAll = async (prefix: string) => {
+          const entries = [];
+          for (let offset = 0; ; offset += 1000) {
+            const page = check(await bucket.list(prefix, { limit: 1000, offset, sortBy: { column: "name", order: "asc" } })) ?? [];
+            entries.push(...page);
+            if (page.length < 1000) return entries;
+          }
+        };
+        for (const entry of await listAll(userId)) {
+          if (entry.id) paths.push(`${userId}/${entry.name}`);
+          else for (const file of await listAll(`${userId}/${entry.name}`)) paths.push(`${userId}/${entry.name}/${file.name}`);
+        }
+        for (let start = 0; start < paths.length; start += 1000) check(await bucket.remove(paths.slice(start, start + 1000)));
 
-      for (const table of Object.values(TABLES)) {
-        const { error } = await client.from(table).delete().eq("user_id", userId);
-        // Skip tables that haven't been migrated yet (e.g. game_progress on older projects).
-        if (error && /schema cache|does not exist|Could not find the table/i.test(error.message)) continue;
-        if (error) throw new Error(error.message);
+        for (const table of Object.values(TABLES)) {
+          const { error } = await client.from(table).delete().eq("user_id", userId);
+          // Retired tables may already be dropped; missing live tables indicate a broken migration.
+          if (error && (table === TABLES.analyses || table === TABLES.coursePlans || table === TABLES.game) &&
+            (error.code === "PGRST205" || error.code === "42P01")) continue;
+          if (error) throw new Error(error.message);
+        }
+        const { emptyProfile } = await import("../profile");
+        const blank = { ...emptyProfile(), updatedAt: Date.now() };
+        check(await client.from(TABLES.profiles).upsert({ user_id: userId, data: blank as unknown as Json, updated_at: new Date().toISOString() }));
+        // Keep writes paused until the caller reloads the page.
+      } catch (error) {
+        resetting.delete(userId);
+        throw error;
       }
-
-      // Seed a blank profile so the next load starts onboarding (completed: false), not a half-filled row.
-      const blank = {
-        basics: { firstName: "", lastName: "", gradeLevel: "", graduationYear: "", highSchool: "", city: "", state: "", firstGen: "" },
-        academics: {
-          gpaUnweighted: "",
-          gpaWeighted: "",
-          exams: "",
-          classRank: "",
-          apIbCourses: "",
-          sat: "",
-          act: "",
-          testPlan: "",
-          coursework: "",
-        },
-        goals: { majors: [], intendedMajor: "", careers: "", whyCollege: "" },
-        activities: [],
-        awards: [],
-        colleges: [],
-        preferences: {
-          regions: "",
-          campusSize: "",
-          setting: "",
-          maxAnnualCost: "",
-          needsAid: "",
-          incomeRange: "",
-          fafsa: "",
-          essays: "",
-          recommendations: "",
-        },
-        checklistDone: {},
-        onboarding: {
-          completed: false,
-          checkpoint: 0,
-          subjects: [],
-          exploringMajors: false,
-          gpaScale: "",
-          distance: "",
-          priorities: [],
-          biggestQuestion: "",
-          helpFocus: "",
-          activityNote: "",
-          completedAt: null,
-        },
-        updatedAt: Date.now(),
-      };
-      check(await client.from(TABLES.profiles).upsert({ user_id: userId, data: blank, updated_at: new Date().toISOString() }));
     },
     conversations,
     transcripts: {
       list: transcripts.list,
-      async save(userId, transcript, file) {
-        let record = transcript;
-        if (file) {
-          const path = `${userId}/${transcript.id}/${file.name}`;
-          const contentType = file.type || (/\.md$/i.test(file.name) ? "text/markdown" : "application/octet-stream");
-          try {
+      save(userId, transcript, file) {
+        return write(userId, `transcript-file:${transcript.id}`, async () => {
+          let record = transcript;
+          if (file) {
+            // Keep filenames inside their transcript folder even if an upload has path separators.
+            const name = file.name.replace(/[\\/]/g, "_");
+            const path = `${userId}/${transcript.id}/${name}`;
+            const contentType = file.type || (/\.md$/i.test(file.name) ? "text/markdown" : "application/octet-stream");
             check(await client.storage.from(TRANSCRIPT_BUCKET).upload(path, file, { upsert: true, contentType }));
             record = { ...transcript, storagePath: path };
-          } catch (error) {
-            // Storage may be unavailable while a project finishes restoring; still keep the parsed record.
-            console.warn("[supabase] transcript file upload skipped:", error);
           }
-        }
-        await transcripts.save(userId, record);
-        return record;
+          await transcripts.save(userId, record);
+          return record;
+        });
       },
-      async remove(userId, transcript) {
-        if (transcript.storagePath) {
-          try {
-            check(await client.storage.from(TRANSCRIPT_BUCKET).remove([transcript.storagePath]));
-          } catch (error) {
-            console.warn("[supabase] transcript file delete skipped:", error);
-          }
-        }
-        await transcripts.remove(userId, transcript.id);
+      remove(userId, transcript) {
+        return write(userId, `transcript-file:${transcript.id}`, async () => {
+          if (transcript.storagePath) check(await client.storage.from(TRANSCRIPT_BUCKET).remove([transcript.storagePath]));
+          await transcripts.remove(userId, transcript.id);
+        });
       },
     },
   };

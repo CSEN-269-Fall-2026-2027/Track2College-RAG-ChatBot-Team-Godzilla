@@ -1,5 +1,4 @@
-import { useId, useState, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
-import { XIcon } from "./icons";
+import { useId, type InputHTMLAttributes, type ReactNode } from "react";
 
 interface FieldShellProps {
   label: string;
@@ -132,77 +131,6 @@ export function Segmented<T extends string>({
       </div>
       {hint && <span className="field-hint">{hint}</span>}
     </div>
-  );
-}
-
-export function ChipsInput({
-  label,
-  values,
-  onChange,
-  suggestions = [],
-  placeholder,
-  max = 5,
-}: {
-  label: string;
-  values: string[];
-  onChange: (values: string[]) => void;
-  suggestions?: string[];
-  placeholder?: string;
-  max?: number;
-}) {
-  const [draft, setDraft] = useState("");
-  const add = (raw: string) => {
-    const value = raw.trim().replace(/,$/, "");
-    if (!value || values.length >= max || values.some((v) => v.toLowerCase() === value.toLowerCase())) return;
-    onChange([...values, value]);
-    setDraft("");
-  };
-  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Enter" || event.key === ",") {
-      event.preventDefault();
-      add(draft);
-    } else if (event.key === "Backspace" && !draft && values.length) {
-      onChange(values.slice(0, -1));
-    }
-  };
-  const remaining = suggestions.filter((s) => !values.includes(s)).slice(0, 8);
-
-  return (
-    <FieldShell label={label} wide hint={`Press Enter to add · up to ${max}`}>
-      {(id) => (
-        <>
-          <div className="chips-input">
-            {values.map((v) => (
-              <span key={v} className="chip">
-                {v}
-                <button type="button" onClick={() => onChange(values.filter((x) => x !== v))} aria-label={`Remove ${v}`}>
-                  <XIcon width={12} height={12} />
-                </button>
-              </span>
-            ))}
-            {values.length < max && (
-              <input
-                id={id}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={onKeyDown}
-                onBlur={() => add(draft)}
-                placeholder={values.length ? "" : placeholder}
-              />
-            )}
-          </div>
-          {remaining.length > 0 && values.length < max && (
-            <div className="chip-suggestions">
-              {remaining.map((s) => (
-                <button key={s} type="button" className="chip chip-ghost" onClick={() => add(s)}>
-                  + {s}
-                </button>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-    </FieldShell>
   );
 }
 

@@ -89,9 +89,25 @@ export function inferGraduationYear(grade: GradeLevel | "", now = new Date()): s
   return String(schoolYearEndYear(now) + yearsLeft);
 }
 
+/**
+ * First and last name from a transcript's student name, as schools print it:
+ * "Lindsay Rotter", "Lindsay Ann Rotter", or "Rotter, Lindsay Ann".
+ */
+export function splitStudentName(full: string): { first: string; last: string } {
+  const name = full.trim().replace(/\s+/g, " ");
+  if (!name) return { first: "", last: "" };
+  if (name.includes(",")) {
+    const [last, rest = ""] = name.split(",", 2).map((part) => part.trim());
+    return { first: rest.split(" ")[0] ?? "", last };
+  }
+  const words = name.split(" ");
+  return { first: words[0], last: words.length > 1 ? words[words.length - 1] : "" };
+}
+
 /** Prefill profile basics/GPA from a transcript without overwriting edits the student already made. */
 export function applyTranscriptBasics(profile: Profile, transcript: Transcript): Profile {
-  const first = transcript.studentName.trim().split(/\s+/)[0] ?? "";
+  // The last name matters: it's how we match the student to their counselor's last-name range.
+  const { first, last } = splitStudentName(transcript.studentName);
   const grade = inferGradeFromCourses(transcript.courses);
   const year = inferGraduationYear(grade);
   const state = (transcript.state || "").trim().toUpperCase();
@@ -101,6 +117,7 @@ export function applyTranscriptBasics(profile: Profile, transcript: Transcript):
     basics: {
       ...profile.basics,
       firstName: profile.basics.firstName || first,
+      lastName: profile.basics.lastName || last,
       highSchool: profile.basics.highSchool || transcript.school,
       state: profile.basics.state || knownState,
       gradeLevel: profile.basics.gradeLevel || grade || profile.basics.gradeLevel,
@@ -122,6 +139,8 @@ export function questionErrors(profile: Profile, questionId: string, opts?: { ha
       return checkpointErrors(profile);
     case "name":
       return profile.basics.firstName.trim() ? [] : ["Add the name you’d like us to use."];
+    case "lastName":
+      return profile.basics.lastName.trim() ? [] : ["Add your last name (we use it to find your school counselor)."];
     case "grade":
       if (profile.basics.gradeLevel === "transfer") {
         return ["This tool supports first-year UC applicants. Transfer applicants use a different UC process."];
@@ -133,26 +152,18 @@ export function questionErrors(profile: Profile, questionId: string, opts?: { ha
       return profile.basics.highSchool.trim() ? [] : ["Add your high school name."];
     case "state":
       return profile.basics.state.trim() ? [] : ["Select your state or “Outside the U.S.”"];
+    case "gpa":
+      return profile.academics.gpaUnweighted.trim() ? [] : ["Add your unweighted GPA."];
+    case "major":
+      return profile.goals.intendedMajor.trim() || profile.onboarding.exploringMajors ? [] : ["Pick your intended major or Still exploring."];
     default:
       return [];
   }
 }
 
-/** Required fields across the whole journey (used before “Start my plan”). */
+/** Every field on the confirm screen (weighted GPA aside) must be filled before “Start my plan”. */
 export function checkpointErrors(profile: Profile, _checkpoint = ABOUT_YOU_CHECKPOINT): string[] {
-  const errors: string[] = [];
-  errors.push(...questionErrors(profile, "name"));
-  errors.push(...questionErrors(profile, "grade"));
-  errors.push(...questionErrors(profile, "year"));
-  errors.push(...questionErrors(profile, "school"));
-  errors.push(...questionErrors(profile, "state"));
-  return errors;
-}
-
-export function requiredComplete(profile: Profile): boolean {
-  const { firstName, gradeLevel, graduationYear, highSchool, state } = profile.basics;
-  if (gradeLevel === "transfer") return false;
-  return !!(firstName.trim() && gradeLevel && graduationYear.trim() && highSchool.trim() && state.trim());
+  return ["name", "lastName", "grade", "year", "school", "state", "gpa", "major"].flatMap((id) => questionErrors(profile, id));
 }
 
 export function isOnboardingComplete(profile: Profile): boolean {
@@ -174,10 +185,6 @@ export function resumeCheckpoint(profile: Profile): number {
 
 export function clampCheckpoint(n: number): number {
   return Math.max(0, Math.min(CHECKPOINT_COUNT, n));
-}
-
-export function toggleList(list: string[], value: string): string[] {
-  return list.includes(value) ? list.filter((x) => x !== value) : [...list, value];
 }
 
 /** Prefill every UC campus (student can unselect later in Profile). */
@@ -233,17 +240,3 @@ export const GRADE_OPTIONS: { id: GradeLevel; label: string }[] = [
   { id: "11", label: "11th" },
   { id: "12", label: "12th" },
 ];
-
-export const SUBJECT_CHIPS = ["English", "Math", "Science", "History", "Art", "Music", "CS / coding", "Languages", "Business", "Other"];
-export const CAREER_CHIPS = ["Healthcare", "Tech", "Education", "Arts", "Law / government", "Trades", "Still exploring"];
-export const ACTIVITY_CHIPS = ["Clubs", "Sports", "Job / paid work", "Volunteering", "Personal projects", "Family responsibilities", "Other"];
-export const REGION_CHIPS = ["Stay in-state", "Nearby states", "Anywhere in the U.S.", "Open to other countries", "Not sure yet"];
-export const DISTANCE_CHIPS = ["Commuting distance", "Within a few hours", "Across the country", "No preference"];
-export const SIZE_CHIPS: { id: Profile["preferences"]["campusSize"]; label: string }[] = [
-  { id: "small", label: "Small" },
-  { id: "medium", label: "Medium" },
-  { id: "large", label: "Large" },
-  { id: "any", label: "No preference" },
-];
-export const PRIORITY_CHIPS = ["Strong programs", "Affordability", "Community / vibe", "Other interests"];
-export const HELP_CHIPS = ["Understanding UC requirements", "Financial aid", "Essays / PIQs", "Course planning", "Choosing a UC campus", "Not sure yet"];

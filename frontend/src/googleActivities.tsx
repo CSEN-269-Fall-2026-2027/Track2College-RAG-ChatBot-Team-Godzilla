@@ -6,9 +6,11 @@ type ScanStatus = "idle" | "scanning" | "ready" | "error";
 interface GoogleActivitiesContextValue {
   suggestions: GoogleActivitySuggestion[];
   status: ScanStatus;
+  /** Google is linked (so an empty scan means "found nothing", not "not connected"). Null until known. */
+  connected: boolean | null;
   error: string | null;
   /** Run a scan. Default is once per sign-in session; `force` refreshes from Google. */
-  scan: (opts?: { force?: boolean }) => Promise<GoogleActivitySuggestion[]>;
+  scan: (opts?: { force?: boolean; throwOnError?: boolean }) => Promise<GoogleActivitySuggestion[]>;
 }
 
 const GoogleActivitiesContext = createContext<GoogleActivitiesContextValue | null>(null);
@@ -31,6 +33,7 @@ function loadSession(userId: string): { scanned: boolean; suggestions: GoogleAct
   }
 }
 
+/** A saved scan only happens while Google is connected (see scan), so "scanned" means connected. */
 function saveSession(userId: string, suggestions: GoogleActivitySuggestion[]) {
   try {
     sessionStorage.setItem(storageKey(userId), JSON.stringify({ scanned: true, suggestions }));
@@ -44,16 +47,19 @@ export function GoogleActivitiesProvider({ userId, children }: { userId: string;
   const [suggestions, setSuggestions] = useState<GoogleActivitySuggestion[]>(cached.suggestions);
   const [status, setStatus] = useState<ScanStatus>(cached.scanned ? "ready" : "idle");
   const [error, setError] = useState<string | null>(null);
+  const [connected, setConnected] = useState<boolean | null>(cached.scanned ? true : null);
   const inFlight = useRef(false);
   const autoStarted = useRef(false);
 
-  const scan = useCallback(async (opts?: { force?: boolean }) => {
+  /** `throwOnError`: reject instead of returning [] when the scan fails, so the caller can say why. */
+  const scan = useCallback(async (opts?: { force?: boolean; throwOnError?: boolean }) => {
     if (inFlight.current) return loadSession(userId).suggestions;
     inFlight.current = true;
     setStatus("scanning");
     setError(null);
     try {
         const google = await getGoogleStatus();
+        setConnected(google.connected);
         if (!google.connected) {
           // Don't mark the session scanned — retry after Connect Google.
           setSuggestions([]);
@@ -70,6 +76,7 @@ export function GoogleActivitiesProvider({ userId, children }: { userId: string;
       setError(message);
       setStatus("error");
       if (opts?.force) saveSession(userId, []);
+      if (opts?.throwOnError) throw err instanceof Error ? err : new Error(message);
       return [];
     } finally {
       inFlight.current = false;
@@ -84,14 +91,15 @@ export function GoogleActivitiesProvider({ userId, children }: { userId: string;
     if (existing.scanned) {
       setSuggestions(existing.suggestions);
       setStatus("ready");
+      setConnected(true);
       return;
     }
     void scan();
   }, [userId, scan]);
 
   const value = useMemo(
-    () => ({ suggestions, status, error, scan }),
-    [suggestions, status, error, scan],
+    () => ({ suggestions, status, connected, error, scan }),
+    [suggestions, status, connected, error, scan],
   );
 
   return <GoogleActivitiesContext.Provider value={value}>{children}</GoogleActivitiesContext.Provider>;

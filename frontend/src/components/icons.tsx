@@ -45,13 +45,6 @@ export const TrashIcon = (p: IconProps) => (
   </Icon>
 );
 
-export const SidebarIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <rect x="3" y="4" width="18" height="16" rx="3" />
-    <path d="M9 4v16" />
-  </Icon>
-);
-
 export const CopyIcon = (p: IconProps) => (
   <Icon {...p}>
     <rect x="9" y="9" width="11" height="11" rx="2" />
@@ -100,12 +93,6 @@ export const CornerIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M9 10l-5 5 5 5" />
     <path d="M20 4v7a4 4 0 0 1-4 4H4" />
-  </Icon>
-);
-
-export const HomeIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M4 10.5L12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z" />
   </Icon>
 );
 
@@ -180,13 +167,6 @@ export const EyeIcon = ({ crossed, ...p }: IconProps & { crossed?: boolean }) =>
   </Icon>
 );
 
-export const CalendarIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <rect x="4" y="5" width="16" height="15" rx="2.5" />
-    <path d="M4 10h16M9 3v4M15 3v4" />
-  </Icon>
-);
-
 export const ArrowRightIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M5 12h14M13 6l6 6-6 6" />
@@ -211,13 +191,6 @@ export const ChevronIcon = (p: IconProps) => (
   </Icon>
 );
 
-export const CompassIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <circle cx="12" cy="12" r="8.5" />
-    <path d="M15.5 8.5l-2 5-5 2 2-5z" />
-  </Icon>
-);
-
 export const UploadIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" />
@@ -231,13 +204,6 @@ export const FileIcon = (p: IconProps) => (
   </Icon>
 );
 
-export const BookIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z" />
-    <path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3" />
-  </Icon>
-);
-
 export function Logo({ size = 28 }: { size?: number }) {
   return <img src="/logo.png" width={size} height={size} alt="" aria-hidden="true" className="logo" draggable={false} />;
 }
@@ -246,27 +212,6 @@ export const VolumeIcon = ({ muted, ...p }: IconProps & { muted?: boolean }) => 
   <Icon {...p}>
     <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
     {muted ? <path d="M16 9.5l5 5M21 9.5l-5 5" /> : <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" />}
-  </Icon>
-);
-
-export const ReadAloudIcon = ({ off, ...p }: IconProps & { off?: boolean }) => (
-  <Icon {...p}>
-    <path d="M14 12a6 6 0 0 1-8.7 5.4L2.5 18l.7-2.9A6 6 0 1 1 14 12z" />
-    <path d="M17.5 8.5a5 5 0 0 1 0 7M20 6a8.5 8.5 0 0 1 0 12" />
-    {off && <path d="M3 3l18 18" />}
-  </Icon>
-);
-
-export const FlagIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M5 21V4M5 4h11l-2 4 2 4H5" />
-  </Icon>
-);
-
-export const UsersIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <circle cx="9" cy="8.5" r="3.5" />
-    <path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 5.2a3.5 3.5 0 0 1 0 6.6M18 14.5a6.5 6.5 0 0 1 3.5 5.5" />
   </Icon>
 );
 

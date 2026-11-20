@@ -111,3 +111,13 @@ describe("virtualCounselorDone", () => {
     ).toBe(true);
   });
 });
+
+describe("Jordan's shorter goodbyes", () => {
+  it("recognizes the new lines and still recognizes the old ones in saved calls", () => {
+    expect(isWrapUpLine("Thanks, Maya! You're all set to start your UC application.")).toBe(true);
+    expect(isWrapUpLine("Thanks, Maya! Come back any time.")).toBe(true);
+    expect(isWrapUpLine("Thanks so much for talking with me today, Maya! When you're ready, you can go ahead with your UC application.")).toBe(true);
+    expect(isWrapUpLine("Thanks so much for talking with me today! Come back any time you have more questions.")).toBe(true);
+    expect(isWrapUpLine("Thanks! What month were you born?")).toBe(false);
+  });
+});

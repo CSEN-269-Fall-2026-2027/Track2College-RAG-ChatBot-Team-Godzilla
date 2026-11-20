@@ -2,8 +2,7 @@
 Connect Google: OAuth for readonly Gmail, Calendar, and Drive.
 
 App login stays Supabase email/password. This module only stores encrypted refresh
-tokens so the API can read Google data later. Chat and product features do not call
-these helpers yet.
+tokens for activity suggestions and UC verification-code retrieval.
 """
 
 from __future__ import annotations
@@ -332,7 +331,7 @@ def status_for(user_id: str) -> GoogleStatus:
 
 
 def credentials_for(user_id: str) -> Credentials:
-    """Build refreshed Google credentials for later API reads. Not used by chat yet."""
+    """Build refreshed Google credentials for activity scans and UC verification codes."""
     _require_configured()
     row = _fetch_row(user_id)
     if not row:
@@ -369,35 +368,3 @@ def frontend_redirect(*, ok: bool, detail: str = "") -> str:
     if detail and not ok:
         params["google_error"] = detail[:180]
     return f"{frontend_origin()}/?{urlencode(params)}"
-
-
-# --- Thin read helpers for later product use (not wired to routes/UI yet) ---
-
-def smoke_calendar_title(user_id: str) -> Optional[str]:
-    from googleapiclient.discovery import build
-
-    service = build("calendar", "v3", credentials=credentials_for(user_id), cache_discovery=False)
-    result = service.calendarList().list(maxResults=1).execute()
-    items = result.get("items") or []
-    return (items[0].get("summary") if items else None)
-
-
-def smoke_drive_filename(user_id: str) -> Optional[str]:
-    from googleapiclient.discovery import build
-
-    service = build("drive", "v3", credentials=credentials_for(user_id), cache_discovery=False)
-    result = service.files().list(pageSize=1, fields="files(name)").execute()
-    items = result.get("files") or []
-    return (items[0].get("name") if items else None)
-
-
-def smoke_gmail_snippet(user_id: str) -> Optional[str]:
-    from googleapiclient.discovery import build
-
-    service = build("gmail", "v1", credentials=credentials_for(user_id), cache_discovery=False)
-    listed = service.users().messages().list(userId="me", maxResults=1).execute()
-    messages = listed.get("messages") or []
-    if not messages:
-        return None
-    msg = service.users().messages().get(userId="me", id=messages[0]["id"], format="metadata").execute()
-    return msg.get("snippet")

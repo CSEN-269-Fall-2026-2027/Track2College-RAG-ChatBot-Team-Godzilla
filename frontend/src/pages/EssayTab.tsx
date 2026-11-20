@@ -136,10 +136,6 @@ export function EssayTab({ onAsk }: { onAsk: (text: string, options?: AskOptions
           );
         })}
       </ol>
-
-      <p className="privacy-note">
-        Read each draft closely and make it sound like you before you submit.
-      </p>
     </>
   );
 }

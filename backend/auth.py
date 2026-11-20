@@ -84,7 +84,10 @@ def verify(token: str) -> str:
         raise HTTPException(status_code=503, detail="Couldn't check your sign-in. Try again in a moment.")
     if response.status_code >= 500:
         raise HTTPException(status_code=503, detail="Couldn't check your sign-in. Try again in a moment.")
-    student_id = response.json().get("id") if response.status_code == 200 else None
+    try:
+        student_id = response.json().get("id") if response.status_code == 200 else None
+    except (ValueError, AttributeError) as error:
+        raise HTTPException(status_code=503, detail="Couldn't check your sign-in. Try again in a moment.") from error
     if not student_id:
         raise _unauthorized("Your session has expired. Sign in again.")
 

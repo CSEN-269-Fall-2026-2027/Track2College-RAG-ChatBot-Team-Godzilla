@@ -53,7 +53,7 @@ export function GoogleConnectPanel({ onContinue, onBack }: GoogleConnectPanelPro
         const connected = next?.connected ? next : await refresh(ac.signal);
         if (!ac.signal.aborted && connected?.connected) void scan({ force: true });
       } else if (result === "error") {
-        setError(detail || "Google connect didn't finish. You can try again or skip.");
+        setError(detail || "Google connect didn't finish. Please try again.");
       }
       setLoading(false);
     })();
@@ -77,7 +77,7 @@ export function GoogleConnectPanel({ onContinue, onBack }: GoogleConnectPanelPro
 
   return (
     <>
-      <p className="ob-section-tag">Step 2 · Optional</p>
+      <p className="ob-section-tag">Step 2</p>
       <h1 id="ob-heading">Connect Google</h1>
 
       <div className="ob-google">
@@ -89,7 +89,6 @@ export function GoogleConnectPanel({ onContinue, onBack }: GoogleConnectPanelPro
             <p className="ob-google-detail">
               {status?.googleEmail ? `Signed in as ${status.googleEmail}` : "Your Google account is linked."}
             </p>
-            <p className="ob-google-note">Readonly access only — we won’t send mail or change files.</p>
           </div>
         ) : (
           <div className="ob-google-scopes">
@@ -114,11 +113,6 @@ export function GoogleConnectPanel({ onContinue, onBack }: GoogleConnectPanelPro
           Back
         </button>
         <div className="ob-actions-right">
-          {!connected && (
-            <button type="button" className="ob-skip" onClick={onContinue} disabled={busy}>
-              Skip for now
-            </button>
-          )}
           {connected ? (
             <button type="button" className="btn-primary" onClick={onContinue}>
               Continue

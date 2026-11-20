@@ -1,17 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { usePlanning } from "../planning";
 import { academicHistoryStatus, completeness, useProfile } from "../profile";
-import { navigate } from "../router";
 import { readJSON, userKey, writeJSON } from "../storage";
 import type { Profile, UcJourneyState } from "../types";
-import { ArrowRightIcon, CheckIcon, ExternalIcon, PixelMapIcon } from "../components/icons";
-import {
-  computeJourney,
-  journeyOf,
-  UC_APPLY_URL,
-  type Checkpoint,
-  type CheckpointId,
-} from "./logic";
+import { CheckIcon } from "../components/icons";
+import { computeJourney, journeyOf, type Checkpoint, type CheckpointId } from "./logic";
 import { daysUntilUcDeadline, nextUcEntryYear } from "../agent/logic";
 import { mentorById } from "../game/characters";
 import { STAGE_GUIDE } from "./guides";
@@ -42,8 +35,8 @@ const MAP_LABEL: Record<CheckpointId, string> = {
   ucs: "Choose UCs",
   activities: "Activities list",
   essays: "Four essays",
-  review: "Apply",
-  aid: "Financial aid",
+  counselor: "Counselor",
+  apply: "Apply",
 };
 
 /** Each chapter's campus building (pixel art), computed once. */
@@ -54,22 +47,13 @@ const ART = Object.fromEntries((Object.keys(MAP_LABEL) as CheckpointId[]).map((i
 
 type Pt = { x: number; y: number };
 
-export function JourneyMap({
-  userId,
-  onBack,
-  embedded = false,
-}: {
-  userId: string;
-  onBack?: () => void;
-  /** Popup / side panel: same map and progress, no full-page chrome. */
-  embedded?: boolean;
-}) {
+export function JourneyMap({ userId }: { userId: string }) {
   const { profile, update } = useProfile();
   const { transcripts } = usePlanning();
   const sections = completeness(profile).sections;
   const academicStarted = academicHistoryStatus(profile, transcripts).started;
   const journey = useMemo(() => computeJourney(profile, sections, academicStarted), [profile, sections, academicStarted]);
-  const { checkpoints, completeCount, current, finished } = journey;
+  const { checkpoints, current, finished } = journey;
 
   // When a stage is completed since the student last looked, draw the new stretch of route.
   // Progress itself always comes from computeJourney.
@@ -99,7 +83,8 @@ export function JourneyMap({
   // on the right. Narrow: a vertical list with labels beside each building.
   const [fitRef, box] = useBoxSize<HTMLDivElement>();
   const layout = mapLayout(box.width);
-  const planet = layout === "tall" ? 72 : box.width >= 640 ? 96 : box.width >= 480 ? 72 : 48;
+  // Seven buildings in the wide row: shrink sooner so they never overflow their columns.
+  const planet = layout === "tall" ? 72 : box.width >= 760 ? 96 : box.width >= 560 ? 72 : 48;
 
   // The route runs through the buildings' measured centres, from the start pad to the flag.
   const skyRef = useRef<HTMLDivElement>(null);
@@ -117,17 +102,6 @@ export function JourneyMap({
   const legs = useMemo(() => routeLegs(points), [points]);
 
   const setJourney = useCallback((change: (j: UcJourneyState) => UcJourneyState) => update((p) => ({ ...p, ucJourney: change(journeyOf(p)) })), [update]);
-
-  const progress = (
-    <div className="jm-overall" aria-live="polite">
-      <strong>
-        {completeCount} of {checkpoints.length} checkpoints complete
-      </strong>
-      <span className="jm-bar" aria-hidden="true">
-        <span style={{ width: `${(completeCount / checkpoints.length) * 100}%` }} />
-      </span>
-    </div>
-  );
 
   const focusIndex = Math.max(0, checkpoints.findIndex((c) => c.id === active));
   const focusCheckpoint = checkpoints[focusIndex];
@@ -223,39 +197,18 @@ export function JourneyMap({
   );
 
   return (
-    <div className={`jm${embedded ? " jm-embedded" : ""}`}>
-      {!embedded && (
-        <header className="jm-top">
-          <button className="btn-ghost jm-back" onClick={onBack}>
-            <ArrowRightIcon width={16} height={16} style={{ transform: "rotate(180deg)" }} />
-            Back
-          </button>
-          <div className="jm-title">
-            <h1>UC Journey Map</h1>
-            <p>Your University of California application, one stop at a time.</p>
-          </div>
-          {progress}
-        </header>
-      )}
-
+    <div className="jm jm-embedded">
       <div className="jm-scroll">
         <div className="jm-board-split">
           <div className="jm-board-map">{mapBoard}</div>
           {focusCheckpoint && (
             <StageTasksPanel
               checkpoint={focusCheckpoint}
-              index={focusIndex}
-              state={focusCheckpoint.complete ? "Complete" : focusIndex === current && !finished ? "Current" : "Upcoming"}
               profile={profile}
               setJourney={setJourney}
             />
           )}
         </div>
-        {finished && (
-          <p className="jm-finished">
-            You've submitted your UC application and your financial aid application. Keep an eye on your follow-ups in Review &amp; Apply.
-          </p>
-        )}
       </div>
     </div>
   );
@@ -325,42 +278,20 @@ function PixelArt({ rows, fill = "var(--cn-sage-deep)" }: { rows: string[]; fill
 
 interface PanelProps {
   checkpoint: Checkpoint;
-  index: number;
-  state: string;
   profile: Profile;
   setJourney: (change: (j: UcJourneyState) => UcJourneyState) => void;
 }
 
-/** Where each step's answers can be changed. */
-const PROFILE_SECTION: Partial<Record<CheckpointId, string>> = {
-  profile: "basics",
-  ucs: "campuses",
-  activities: "activities",
-  essays: "essays",
-  aid: "finances",
-};
-
 /** Bottom half of the map: tasks for the focused stop. */
-function StageTasksPanel({ checkpoint: c, index, state, profile, setJourney }: PanelProps) {
+function StageTasksPanel({ checkpoint: c, profile, setJourney }: PanelProps) {
   const headingId = `jm-stage-${c.id}`;
-  const section = PROFILE_SECTION[c.id];
   const submittedAt = journeyOf(profile).submittedAt;
 
   return (
     <section className="jm-stage-panel" aria-labelledby={headingId}>
       <header className="jm-stage-head">
-        <span className="jm-panel-kicker">
-          Step {index + 1} · {state}
-        </span>
         <h2 id={headingId}>{c.title}</h2>
       </header>
-
-      <div className="jm-progress">
-        <span>{c.summary}</span>
-        <span className="jm-bar" aria-hidden="true">
-          <span style={{ width: `${(c.done / Math.max(c.total, 1)) * 100}%` }} />
-        </span>
-      </div>
 
       <ul className="jm-tasks">
         {c.tasks
@@ -378,35 +309,13 @@ function StageTasksPanel({ checkpoint: c, index, state, profile, setJourney }: P
           ))}
       </ul>
 
-      <div className="jm-stage-actions">
-        {section && (
-          <button className="btn-ghost jm-cta" onClick={() => navigate("profile", section)}>
-            Open in Profile <ArrowRightIcon width={15} height={15} />
-          </button>
-        )}
-
-        {c.id === "review" && (
-          <a className="btn-ghost jm-cta" href={UC_APPLY_URL} target="_blank" rel="noreferrer noopener">
-            Open the official UC application <ExternalIcon width={14} height={14} />
-          </a>
-        )}
-
-        {c.id === "review" && submittedAt !== null && (
+      {c.id === "apply" && submittedAt !== null && (
+        <div className="jm-stage-actions">
           <button className="jm-link" onClick={() => setJourney((j) => ({ ...j, submittedAt: null }))}>
             I haven't actually submitted
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </section>
-  );
-}
-
-/** Header entry point used across the signed-in app. */
-export function MapButton({ active = false }: { active?: boolean }) {
-  return (
-    <a className={`map-btn${active ? " on" : ""}`} href="#/map" aria-label="UC Journey Map" aria-current={active ? "page" : undefined}>
-      <PixelMapIcon />
-      <span>Map</span>
-    </a>
   );
 }

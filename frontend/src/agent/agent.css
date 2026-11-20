@@ -94,6 +94,29 @@
   line-height: 1.5;
 }
 
+.agent-error {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.agent-error strong {
+  display: block;
+  margin: 0 0 4px;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.agent-error p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: inherit;
+}
+
 /* Find → review → send progress */
 
 .agent-steps {
@@ -274,16 +297,6 @@
 
 /* UC account: saved login + live status of the UC window */
 
-.uc-creds {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 14px 12px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--bg-subtle);
-}
-
 .uc-cred {
   display: flex;
   align-items: center;
@@ -339,13 +352,6 @@
 .uc-icon-btn:hover {
   background: var(--bg-hover);
   color: var(--text);
-}
-
-.uc-creds-note {
-  margin: 8px 0 0;
-  font-size: 12.5px;
-  line-height: 1.45;
-  color: var(--text-muted);
 }
 
 .uc-run {

@@ -18,12 +18,8 @@ from query import (
     _extract_followup_questions,
     _resolve_followup_query,
 )
-from profile_analysis import analyze_profile
 from transcript import TranscriptError, analyze_transcript
-from course_plan import build_course_plan
-from essay import generate_essay
 from piq import generate_piqs
-from activities import extract_activities
 import google_activities
 import uc_account
 from auth import Student, current_student
@@ -35,7 +31,7 @@ import google_oauth
 app = FastAPI(
     title="Track2College Chatbot API",
     version="1.0.0",
-    description="UC-focused advisor API (Groq): chat, transcripts, PIQs, course plans.",
+    description="UC-focused advisor API (Groq): chat, transcripts, PIQs, Google, counselor and UC application tools.",
 )
 
 app.add_middleware(
@@ -98,35 +94,8 @@ class ChatRequest(BaseModel):
     mode: Optional[str] = Field(
         None,
         max_length=32,
-        description="Optional Story-mode step mode: Review & Apply (counselor, assistant) for Sage, or Financial Aid (fafsa, scholarships) for Penny.",
+        description="Optional Story-mode step mode: Review & Apply (counselor, assistant) for Sage, for the counselor and application assistant.",
     )
-
-
-class ProfileAnalysisRequest(BaseModel):
-    profile_summary: str = Field("", max_length=8000)
-    colleges: List[str] = Field(default_factory=list, max_length=20)
-    majors: List[str] = Field(default_factory=list, max_length=10)
-
-
-class CollegeFit(BaseModel):
-    name: str
-    fit: str
-    reasoning: str
-    sources: List[str]
-
-
-class ActionItem(BaseModel):
-    title: str
-    detail: str
-    timeframe: str
-
-
-class ProfileAnalysisResponse(BaseModel):
-    summary: str
-    strengths: List[str]
-    gaps: List[str]
-    colleges: List[CollegeFit]
-    actions: List[ActionItem]
 
 
 class TranscriptRequest(BaseModel):
@@ -154,88 +123,12 @@ class ReportedGpa(BaseModel):
 class TranscriptResponse(BaseModel):
     student_name: str
     school: str
+    state: str = ""
     reported_gpa: ReportedGpa
     courses: List[TranscriptCourse]
     summary: str
     strengths: List[str]
     concerns: List[str]
-
-
-class CompletedCourse(BaseModel):
-    name: str = Field(..., max_length=200)
-    grade_level: str = Field("", max_length=10)
-    level: str = Field("regular", max_length=30)
-    area: str = Field("none", max_length=10)
-    grade: str = Field("", max_length=10)
-
-
-class CoursePlanRequest(BaseModel):
-    college: str = Field(..., min_length=1, max_length=200)
-    major: str = Field("", max_length=200)
-    grade_level: str = Field("", max_length=20)
-    completed_courses: List[CompletedCourse] = Field(default_factory=list, max_length=120)
-    profile_summary: str = Field("", max_length=8000)
-
-
-class PlannedCourse(BaseModel):
-    name: str
-    area: str
-    level: str
-    status: str
-    note: str
-
-
-class PlanYear(BaseModel):
-    grade: str
-    courses: List[PlannedCourse]
-
-
-class PlanRequirement(BaseModel):
-    area: str
-    detail: str
-
-
-class CoursePlanResponse(BaseModel):
-    summary: str
-    requirements: List[PlanRequirement]
-    years: List[PlanYear]
-    tips: List[str]
-    sources: List[str]
-
-
-class EssayRequest(BaseModel):
-    prompt: str = Field(..., min_length=1, max_length=4000)
-    profile_summary: str = Field("", max_length=8000)
-    mode: str = Field("draft", max_length=20)
-
-
-class EssayIdea(BaseModel):
-    title: str
-    angle: str
-    why_it_fits: str
-
-
-class EssayResponse(BaseModel):
-    title: str
-    essay: str
-    ideas: List[EssayIdea]
-    tips: List[str]
-
-
-class ActivityExtractRequest(BaseModel):
-    notes: str = Field(..., min_length=1, max_length=10000)
-    section: str = Field(..., max_length=20)
-
-
-class ActivityItem(BaseModel):
-    name: str
-    role: str
-    description: str
-    level: str = ""
-
-
-class ActivityExtractResponse(BaseModel):
-    activities: List[ActivityItem]
 
 
 class PiqAnswer(BaseModel):
@@ -317,8 +210,8 @@ class UcAccountStartRequest(BaseModel):
     verified: bool = False
     # The student's four chosen personal insight questions with their saved answers.
     piqs: List[UcPiq] = Field(default_factory=list, max_length=4)
-    # "local": a window on this computer; "cloud": a Browserbase session the student uses via live view.
-    browser: str = Field("local", pattern="^(local|cloud)$")
+    # Browserbase session the student uses via live view.
+    browser: str = Field("cloud", pattern="^cloud$")
 
 
 class UcAccountStartResponse(BaseModel):
@@ -329,7 +222,7 @@ class UcAccountStatusResponse(BaseModel):
     status: str
     detail: str
     mode: str
-    browser: str = "local"
+    browser: str = "cloud"
     live_url: Optional[str] = None
     page_url: str = ""
     finished: bool = False
@@ -341,6 +234,8 @@ class UcAccountStatusResponse(BaseModel):
     about_report: Dict[str, List[Any]]
     piq: bool
     piq_report: Dict[str, List[str]]
+    # Looking for UC's emailed code in the student's Gmail (the app holds the code popup meanwhile).
+    code_search: bool = False
 
 
 class UcAccountCodeRequest(BaseModel):
@@ -393,7 +288,7 @@ async def health() -> HealthResponse:
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest, student: Student = Depends(current_student)) -> ChatResponse:
+def chat(request: ChatRequest, student: Student = Depends(current_student)) -> ChatResponse:
     query_text = request.query.strip()
     if not query_text:
         raise HTTPException(status_code=400, detail="Query cannot be empty")
@@ -451,19 +346,6 @@ async def clear_session(session_id: str, student: Student = Depends(current_stud
     }
 
 
-@app.post("/profile/analysis", response_model=ProfileAnalysisResponse)
-def profile_analysis(request: ProfileAnalysisRequest, student: Student = Depends(current_student)) -> ProfileAnalysisResponse:
-    if not request.profile_summary.strip() and not request.colleges:
-        raise HTTPException(status_code=400, detail="Add some profile details or colleges before running an analysis.")
-    try:
-        result = analyze_profile(request.profile_summary, request.colleges, request.majors)
-    except RuntimeError as error:
-        raise HTTPException(status_code=502, detail=str(error))
-    except Exception as error:
-        raise HTTPException(status_code=500, detail=f"Profile analysis failed: {error}")
-    return ProfileAnalysisResponse(**result)
-
-
 @app.post("/transcript/analyze", response_model=TranscriptResponse)
 def transcript_analyze(request: TranscriptRequest, student: Student = Depends(current_student)) -> TranscriptResponse:
     try:
@@ -475,37 +357,6 @@ def transcript_analyze(request: TranscriptRequest, student: Student = Depends(cu
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Transcript analysis failed: {error}")
     return TranscriptResponse(**result)
-
-
-@app.post("/plan/courses", response_model=CoursePlanResponse)
-def plan_courses(request: CoursePlanRequest, student: Student = Depends(current_student)) -> CoursePlanResponse:
-    try:
-        result = build_course_plan(
-            request.college.strip(),
-            request.major.strip(),
-            request.grade_level.strip(),
-            [course.model_dump() for course in request.completed_courses],
-            request.profile_summary,
-        )
-    except RuntimeError as error:
-        raise HTTPException(status_code=502, detail=str(error))
-    except Exception as error:
-        raise HTTPException(status_code=500, detail=f"Course planning failed: {error}")
-    return CoursePlanResponse(**result)
-
-
-@app.post("/essay/generate", response_model=EssayResponse)
-def essay_generate(request: EssayRequest, student: Student = Depends(current_student)) -> EssayResponse:
-    if not request.prompt.strip():
-        raise HTTPException(status_code=400, detail="Paste an essay prompt first.")
-    mode = "ideas" if request.mode.strip().lower() == "ideas" else "draft"
-    try:
-        result = generate_essay(request.prompt, request.profile_summary, mode)
-    except RuntimeError as error:
-        raise HTTPException(status_code=502, detail=str(error))
-    except Exception as error:
-        raise HTTPException(status_code=500, detail=f"Essay generation failed: {error}")
-    return EssayResponse(**result)
 
 
 @app.post("/essay/piqs", response_model=PiqResponse)
@@ -525,19 +376,6 @@ def essay_piqs(request: PiqRequest, student: Student = Depends(current_student))
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"PIQ generation failed: {error}")
     return PiqResponse(essays=essays)
-
-
-@app.post("/activities/extract", response_model=ActivityExtractResponse)
-def activities_extract(request: ActivityExtractRequest, student: Student = Depends(current_student)) -> ActivityExtractResponse:
-    """Turns what the student told Milo into rows for their activities list."""
-    try:
-        return ActivityExtractResponse(activities=extract_activities(request.notes, request.section))
-    except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error))
-    except RuntimeError as error:
-        raise HTTPException(status_code=502, detail=str(error))
-    except Exception as error:
-        raise HTTPException(status_code=500, detail=f"Saving activities failed: {error}")
 
 
 class GoogleActivityItem(BaseModel):

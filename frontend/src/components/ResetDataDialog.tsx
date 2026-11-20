@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useAuth } from "../auth";
+import { disconnectGoogle } from "../api";
 import { getStore } from "../data";
 import { AlertIcon, XIcon } from "./icons";
-
-/** Longer than the profile (500ms) and game (800ms) save debounces, so queued saves land before we delete. */
-const FLUSH_MS = 1000;
 
 /** Password-confirmed wipe of everything saved for the signed-in user, then a fresh start. */
 export function ResetDataDialog({ onClose }: { onClose: () => void }) {
@@ -23,10 +21,13 @@ export function ResetDataDialog({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      await new Promise((resolve) => window.setTimeout(resolve, FLUSH_MS));
-      await (await getStore()).resetAllData(account.id, account.email, password);
+      await (await getStore()).resetAllData(account.id, account.email, password, async () => {
+        // Google tokens live on the backend; require their removal before reporting a complete reset.
+        await disconnectGoogle();
+      });
       // Wipe local caches for this user (game, map, drafts).
-      const prefixes = [`t2c.u.${account.id}.`, `t2c.${account.id}.`];
+      // Includes the cached Google activity scan, so the next scan really searches Google again.
+      const prefixes = [`t2c.u.${account.id}.`, `t2c.${account.id}.`, `t2c.googleActivities.${account.id}`];
       for (const store of [localStorage, sessionStorage]) {
         for (const key of Object.keys(store)) {
           if (prefixes.some((p) => key.startsWith(p))) store.removeItem(key);
@@ -35,7 +36,7 @@ export function ResetDataDialog({ onClose }: { onClose: () => void }) {
       window.location.hash = "";
       window.location.reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong. Nothing was deleted.");
+      setError(err instanceof Error ? err.message : "The reset could not finish. Please try again.");
       setBusy(false);
     }
   };
@@ -58,22 +59,18 @@ export function ResetDataDialog({ onClose }: { onClose: () => void }) {
   return (
     <div className="reset-wrap" onKeyDown={onKeyDown}>
       <button className="reset-scrim" onClick={() => !busy && onClose()} tabIndex={-1} aria-label="Cancel" />
-      <div className="reset-dialog" role="alertdialog" aria-modal="true" aria-labelledby="reset-title" aria-describedby="reset-desc" ref={dialogRef}>
+      <div className="reset-dialog" role="alertdialog" aria-modal="true" aria-labelledby="reset-title" ref={dialogRef}>
         <header>
           <span className="reset-icon" aria-hidden="true">
             <AlertIcon width={18} height={18} />
           </span>
-          <h2 id="reset-title">Reset all data?</h2>
+          <h2 id="reset-title">Reset all data</h2>
           <button className="icon-btn" onClick={onClose} disabled={busy} aria-label="Close">
             <XIcon width={16} height={16} />
           </button>
         </header>
-        <p id="reset-desc">
-          This permanently deletes everything saved to your account: your profile, chats, transcripts and uploaded files,
-          essay progress, journey map, and XP. Your login stays, and you'll start over from onboarding. <strong>This can't be undone.</strong>
-        </p>
         <form onSubmit={submit}>
-          <label htmlFor="reset-password">Enter your password to confirm</label>
+          <label htmlFor="reset-password">Password</label>
           <input
             id="reset-password"
             ref={inputRef}

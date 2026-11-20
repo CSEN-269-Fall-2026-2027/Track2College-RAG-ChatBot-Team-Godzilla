@@ -1,8 +1,8 @@
 # Track2College
 
 A UC college-planning app with a guided journey, advisor chat, transcript review,
-course plans, PIQ drafts, and an application assistant. Built with React, FastAPI,
-Groq, and Supabase; ElevenLabs powers the optional voice counselor.
+PIQ drafts, and an application assistant. Built with React, FastAPI,
+Groq, and Supabase; ElevenLabs powers the voice counselor.
 
 ## Setup
 
@@ -22,11 +22,11 @@ Apply [supabase/schema.sql](supabase/schema.sql) in your project's SQL editor,
 enable email sign-in, and allow `http://localhost:5500` as an auth redirect URL.
 See [Supabase setup](supabase/README.md) for details.
 
-ElevenLabs is only needed for voice. Browserbase is only needed for cloud browser
-mode. Leave their settings blank if you don't use those features.
+ElevenLabs is needed for the voice counselor. Browserbase is needed for the
+application assistant.
 
-**Connect Google** (optional) lets students authorize readonly Gmail, Calendar, and
-Drive during onboarding so the API can read that data later. It does not replace
+**Connect Google** is required during onboarding. Students authorize readonly Gmail,
+Calendar, and Drive for activity suggestions and UC verification codes. It does not replace
 Supabase email sign-in. Set the `GOOGLE_*` and `SUPABASE_SERVICE_ROLE_KEY` values
 in `.env` and follow [Google connect](supabase/README.md#google-connect).
 
@@ -61,8 +61,8 @@ cd backend
 .venv/bin/python -m unittest discover -s tests
 ```
 
-Tests cover frontend logic and backend helpers; live services and browser flows
-need a manual check. Code lives in `frontend/src` and `backend`; backend tests
+Tests cover frontend logic, persistence failures, backend helpers, API access, and
+UC browser flows using local fixtures. Live provider calls require configured services. Code lives in `frontend/src` and `backend`; backend tests
 live in `backend/tests`.
 
 Keep private keys in the ignored root `.env`. Only public settings belong in

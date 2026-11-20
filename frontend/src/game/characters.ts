@@ -1,5 +1,3 @@
-import type { Mood } from "../types";
-
 export type Species = "owl" | "fox" | "cat" | "human";
 export type SceneId = "campus" | "office" | "library";
 
@@ -138,8 +136,8 @@ export const REVIEW_GUIDES: Mentor[] = [
   },
   {
     id: "assistant",
-    name: "Application Assistant",
-    title: "Fill in your UC application",
+    name: "John",
+    title: "Application assistant",
     specialty: "Opening the UC application and filling in what's in your profile",
     species: "human",
     palette: { body: "#1e3a6e", belly: "#e9dcc0", accent: "#d4a017", dark: "#14213d" },
@@ -161,14 +159,6 @@ const CAMPUS = /\b(ucla|ucsd|ucsb|ucsc|uci|ucr|berkeley|davis|irvine|merced|rive
 const APPLICATION = /\b(deadlines?|requirements?|gpa|a[-–]g|submit|fill(ing)? (in|out)|application)\b/i;
 const MAJOR = /\b(major|majors|undeclared|impacted|minor|what (should|to) (i )?study|career path)\b/i;
 
-/** Background for a conversation, based on what the student is asking about. */
-export function sceneFor(question: string | undefined, mentor: Mentor): SceneId {
-  if (!question) return mentor.scene;
-  if (FINANCE.test(question)) return "office";
-  if (ESSAY.test(question)) return "library";
-  return "campus";
-}
-
 /** Which mentor is best suited to a question, used to suggest a hand-off. */
 export function specialistFor(question: string): Mentor["id"] {
   if (FINANCE.test(question)) return "penny";
@@ -176,19 +166,4 @@ export function specialistFor(question: string): Mentor["id"] {
   if (MAJOR.test(question)) return "theo";
   if (CAMPUS.test(question) && !APPLICATION.test(question)) return "theo";
   return "sage";
-}
-
-const OFF_TOPIC = /^I'm sorry, I can only help/i;
-
-/** Expression to show when the model didn't send one. */
-export function inferMood(message: { content: string; error?: boolean; mood?: Mood }): Mood {
-  if (message.mood) return message.mood;
-  if (message.error || OFF_TOPIC.test(message.content)) return "concerned";
-  if (/\b(deadline|due|late|miss|penalt|warning|important)\b/i.test(message.content)) return "concerned";
-  if (/\b(congrat|great news|good news|eligible|free|guaranteed)\b/i.test(message.content)) return "excited";
-  return "happy";
-}
-
-export function isOffTopic(content: string) {
-  return OFF_TOPIC.test(content);
 }

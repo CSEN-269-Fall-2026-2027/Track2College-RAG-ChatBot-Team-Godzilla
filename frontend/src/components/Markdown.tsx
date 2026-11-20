@@ -62,7 +62,7 @@ function renderInline(text: string): ReactNode[] {
     });
 }
 
-function parseBlocks(text: string): Block[] {
+function parseBlocks(text: string, colonHeadings = true): Block[] {
   const blocks: Block[] = [];
   let current: Block | null = null;
 
@@ -113,7 +113,7 @@ function parseBlocks(text: string): Block[] {
       continue;
     }
 
-    if (line.endsWith(":") && line.length <= 70 && current?.type !== "p") {
+    if (colonHeadings && line.endsWith(":") && line.length <= 70 && current?.type !== "p") {
       blocks.push({ type: "heading", text: line });
       current = null;
       continue;
@@ -131,10 +131,14 @@ function parseBlocks(text: string): Block[] {
 }
 
 /** Minimal, XSS-safe renderer for the plain-text formatting the advisor model produces. */
-export const Markdown = memo(function Markdown({ text }: { text: string }) {
+/**
+ * `colonHeadings`: a short line ending in ":" becomes a bold heading (the model writes "Next steps:").
+ * Turn it off for text we write ourselves, like a guide's opening line that leads into a list.
+ */
+export const Markdown = memo(function Markdown({ text, colonHeadings = true }: { text: string; colonHeadings?: boolean }) {
   return (
     <div className="prose">
-      {parseBlocks(text).map((block, i) => {
+      {parseBlocks(text, colonHeadings).map((block, i) => {
         switch (block.type) {
           case "heading":
             return (

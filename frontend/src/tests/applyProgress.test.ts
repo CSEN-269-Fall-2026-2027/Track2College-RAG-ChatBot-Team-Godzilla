@@ -1,7 +1,6 @@
 /** The retired Apply page's data, now carried by the chatbot and story mode. */
 import { describe, expect, it } from "vitest";
-import { agentTasks, applyProgressSummary, fafsaSubmitted, setAgent } from "../agent/logic";
-import { applyGuidedEffect, savedLabel } from "../journey/guided";
+import { applyProgressSummary, setAgent } from "../agent/logic";
 import { hydrate } from "../profile";
 import { blankProfile } from "./fixtures";
 
@@ -52,22 +51,5 @@ describe("one FAFSA flag", () => {
     const changed = { ...loaded, preferences: { ...loaded.preferences, fafsa: "in-progress" as const } };
     expect(hydrate(JSON.parse(JSON.stringify(changed)), blankProfile()).preferences.fafsa).toBe("in-progress");
     expect(hydrate(blankProfile(), blankProfile()).preferences.fafsa).toBe("");
-  });
-
-  it("counts the FAFSA done from either place", () => {
-    const viaStory = blankProfile({ preferences: { ...blankProfile().preferences, fafsa: "done" } });
-    expect(fafsaSubmitted(viaStory)).toBe(true);
-    expect(agentTasks(viaStory).find((t) => t.id === "fafsa")!.done).toBe(true);
-    expect(fafsaSubmitted(blankProfile())).toBe(false);
-  });
-});
-
-describe("Intent to Register in story mode", () => {
-  it("records and undoes the Statement of Intent to Register", () => {
-    const done = applyGuidedEffect(blankProfile(), { type: "setSirDone", done: true }, () => "x");
-    expect(agentTasks(done).find((t) => t.id === "sir")!.done).toBe(true);
-    expect(savedLabel({ type: "setSirDone", done: true })).toBe("Recorded your Intent to Register");
-    const undone = applyGuidedEffect(done, { type: "setSirDone", done: false }, () => "x");
-    expect(agentTasks(undone).find((t) => t.id === "sir")!.done).toBe(false);
   });
 });

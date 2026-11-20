@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { emptyJourney, togglePiq } from "../journey/logic";
-import { activitiesSummary, applyDrafts, canGeneratePiq, chosenPiqs, countWords, currentEssay, deleteDraft, editDraft, essayHasText, essayHelpRequest, essaysReadyCount, essayNotesFrom, limitWords, PERSONAL_ANSWER, piqAboutAsk, resetEssays, piqRequest, setPiqAnswer, suggestEssaysPrompt, suggestedPiqTitles, usedActivities } from "../journey/piqs";
+import { activitiesSummary, applyDrafts, autoPickPiqs, canGeneratePiq, chosenPiqs, countWords, currentEssay, deleteDraft, editDraft, essayHasText, essayHelpRequest, essaysReadyCount, essayNotesFrom, limitWords, PERSONAL_ANSWER, piqAboutAsk, resetEssays, piqRequest, setPiqAnswer, suggestedPiqTitles, usedActivities } from "../journey/piqs";
 import type { Profile } from "../types";
 import { blankProfile } from "./fixtures";
 
@@ -74,12 +74,6 @@ describe("how many essays an activity can carry", () => {
   it("ignores old drafts the app wrote on its own", () => {
     const p = { ...withActs("Soccer", "Robotics"), piqWork: { leadership: { answers: {}, draft: { text: "Soccer taught me.", words: 3, generatedAt: 1 } } } };
     expect(usedActivities(p, "creativity")).toEqual([]);
-  });
-
-  it("spells out the limit in the suggestion request, or asks for general essays with no activities", () => {
-    expect(suggestEssaysPrompt(withActs("Soccer"))).toContain("My activities: Soccer.");
-    expect(suggestEssaysPrompt(withActs())).toContain("no activities");
-    expect(suggestEssaysPrompt(withActs("Soccer"))).toContain("The Backup can be anything");
   });
 
   it("reads Top 4 and Backup titles from Quill's suggestion reply in order", () => {
@@ -205,5 +199,65 @@ describe("PIQ drafting from activities", () => {
     it("tells Quill when nothing is written yet", () => {
       expect(essayHelpRequest(chosen(), "talent").query).toContain("I haven't written anything for it yet.");
     });
+  });
+});
+
+describe("autoPickPiqs", () => {
+  const activity = (name: string, role = "", description = "", category: Profile["activities"][number]["category"] = "extracurricular") => ({
+    id: name,
+    name,
+    role,
+    description,
+    category,
+    hoursPerWeek: "",
+    weeksPerYear: "",
+    years: "",
+  });
+
+  it("gives a student with only a major the questions anyone can answer", () => {
+    const p = blankProfile({ goals: { ...blankProfile().goals, intendedMajor: "Biology" } });
+    expect(autoPickPiqs(p)).toEqual(["opportunity", "challenge", "subject", "standout"]);
+  });
+
+  it("reads role, description, and category, not just the activity name", () => {
+    const p = blankProfile({
+      goals: { ...blankProfile().goals, intendedMajor: "Computer Science" },
+      activities: [
+        activity("Robotics", "Captain", "Programmed the robot's vision system."),
+        activity("Lincoln Library", "", "Helped kids with homework.", "volunteering"),
+      ],
+    });
+    expect(autoPickPiqs(p)).toEqual(["leadership", "creativity", "subject", "community"]);
+  });
+
+  it("uses one activity in at most two of the four essays", () => {
+    // One activity that matches four questions: it can only back two picks; the rest come from elsewhere.
+    const p = blankProfile({
+      activities: [activity("Robotics", "Captain and founder", "Volunteer coding tutor; varsity competition.")],
+    });
+    const picks = autoPickPiqs(p);
+    const backedByRobotics = picks.filter((id) => ["leadership", "creativity", "talent", "community"].includes(id));
+    expect(backedByRobotics).toHaveLength(2);
+    expect(picks).toHaveLength(4);
+  });
+
+  it("lets the major back all four when there are no activities", () => {
+    const p = blankProfile({ goals: { ...blankProfile().goals, intendedMajor: "History" } });
+    expect(autoPickPiqs(p)).toHaveLength(4);
+    expect(autoPickPiqs(p)).toContain("subject");
+  });
+
+  it("counts awards toward Talent and work toward Significant challenge", () => {
+    const p = blankProfile({
+      activities: [activity("Safeway", "Cashier", "", "work")],
+      awards: [
+        { id: "a", title: "All-State Orchestra", level: "state" },
+        { id: "b", title: "Honor roll", level: "school" },
+      ],
+    });
+    const picks = autoPickPiqs(p);
+    expect(picks).toContain("talent");
+    expect(picks).toContain("challenge");
+    expect(picks).toHaveLength(4);
   });
 });

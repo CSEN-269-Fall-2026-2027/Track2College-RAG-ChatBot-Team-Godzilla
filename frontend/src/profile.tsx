@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { PIQ_PROMPTS } from "./journey/logic";
 import { getStore } from "./data";
 import { OTHER_MAJOR, toMajorChoice } from "./constants";
-import type { Activity, ActivityCategory, Profile, TargetCollege, Transcript } from "./types";
+import type { Activity, ActivityCategory, Profile, Transcript } from "./types";
 
 export function emptyOnboarding(): Profile["onboarding"] {
   return {
@@ -226,21 +226,6 @@ export function displayName(p: Profile, fallback: string) {
   return p.basics.firstName.trim() || fallback.split(" ")[0];
 }
 
-export function parseDate(value: string): Date | null {
-  if (!value) return null;
-  const date = new Date(`${value}T23:59:00`);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-export function upcomingDeadlines(p: Profile, now = Date.now()) {
-  return p.colleges
-    .map((college) => ({ college, date: parseDate(college.deadline) }))
-    .filter((item): item is { college: TargetCollege; date: Date } => item.date !== null)
-    .filter(({ college }) => college.status === "researching" || college.status === "applying")
-    .sort((a, b) => a.date.getTime() - b.date.getTime())
-    .map(({ college, date }) => ({ college, date, days: Math.ceil((date.getTime() - now) / 86_400_000) }));
-}
-
 /**
  * Compact, plain-text profile for the LLM. Only filled, UC-relevant fields.
  * Deprecated SAT/ACT/test-plan and removed preference fields are omitted.
@@ -434,7 +419,11 @@ function LoadedProfileProvider({ userId, initial, children }: { userId: string; 
   // Flush a pending debounced save if the tab closes mid-edit.
   useEffect(() => {
     window.addEventListener("pagehide", persist);
-    return () => window.removeEventListener("pagehide", persist);
+    window.addEventListener("online", persist);
+    return () => {
+      window.removeEventListener("pagehide", persist);
+      window.removeEventListener("online", persist);
+    };
   }, [persist]);
 
   const update = useCallback((change: (draft: Profile) => Profile) => {
@@ -442,7 +431,7 @@ function LoadedProfileProvider({ userId, initial, children }: { userId: string; 
     // overwrite newer work from another tab.
     setProfile((prev) => {
       const next = change(prev);
-      return next === prev ? prev : { ...next, updatedAt: Date.now() };
+      return next === prev ? prev : { ...next, updatedAt: Math.max(Date.now(), prev.updatedAt + 1) };
     });
   }, []);
 

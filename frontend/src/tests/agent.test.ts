@@ -1,19 +1,11 @@
 /** Apply rules (pure logic; no React, Google, or Supabase). */
 import { describe, expect, it } from "vitest";
-import {
-  agentTasks,
-  calendarEvents,
-  daysUntilUcDeadline,
-  entryYear,
-  filingPeriod,
-  gmailComposeUrl,
-  setAgent,
-  withUcRunProgress,
-  cleanTranscriptLine,
-  withoutAudioTags,
-} from "../agent/logic";
-import { ucFacts, shuffled } from "../journey/facts";
-import { reviewVisitKind, storyComplete } from "../journey/guided";
+import { calendarEvents, daysUntilUcDeadline, entryYear, gmailComposeUrl, setAgent, withUcRunProgress, cleanTranscriptLine, withoutAudioTags } from "../agent/logic";
+import { coversLastName, openGmail, pickCounselor } from "../agent/counselorEmailAuto";
+import { issueOf } from "../agent/useBackgroundApply";
+import { commitApplied } from "../agent/logic";
+import type { UcRun } from "../api";
+import { storyComplete } from "../journey/guided";
 import { emptyJourney, setPiqStatus, toggleCampus, togglePiq } from "../journey/logic";
 import type { Profile, UcJourneyState } from "../types";
 import { blankProfile } from "./fixtures";
@@ -52,82 +44,6 @@ describe("Apply", () => {
     expect(storyComplete(storyDoneProfile(), fullBasics)).toBe(true);
   });
 
-  it("lets you reopen both Apply personas only from Financial Aid after earlier steps are done", () => {
-    expect(reviewVisitKind("essays", false)).toBe("locked");
-    expect(reviewVisitKind("essays", true)).toBe("locked");
-    expect(reviewVisitKind("aid", false)).toBe("locked");
-    expect(reviewVisitKind("aid", true)).toBe("revisit");
-    expect(reviewVisitKind("review", true)).toBe("locked");
-  });
-
-  it("lists the counselor call, email, UC account, then FAFSA and Intent to Register", () => {
-    const tasks = agentTasks(storyDoneProfile());
-    expect(tasks.map((t) => [t.id, t.done, !!t.comingSoon])).toEqual([
-      ["virtualCounselor", false, false],
-      ["emailCounselor", false, false],
-      ["ucAccount", false, false],
-      ["fafsa", false, false],
-      ["sir", false, false],
-    ]);
-  });
-
-  it("marks FAFSA and Intent to Register done when the student says so", () => {
-    const p = setAgent(storyDoneProfile(), (a) => ({ ...a, fafsaDoneAt: 1, sirDoneAt: 2 }));
-    expect(
-      agentTasks(p)
-        .filter((t) => t.done)
-        .map((t) => t.id),
-    ).toEqual(["fafsa", "sir"]);
-  });
-
-  it("counts virtual counselor and email counselor as separate tasks", () => {
-    const base = storyDoneProfile();
-    const virtual = (p: Profile) => agentTasks(p).find((t) => t.id === "virtualCounselor")!.done;
-    const emailed = (p: Profile) => agentTasks(p).find((t) => t.id === "emailCounselor")!.done;
-    expect(virtual(base)).toBe(false);
-    expect(emailed(base)).toBe(false);
-    const draft = setAgent(base, (a) => ({
-      ...a,
-      counselorMode: "school",
-      counselor: { name: "Ms. Lee", email: "lee@school.org", title: "", serves: "", sourceUrl: "", confirmedAt: 1 },
-      counselorEmail: { subject: "Hi", body: "Hello", openedAt: 2 },
-    }));
-    expect(emailed(draft)).toBe(false); // opened in Gmail but not sent yet
-    expect(emailed(setAgent(draft, (a) => ({ ...a, counselorEmail: { ...a.counselorEmail!, sentAt: 3 } })))).toBe(true);
-    // First greeting alone isn't a full meeting.
-    expect(virtual(setAgent(base, (a) => ({ ...a, counselorCall: { endedAt: 1, lines: [{ role: "student", text: "Hi" }] } })))).toBe(false);
-    expect(
-      virtual(
-        setAgent(base, (a) => ({
-          ...a,
-          counselorCall: {
-            endedAt: 1,
-            lines: [
-              { role: "student", text: "I'm good" },
-              {
-                role: "counselor",
-                text: "Thanks so much for talking with me today! When you're ready, you can go ahead with your UC application.",
-              },
-            ],
-          },
-        })),
-      ),
-    ).toBe(true);
-  });
-
-  it("asks UC fun facts with exactly one true answer and three distinct false ones", () => {
-    const facts = ucFacts("November 30");
-    expect(facts.length).toBeGreaterThanOrEqual(8);
-    expect(new Set(facts.map((f) => f.id)).size).toBe(facts.length);
-    for (const f of facts) {
-      const all = [f.answer, ...f.wrong];
-      expect(new Set(all.map((o) => o.toLowerCase())).size).toBe(4);
-      expect(f.why).toBeTruthy();
-    }
-    expect(facts.find((f) => f.id === "deadline")!.answer).toBe("November 30");
-    expect(shuffled([1, 2, 3, 4]).sort()).toEqual([1, 2, 3, 4]);
-  });
-
   it("cleans Jordan's lines: no leading comma or bang, years as digits", () => {
     expect(cleanTranscriptLine(", Got it! Fall two thousand twenty seven?")).toBe("Got it! Fall 2027?");
     expect(cleanTranscriptLine("[happy] , Great.")).toBe("Great.");
@@ -141,29 +57,6 @@ describe("Apply", () => {
   it("hides the voice's tone cues from the transcript", () => {
     expect(withoutAudioTags("[happy] Hi Maya! [laughs] Great pick.")).toBe("Hi Maya! Great pick.");
     expect(withoutAudioTags("No tags here.")).toBe("No tags here.");
-  });
-
-  it("counts the virtual counselor done only after a full call wrap-up", () => {
-    let p = storyDoneProfile();
-    expect(agentTasks(p)[0]).toMatchObject({ title: "Meet with the virtual counselor", done: false });
-    p = setAgent(p, (a) => ({ ...a, counselorCall: { endedAt: 1, lines: [{ role: "student", text: "Hi Jordan" }] } }));
-    expect(agentTasks(p)[0].done).toBe(false);
-    p = setAgent(p, (a) => ({
-      ...a,
-      counselorCall: {
-        endedAt: 1,
-        lines: [
-          { role: "student", text: "Hi Jordan" },
-          {
-            role: "counselor",
-            text: "Thanks so much for talking with me today! When you're ready, you can go ahead with your UC application.",
-          },
-        ],
-      },
-    }));
-    expect(agentTasks(p)[0].done).toBe(true);
-    // Agent state lives beside the rest of the journey without disturbing it.
-    expect(Object.keys(p.ucJourney!.piqs)).toHaveLength(4);
   });
 
   it("builds a Gmail compose link in the connected account", () => {
@@ -206,13 +99,6 @@ describe("Apply", () => {
     };
     expect(entryYear(junior)).toBe(2028);
     expect(daysUntilUcDeadline(junior, new Date("2026-11-18T20:00:00Z"))).toBe(12);
-  });
-
-  it("tracks progress through the Oct 1 – Nov 30 filing period", () => {
-    const p = storyDoneProfile();
-    expect(filingPeriod(p, new Date("2026-09-15T19:00:00Z"))).toEqual({ opens: "2026-10-01", closes: "2026-11-30", progress: 0 });
-    expect(filingPeriod(p, new Date("2026-10-30T19:00:00Z")).progress).toBeCloseTo(30 / 61);
-    expect(filingPeriod(p, new Date("2026-11-30T19:00:00Z")).progress).toBe(1);
   });
 
   it("adds a counselor follow-up a week after the email", () => {
@@ -262,17 +148,152 @@ describe("Apply", () => {
       expect(withUcRunProgress(a, inside, fixed, 2).ucAccount?.password).toBe(fixed.password);
     });
   });
+});
 
-  it("checks off the UC application once the account is created and verified", () => {
-    const base = { email: "me@example.com", password: "Tq7#mVx2!pLr9Kd4", generatedAt: 1 };
-    const step = (ucAccount?: typeof base & { createdAt?: number; verifiedAt?: number; signedInAt?: number }) =>
-      agentTasks(setAgent(storyDoneProfile(), (a) => ({ ...a, ucAccount }))).find((t) => t.id === "ucAccount")!;
-    expect(step().title).toBe("UC application");
-    expect(step().done).toBe(false);
-    expect(step(base).done).toBe(false);
-    // Created but still waiting on the emailed code.
-    expect(step({ ...base, createdAt: 2 }).done).toBe(false);
-    expect(step({ ...base, createdAt: 2, verifiedAt: 3 }).done).toBe(true);
-    expect(step({ ...base, signedInAt: 2 }).done).toBe(true);
+describe("counselor email: picking the student's counselor", () => {
+  const found = (name: string, serves: string, email = `${name.toLowerCase()}@school.edu`, match = false) => ({
+    name,
+    title: "Counselor",
+    email,
+    serves,
+    match,
+    sourceUrl: "",
+  });
+
+  it("reads last-name ranges, including two-letter ones and several ranges", () => {
+    expect(coversLastName("A–L", "Garcia")).toBe(true);
+    expect(coversLastName("Last names M - Z", "Garcia")).toBe(false);
+    expect(coversLastName("A-Gh", "Garcia")).toBe(true);
+    expect(coversLastName("A-Gh", "Gomez")).toBe(false);
+    expect(coversLastName("A-C, M-O", "Nguyen")).toBe(true);
+    expect(coversLastName("Students A to F", "Diaz")).toBe(true);
+    expect(coversLastName("Grades 9-12", "Diaz")).toBeNull();
+    expect(coversLastName("A–L", "")).toBeNull();
+  });
+
+  it("picks by the last-name range before the search's own guess", () => {
+    const list = [found("Rivera", "A–L", undefined, false), found("Chen", "M–Z", undefined, true)];
+    expect(pickCounselor(list, "Garcia")?.name).toBe("Rivera");
+    expect(pickCounselor(list, "Smith")?.name).toBe("Chen");
+    // Several with no ranges and no match: we can't tell, so the popup asks.
+    expect(pickCounselor([found("Rivera", ""), found("Chen", "")], "Garcia")).toBeNull();
+    // Only one with an email: that's the one.
+    expect(pickCounselor([found("Rivera", "", ""), found("Chen", "")], "Garcia")?.name).toBe("Chen");
+  });
+});
+
+describe("counselor email: the Mission San Jose search, as the web search returned it", () => {
+  // Real shape from the search: ranges written "Lastnames Lo-Sh" / "Si - Z", match all false
+  // (the model wasn't given a last name), plus non-counselor staff with emails.
+  const list = [
+    { name: "Counselor A", title: "Counselor", email: "a@fusdk12.net", serves: "Lastnames A-Ch", match: false, sourceUrl: "" },
+    { name: "Counselor B", title: "Counselor", email: "b@fusdk12.net", serves: "Lastnames Lo-Sh", match: false, sourceUrl: "" },
+    { name: "Lindsay Rotter", title: "Counselor", email: "lrotter@fusdk12.net", serves: "Lastnames Si-Z", match: false, sourceUrl: "" },
+    { name: "Yvonne Ng", title: "College/Career Specialist", email: "wng@fusdk12.net", serves: "", match: false, sourceUrl: "" },
+  ];
+
+  it("picks Lindsay Rotter for an Si–Z last name once the last name is known", () => {
+    expect(pickCounselor(list, "Tran")?.name).toBe("Lindsay Rotter");
+    expect(pickCounselor(list, "Smith")?.name).toBe("Lindsay Rotter");
+    expect(pickCounselor(list, "Shah")?.name).toBe("Counselor B");
+  });
+
+  it("can't choose with no last name (the original bug: onboarding never saved it)", () => {
+    expect(pickCounselor(list, "")).toBeNull();
+  });
+});
+
+describe("counselor email: opening Gmail", () => {
+  const withOpen = (impl: (...args: unknown[]) => unknown, run: () => void) => {
+    const g = globalThis as { window?: unknown };
+    const prev = g.window;
+    g.window = { open: impl };
+    try {
+      run();
+    } finally {
+      g.window = prev;
+    }
+  };
+
+  it("counts an opened tab as opened (no 'noopener' feature, which always returns null)", () => {
+    const tab: { opener: unknown } = { opener: "us" };
+    const calls: unknown[][] = [];
+    withOpen(
+      (...args) => {
+        calls.push(args);
+        return tab;
+      },
+      () => expect(openGmail("https://mail.google.com/")).toBe(true),
+    );
+    expect(calls[0]).toEqual(["https://mail.google.com/", "_blank"]);
+    expect(tab.opener).toBeNull();
+  });
+
+  it("sends the tab opened on the click to Gmail instead of opening another (the first-try block)", () => {
+    const tab = { closed: false, location: { href: "" } };
+    let opened = 0;
+    withOpen(
+      () => {
+        opened++;
+        return null;
+      },
+      () => expect(openGmail("https://mail.google.com/x", tab as unknown as Window)).toBe(true),
+    );
+    expect(tab.location.href).toBe("https://mail.google.com/x");
+    expect(opened).toBe(0);
+  });
+
+  it("reports a real popup block", () => {
+    withOpen(() => null, () => expect(openGmail("https://mail.google.com/")).toBe(false));
+  });
+});
+
+describe("Help me apply in the background", () => {
+  const run = (over: Partial<UcRun>): UcRun => ({
+    status: "filling",
+    detail: "Filling in About you…",
+    mode: "login",
+    open: true,
+    created: true,
+    browser: "cloud",
+    live_url: "https://live.example/x",
+    page_url: "",
+    finished: false,
+    verified: true,
+    setup: true,
+    about: false,
+    about_report: { filled: [], missing: [], check: [] },
+    piq: false,
+    piq_report: { entered: [], skipped: [] },
+    ...over,
+  });
+
+  it("keeps working quietly, and only flags what needs the student", () => {
+    expect(issueOf(run({}), null)).toBeNull();
+    expect(issueOf(run({ status: "needs_code" }), null)?.kind).toBe("code");
+    // The server is looking for UC's code in Gmail, or entering one it found: don't ask yet.
+    expect(issueOf(run({ status: "needs_code", code_search: true }), null)).toBeNull();
+    expect(issueOf(run({ status: "checking_code" }), null)).toBeNull();
+    expect(issueOf(run({ status: "needs_you", detail: "Fill in the gender question." }), null)).toEqual({ kind: "your-turn", message: "Fill in the gender question." });
+    expect(issueOf(run({ status: "login_failed", open: false }), null)?.kind).toBe("login");
+    expect(issueOf(run({ status: "error", open: false, detail: "The cloud browser couldn't start." }), null)).toEqual({
+      kind: "failed",
+      message: "The cloud browser couldn't start.",
+    });
+    expect(issueOf(null, "Cloud mode isn't set up on this server yet.")?.kind).toBe("failed");
+    // Finished is not an issue: the chat shows "Done with application".
+    expect(issueOf(run({ status: "piq_done", finished: true }), null)).toBeNull();
+  });
+
+  it("records Applied only when the student clicks Done with application", () => {
+    const a = { pendingApply: true, ucAccount: { email: "maya@example.com", password: "x", generatedAt: 1 } };
+    const done = commitApplied(a, null, 5);
+    expect(done.pendingApply).toBeUndefined();
+    expect(done.ucAccount).toMatchObject({ piqAt: 5, verifiedAt: 5, signedInAt: 5 });
+    // A brand-new login from this run becomes the saved account.
+    expect(commitApplied({ pendingApply: true }, { email: "new@example.com", password: "Pw!12345" }, 7).ucAccount).toMatchObject({
+      email: "new@example.com",
+      piqAt: 7,
+    });
   });
 });

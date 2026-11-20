@@ -1,3 +1,4 @@
+// Supabase schema types used by the data store. Regenerate after database schema changes.
 export type Json =
   | string
   | number

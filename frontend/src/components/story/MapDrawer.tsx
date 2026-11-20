@@ -54,7 +54,7 @@ export function MapDrawer({ userId, open, onClose }: MapDrawerProps) {
           </button>
         </div>
         <div className="map-modal-body">
-          <JourneyMap userId={userId} embedded />
+          <JourneyMap userId={userId} />
         </div>
       </div>
     </div>,

@@ -151,8 +151,35 @@ const SPRITES: Record<CheckpointId, string[]> = {
     "..kkkkkkkkkkkkkkkkkkkk..",
     "..TTTTTTTTTTTTTTTTTTtt..",
   ],
-  // Review & apply · Admissions Office: clock tower with spire and flag over a long hall.
-  review: [
+  // Counselor · Counseling Office: gabled cottage with an envelope sign over the door.
+  counselor: [
+    "........................",
+    "........................",
+    "........................",
+    "........................",
+    "...........kk...........",
+    ".........kkLgkk.........",
+    ".......kkLGGGggkk.......",
+    ".....kkLLGGGGGGggkk.....",
+    "...kkLLLGGGGGGGGGggkk...",
+    "..kkkkkkkkkkkkkkkkkkkk..",
+    "...kWWWWWWWWWWWWWWwwk...",
+    "...kWWkkkkkkkkkkkkwwk...",
+    "...kWWkHkHHHHHHkHkwwk...",
+    "...kWWkHHkHHHHkHHkwwk...",
+    "...kWWkHHHkkkkHHHkwwk...",
+    "...kWWkkkkkkkkkkkkwwk...",
+    "...kWkkkkWkkkkWkkkkwk...",
+    "...kWkHBkWkDDkWkHBkwk...",
+    "...kWkBbkWkDdkWkBbkwk...",
+    "...kWkkkkWkDdkWkkkkwk...",
+    "...kWWWWWWkDdkWWWWwwk...",
+    "...kSSSSSSkDdkSSSSssk...",
+    "..kkkkkkkkkkkkkkkkkkkk..",
+    "..TTTTTTTTTTTTTTTTTTtt..",
+  ],
+  // Apply · Admissions Office: clock tower with spire and flag over a long hall.
+  apply: [
     "........................",
     "........................",
     "...........kFFF.........",
@@ -178,43 +205,6 @@ const SPRITES: Record<CheckpointId, string[]> = {
     "..kkkkkkkkkkkkkkkkkkkk..",
     "..TTTTTTTTTTTTTTTTTTtt..",
   ],
-  // Financial aid · Financial Aid Office: brick hip roof with chimney, green trim, dollar-bill sign.
-  aid: [
-    "........................",
-    "........................",
-    "........................",
-    "...............kkkk.....",
-    "...............kRrk.....",
-    ".....kkkkkkkkkkkkkk.....",
-    "....kRRRRRRRRRRRRrrk....",
-    "...kRRRRRRRRRRRRRRrrk...",
-    "..kRRRRRRRRRRRRRRRRrrk..",
-    "..kkkkkkkkkkkkkkkkkkkk..",
-    "...kGGGGGGGGGGGGGGggk...",
-    "...kkkkkkkkkkkkkkkkkk...",
-    "...kWWkkkkkkkkkkkkwwk...",
-    "...kWWkLGLLYYLLGLkwwk...",
-    "...kWWkkkkkkkkkkkkwwk...",
-    "...kWWWWWWWWWWWWWWwwk...",
-    "...kWkkkkWkkkkWkkkkwk...",
-    "...kWkHBkWkDDkWkHBkwk...",
-    "...kWkBbkWkDdkWkBbkwk...",
-    "...kWkkkkWkDdkWkkkkwk...",
-    "...kWWWWWWkDdkWWWWwwk...",
-    "...kSSSSSSkDdkSSSSssk...",
-    "..kkkkkkkkkkkkkkkkkkkk..",
-    "..TTTTTTTTTTTTTTTTTTtt..",
-  ],
-};
-
-/** Building names, for anything that wants to describe the art. */
-export const BUILDING_NAME: Record<CheckpointId, string> = {
-  profile: "Student Center",
-  ucs: "College Center",
-  activities: "Activities Hall",
-  essays: "Library",
-  review: "Admissions Office",
-  aid: "Financial Aid Office",
 };
 
 type Cell = string | null;

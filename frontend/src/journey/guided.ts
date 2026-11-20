@@ -1,24 +1,7 @@
-import { agentOf, setAgent, sirDeadlineDate } from "../agent/logic";
 import { MAJOR_CHOICES } from "../constants";
 import type { Mentor } from "../game/characters";
-import type { ActivitySectionId, Award, GradeLevel, Profile } from "../types";
-import {
-  ACTIVITY_DESC_LIMIT,
-  ACTIVITY_SECTIONS,
-  AFTER_APPLY,
-  activitiesStatus,
-  activitySection,
-  activitySectionAnswered,
-  computeJourney,
-  isUc,
-  journeyOf,
-  withActivitySection,
-  PIQ_REQUIRED,
-  toggleCampus,
-  togglePiq,
-  type Checkpoint,
-  type CheckpointId,
-} from "./logic";
+import type { GradeLevel, Profile } from "../types";
+import { AFTER_APPLY, computeJourney, isReviewStage, isUc, journeyOf, PIQ_REQUIRED, toggleCampus, togglePiq, type Checkpoint, type CheckpointId } from "./logic";
 import { chosenPiqs, essayDone } from "./piqs";
 
 /** Rough unweighted GPA choices (4.0 scale). */
@@ -39,14 +22,6 @@ export type GuidedEffect =
   | { type: "setGoals"; patch: Partial<Profile["goals"]> }
   /** Financial-aid answers (Profile → Cost & support). */
   | { type: "setPreferences"; patch: Partial<Profile["preferences"]> }
-  /** How many of this section's things the student wants to report (3 means 3 or more). */
-  | { type: "setActivityCount"; section: ActivitySectionId; count: number }
-  /** Saves what the student told Milo and adds it to their list; the view builds it from the chat (see finishActivities). */
-  | { type: "saveActivitySection"; section: ActivitySectionId; notes: string; items: ActivityItem[] }
-  /** The student is done telling Milo about this section. */
-  | { type: "finishActivities"; section: ActivitySectionId }
-  /** 3 or more: the student fills these in on the Profile page, so this question is finished. */
-  | { type: "fillInProfile"; section: ActivitySectionId }
   | { type: "toggleCampus"; campus: string }
   /** Replace the UC campus list with these names (checkbox picker submit). */
   | { type: "setCampuses"; campuses: string[] }
@@ -54,9 +29,6 @@ export type GuidedEffect =
   /** Replace chosen PIQs with exactly these ids (checkbox picker; expect four). */
   | { type: "setPiqs"; piqIds: string[] }
   | { type: "toggleCheck"; checkId: string }
-  | { type: "markSubmitted" }
-  /** UC Statement of Intent to Register: submitted on UC's site, recorded here (true) or undone (false). */
-  | { type: "setSirDone"; done: boolean }
   | { type: "applyText"; field: TextField; value: string }
   /** Sets an essay aside: Quill moves on to the next one. */
   | { type: "skipPiq"; piqId: string }
@@ -73,22 +45,12 @@ export type GuidedEffect =
   /** Bring back everything deferred this session. */
   | { type: "resume" };
 
-/** One row for the activities list, read out of the student's chat with Milo. */
-export interface ActivityItem {
-  name: string;
-  role: string;
-  description: string;
-  /** Honors and awards only. */
-  level?: string;
-}
-
 export type TextField =
   | "firstName"
   | "highSchool"
   | "graduationYear"
   | "gpaUnweighted"
   | "exams";
-
 export interface GuidedChoice {
   id: string;
   label: string;
@@ -125,8 +87,6 @@ export interface GuidedTurn {
   note?: string;
   /** Show all UC campuses as checkboxes; submit fires setCampuses. */
   campusPicker?: boolean;
-  /** Show all 8 PIQs as checkboxes; submit fires setPiqs with exactly 4. */
-  piqPicker?: boolean;
   /** Hold the essays chapter without a guided bubble — Quill's chat opener owns the UI. */
   chatOnly?: boolean;
   finished: boolean;
@@ -152,22 +112,14 @@ export const academicStarted = (profile: Profile) =>
   filled(profile.academics.gpaUnweighted) || filled(profile.academics.gpaWeighted) || filled(profile.academics.exams);
 
 /**
- * Apply unlocks at Review & Apply: every checkpoint before it is complete, so Apply takes over.
- * Financial Aid comes after Review & Apply and doesn't hold Apply up.
+ * The Counselor and Application assistant unlock once every checkpoint before the counselor stop
+ * is complete. Financial Aid comes after Apply and doesn't hold it up.
  */
 export function storyComplete(profile: Profile, sections: Record<string, number>) {
   const { checkpoints } = computeJourney(profile, sections, academicStarted(profile));
   return checkpoints.filter((c) => !AFTER_APPLY.includes(c.id)).every((c) => c.complete);
 }
 
-/**
- * Opening the Review & Apply planet from another stop:
- * - `revisit`: on Financial Aid after Apply is unlocked — show Counselor and Application assistant
- * - `locked`: earlier steps still open — Application Assistant stays unavailable
- */
-export function reviewVisitKind(currentStage: CheckpointId, applyUnlocked: boolean): "revisit" | "locked" {
-  return applyUnlocked && currentStage === "aid" ? "revisit" : "locked";
-}
 const DEFER = { type: "noop" } as const;
 
 type Draft = Omit<GuidedTurn, "checkpointId" | "chapter" | "finished">;
@@ -189,26 +141,16 @@ export function nextGuidedTurn(
   const journey = computeJourney(profile, sections, academicStarted(profile));
 
   if (journey.finished) {
-    // After admission offers, the last real step is accepting one: UC's Statement of Intent to Register.
-    const sirDone = !!agentOf(profile).sirDoneAt;
-    const sirDue = new Date(`${sirDeadlineDate(profile)}T12:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric" });
+    // Done after Apply: no more questions. The student can chat with any guide (each opens with
+    // their own greeting), so there's no question box here.
     return {
-      id: sirDone ? "done-sir" : "done",
+      id: "done",
       checkpointId: "done",
       speaker: "sage",
       chapter: "Finish",
-      prompt: sirDone
-        ? hi("you've submitted your UC application, sorted out financial aid, and accepted your spot. Congratulations — you did the whole path!")
-        : hi(`you've submitted your UC application and sorted out financial aid — that's the whole path! Next up: watch your email and keep your grades steady. Once offers come in, accept one by submitting your Statement of Intent to Register by ${sirDue}.`),
-      choices: [
-        sirDone
-          ? { id: "sir-undo", label: "I haven't submitted my Intent to Register", effect: { type: "setSirDone", done: false } }
-          : { id: "sir", label: "I submitted my Intent to Register", effect: { type: "setSirDone", done: true } },
-        { id: "dates", label: "What dates are coming up?", effect: { type: "ask", mentorId: "sage", prompt: "Looking at my upcoming dates, what's next for me and when is each one due?" } },
-        { id: "aid", label: "Ask Penny what comes next for aid", effect: { type: "ask", mentorId: "penny", prompt: "I submitted my UC application and my FAFSA or CA Dream Act. What should I watch for next with financial aid, like Cal Grant and my aid offers?" } },
-        { id: "next", label: "What happens after I submit?", effect: { type: "ask", mentorId: "sage", prompt: "I submitted my UC application. What happens next and what should I watch for?" } },
-        { id: "manual", label: "Ask my own question", effect: { type: "focusChat" } },
-      ],
+      prompt: "",
+      choices: [],
+      chatOnly: true,
       finished: true,
     };
   }
@@ -221,6 +163,8 @@ export function nextGuidedTurn(
       checkpointId: "ucs",
       speaker: "theo",
       chapter: "Choose UCs",
+      // Theo's chat opener carries Confirm / Decline; no multiple-choice box.
+      chatOnly: true,
       prompt: hi("we'll apply to all nine UCs. You can unselect any in Profile anytime — sound good?"),
       choices: [
         { id: "confirm", label: "Yes, all nine", highlight: true, effect: { type: "toggleCheck", checkId: "ucs-confirmed" } },
@@ -242,20 +186,31 @@ export function nextGuidedTurn(
       const chapter = `${cp.short} · ${turns.length} question${turns.length === 1 ? "" : "s"} left`;
       return { ...turns[0], checkpointId: cp.id, chapter, finished: false };
     }
-    // Review is finished by the counselor / application tools, not chat turns. If Applied is
-    // checked but Counselor or UC account isn't, don't skip ahead to Financial Aid — that left
-    // "questions left" on Aid while the map and chat stayed on Review.
-    if (cp.id === "review") {
+    // Activities is finished in Milo's chat: the list found (or added) there, then Confirm. No question box.
+    if (cp.id === "activities") {
+      return {
+        id: "activities-list",
+        checkpointId: cp.id,
+        speaker: "milo",
+        chapter: `${cp.short} · 1 task left`,
+        prompt: "",
+        choices: [],
+        chatOnly: true,
+        finished: false,
+      };
+    }
+    // The counselor and apply stops are finished by the tools in their guide's chat, not chat turns.
+    // Hold the story there (no bubble) so it never skips ahead to Financial Aid.
+    if (isReviewStage(cp.id)) {
       const left = cp.tasks.filter((t) => !t.done).length;
       return {
-        id: "review-tools",
-        checkpointId: "review",
-        speaker: "sage",
+        id: `${cp.id}-tools`,
+        checkpointId: cp.id,
+        speaker: cp.id === "counselor" ? "counselor" : "assistant",
         chapter: `${cp.short} · ${left} task${left === 1 ? "" : "s"} left`,
-        prompt: hi(
-          "finish Review & Apply with the tools on the right — meet your virtual counselor, email your school counselor, and run the Application assistant until you've applied. The map moves on once those are checked off.",
-        ),
-        choices: [{ id: "manual", label: "Ask a guide a question instead", effect: { type: "focusChat" } }],
+        prompt: "",
+        choices: [],
+        chatOnly: true,
         finished: false,
       };
     }
@@ -386,6 +341,7 @@ function turnsFor(
       out.push({
         id: "confirm-ucs",
         speaker: "theo",
+        chatOnly: true,
         prompt: hi("we'll apply to all nine UCs. You can unselect any in Profile anytime — sound good?"),
         choices: [
           { id: "confirm", label: "Yes, all nine", highlight: true, effect: { type: "toggleCheck", checkId: "ucs-confirmed" } },
@@ -412,54 +368,19 @@ function turnsFor(
     }
   }
 
-  if (cp.id === "activities" && !activitiesStatus(profile).answered) {
-    const journey = journeyOf(profile);
-    for (const section of ACTIVITY_SECTIONS.filter((s) => !activitySectionAnswered(profile, s.id))) {
-      const { count } = activitySection(journey, section.id);
-      const saveWhat = section.id === "job" ? (count === 1 ? "job" : "jobs") : section.id === "awards" ? "honors and awards" : section.id;
-      out.push({
-        id: section.turnId,
-        speaker: "milo",
-        prompt: hi(!count ? section.question : count >= 3 ? `${section.question} Add them in your profile.` : `${section.question} Answer Milo's questions in the chat, then hit Done.`),
-        stackedChoices: true,
-        choices: [
-          ...[0, 1, 2, 3].map((n) => ({
-            id: `count-${n}`,
-            label: n === 3 ? "3+" : String(n),
-            selected: count === n,
-            effect: { type: "setActivityCount" as const, section: section.id, count: n },
-          })),
-          ...(count && count >= 3
-            ? [{ id: "profile", label: "Go to Activities & awards", highlight: true, effect: { type: "fillInProfile" as const, section: section.id } }]
-            : []),
-          ...(count && count < 3 ? [{ id: "done", label: `Done — save my ${saveWhat}`, highlight: true, effect: { type: "finishActivities" as const, section: section.id } }] : []),
-        ],
-      });
-    }
-  }
-
   if (cp.id === "essays") {
     const j = journeyOf(profile);
     const chosen = Object.keys(j.piqs);
     if (chosen.length < PIQ_REQUIRED) {
-      if (j.checks?.["choose-piqs"]) {
-        out.push({
-          id: "pick-piq",
-          speaker: "quill",
-          prompt: hi("please choose 4 essay topics."),
-          choices: [],
-          piqPicker: true,
-        });
-      } else {
-        // Quill's chat opener lists the four picks + Why / Sounds good / Swap.
-        out.push({
-          id: "confirm-piq-chat",
-          speaker: "quill",
-          prompt: "",
-          choices: [],
-          chatOnly: true,
-        });
-      }
+      // Quill's chat opener lists the four picks + Why / Sounds good / Swap (swap opens a popup).
+      // A leftover "choose-piqs" flag from the old in-chat picker is ignored.
+      out.push({
+        id: "confirm-piq-chat",
+        speaker: "quill",
+        prompt: "",
+        choices: [],
+        chatOnly: true,
+      });
     } else {
       const pending = chosenPiqs(profile).filter((id) => !essayDone(profile, id));
       if (pending.length) {
@@ -472,63 +393,6 @@ function turnsFor(
           chatOnly: true,
         });
       }
-    }
-  }
-
-  if (cp.id === "review") {
-    // Counselor + Application assistant drive this stop (see ReviewPersonaPicker). Guided only
-    // offers a manual "I submitted" fallback when the assistant hasn't finished PIQs yet.
-    const j = journeyOf(profile);
-    const applied = !!j.agent?.ucAccount?.piqAt || j.submittedAt !== null;
-    if (!applied) {
-      out.push({
-        id: "submit",
-        speaker: "sage",
-        prompt: hi("the last step happens on the official UC site, apply.universityofcalifornia.edu. Once you've submitted there, record it here."),
-        choices: [
-          { id: "submitted", label: "I submitted — mark it!", effect: { type: "markSubmitted" } },
-          { id: "how", label: "Walk me through submitting", effect: { type: "ask", mentorId: "sage", prompt: "Walk me through the final steps to submit my UC application, and what to double-check before I do." } },
-          { id: "later", label: "Not submitted yet", effect: DEFER },
-        ],
-      });
-    }
-  }
-
-  if (cp.id === "aid") {
-    const f = profile.preferences;
-    if (f.needsAid === "") {
-      out.push({
-        id: "aid-needs",
-        speaker: "penny",
-        prompt: hi("last stop: paying for college. Do you think you'll need financial aid — grants, scholarships, or work-study?"),
-        choices: [
-          { id: "yes", label: "Yes, I'll need aid", effect: { type: "setPreferences", patch: { needsAid: "yes" } } },
-          { id: "unsure", label: "Not sure yet", effect: { type: "setPreferences", patch: { needsAid: "unsure" } } },
-          { id: "no", label: "No, we've got it covered", effect: { type: "setPreferences", patch: { needsAid: "no" } } },
-        ],
-      });
-    }
-    if (f.fafsa !== "done" && f.needsAid !== "no") {
-      const started = f.fafsa === "in-progress";
-      out.push({
-        id: started ? "aid-fafsa-finish" : "aid-fafsa",
-        speaker: "penny",
-        prompt: started
-          ? hi("how's the FAFSA or California Dream Act Application going? Once it's submitted, this step is done.")
-          : hi("the FAFSA (or the California Dream Act Application, if FAFSA isn't right for you) is how UC and California decide your aid. Have you filed it?"),
-        choices: started
-          ? [
-              { id: "done", label: "It's submitted!", effect: { type: "setPreferences", patch: { fafsa: "done" } } },
-              { id: "help", label: "Help me finish it", effect: { type: "ask", mentorId: "penny", prompt: "I started the FAFSA or California Dream Act Application. What do I still need to finish it, and what documents should I have ready?" } },
-              { id: "later", label: "Not yet", effect: DEFER },
-            ]
-          : [
-              { id: "done", label: "Yes, it's submitted", effect: { type: "setPreferences", patch: { fafsa: "done" } } },
-              { id: "started", label: "I've started it", effect: { type: "setPreferences", patch: { fafsa: "in-progress" } } },
-              { id: "which", label: "Which one should I file?", effect: { type: "ask", mentorId: "penny", prompt: "Should I file the FAFSA or the California Dream Act Application, and how do I get started?" } },
-              { id: "later", label: "Not yet", effect: DEFER },
-            ],
-      });
     }
   }
 
@@ -546,22 +410,6 @@ export function applyGuidedEffect(profile: Profile, effect: GuidedEffect, newId:
       return { ...profile, goals: { ...profile.goals, ...effect.patch } };
     case "setPreferences":
       return { ...profile, preferences: { ...profile.preferences, ...effect.patch } };
-    case "setActivityCount":
-      // A new number restarts the chat, so anything saved from the last one goes with it.
-      return { ...profile, ucJourney: withActivitySection(journeyOf(profile), effect.section, { count: effect.count }) };
-    case "saveActivitySection": {
-      const journey = journeyOf(profile);
-      const { count } = activitySection(journey, effect.section);
-      return {
-        ...profile,
-        ...(effect.section === "awards"
-          ? { awards: mergeAwards(profile.awards, effect.items, newId) }
-          : { activities: mergeActivities(profile.activities, effect.section, effect.items, newId) }),
-        ucJourney: withActivitySection(journey, effect.section, { count, notes: effect.notes }),
-      };
-    }
-    case "fillInProfile":
-      return applyGuidedEffect(profile, { type: "saveActivitySection", section: effect.section, notes: "", items: [] }, newId);
     case "toggleCampus":
       return toggleCampus(profile, effect.campus, newId);
     case "setCampuses": {
@@ -594,10 +442,6 @@ export function applyGuidedEffect(profile: Profile, effect: GuidedEffect, newId:
       else checks[effect.checkId] = true;
       return { ...profile, ucJourney: { ...cur, checks } };
     }
-    case "markSubmitted":
-      return { ...profile, ucJourney: { ...journeyOf(profile), submittedAt: Date.now() } };
-    case "setSirDone":
-      return setAgent(profile, (a) => ({ ...a, sirDoneAt: effect.done ? Date.now() : undefined }));
     case "skipPiq": {
       const cur = journeyOf(profile);
       return { ...profile, ucJourney: { ...cur, skippedPiqs: [...(cur.skippedPiqs ?? []), effect.piqId] } };
@@ -626,33 +470,6 @@ export function applyGuidedEffect(profile: Profile, effect: GuidedEffect, newId:
   }
 }
 
-/** Adds what Milo heard to the list. Telling Milo about the same thing again updates its row instead of adding another. */
-function mergeActivities(list: Profile["activities"], section: ActivitySectionId, items: ActivityItem[], newId: () => string): Profile["activities"] {
-  const category = ACTIVITY_SECTIONS.find((s) => s.id === section)!.category;
-  const key = (name: string) => name.trim().toLowerCase();
-  return items.reduce((acts, item) => {
-    const description = item.description.slice(0, ACTIVITY_DESC_LIMIT);
-    const same = acts.find((a) => a.category === category && key(a.name) === key(item.name));
-    if (same) {
-      return acts.map((a) => (a === same ? { ...a, role: item.role || a.role, description: description || a.description } : a));
-    }
-    return [...acts, { id: newId(), name: item.name, role: item.role, hoursPerWeek: "", weeksPerYear: "", years: "", description, category }];
-  }, list);
-}
-
-const AWARD_LEVELS: Award["level"][] = ["school", "regional", "state", "national", "international"];
-
-/** Adds what Milo heard to the honors and awards list, updating an award already there. */
-function mergeAwards(list: Award[], items: ActivityItem[], newId: () => string): Award[] {
-  const key = (title: string) => title.trim().toLowerCase();
-  return items.reduce((awards, item) => {
-    const level = AWARD_LEVELS.find((l) => l === item.level) ?? "";
-    const same = awards.find((a) => key(a.title) === key(item.name));
-    if (same) return awards.map((a) => (a === same ? { ...a, level: level || a.level } : a));
-    return [...awards, { id: newId(), title: item.name, level }];
-  }, list);
-}
-
 /** Short confirmation shown after a reply changes the profile. */
 export function savedLabel(effect: GuidedEffect): string | null {
   switch (effect.type) {
@@ -678,17 +495,6 @@ export function savedLabel(effect: GuidedEffect): string | null {
       return effect.piqIds.length === PIQ_REQUIRED ? `Saved your 4 PIQ choices` : null;
     case "toggleCheck":
       return "Checked off on your review list";
-    case "markSubmitted":
-      return "Recorded your UC submission";
-    case "setSirDone":
-      return effect.done ? "Recorded your Intent to Register" : "Marked Intent to Register not done";
-    case "setActivityCount":
-      return null;
-    case "saveActivitySection":
-      if (!effect.items.length) return "Saved for your essays";
-      return effect.section === "awards" ? "Added to your honors and awards" : "Added to your activities list";
-    case "finishActivities":
-      return null;
     case "setGoals":
       return effect.patch.intendedMajor ? `Saved your major: ${effect.patch.intendedMajor}` : "Saved to your profile";
     default:

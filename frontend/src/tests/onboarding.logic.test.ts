@@ -1,20 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { COLLEGES } from "../colleges";
 import { emptyOnboarding, emptyProfile } from "../profile";
-import {
-  applyTranscriptBasics,
-  checkpointErrors,
-  inferGradeFromCourses,
-  inferGraduationYear,
-  isOnboardingComplete,
-  markComplete,
-  questionErrors,
-  questionsForCheckpoint,
-  requiredComplete,
-  resumeCheckpoint,
-  schoolYearEndYear,
-  withAllUcs,
-} from "../onboarding/logic";
+import { applyTranscriptBasics, inferGradeFromCourses, inferGraduationYear, isOnboardingComplete, markComplete, splitStudentName, questionErrors, questionsForCheckpoint, resumeCheckpoint, schoolYearEndYear, withAllUcs } from "../onboarding/logic";
 import type { Transcript, TranscriptCourse } from "../types";
 
 function course(gradeLevel: TranscriptCourse["gradeLevel"]): TranscriptCourse {
@@ -31,24 +18,6 @@ function course(gradeLevel: TranscriptCourse["gradeLevel"]): TranscriptCourse {
 }
 
 describe("onboarding logic", () => {
-  it("requires name, grade, year, school, and state — not optional fields", () => {
-    let p = emptyProfile();
-    expect(requiredComplete(p)).toBe(false);
-    expect(checkpointErrors(p, 0).length).toBeGreaterThan(0);
-    expect(questionErrors(p, "name").length).toBe(1);
-    expect(questionErrors(p, "gpa")).toEqual([]);
-
-    p = {
-      ...p,
-      basics: { ...p.basics, firstName: "Maya", gradeLevel: "11", graduationYear: "2027", highSchool: "Lincoln" },
-    };
-    expect(checkpointErrors(p, 0).some((e) => e.toLowerCase().includes("state"))).toBe(true);
-    expect(checkpointErrors(p, 1).some((e) => e.toLowerCase().includes("state"))).toBe(true);
-
-    p = { ...p, basics: { ...p.basics, state: "CA" } };
-    expect(requiredComplete(p)).toBe(true);
-    expect(checkpointErrors(p, 0)).toEqual([]);
-  });
 
   it("uses transcript then a single confirm step", () => {
     expect(questionsForCheckpoint(0).map((q) => q.id)).toEqual(["transcript"]);
@@ -91,6 +60,7 @@ describe("onboarding logic", () => {
     };
     const filled = applyTranscriptBasics(emptyProfile(), transcript);
     expect(filled.basics.firstName).toBe("Maya");
+    expect(filled.basics.lastName).toBe("Chen");
     expect(filled.basics.highSchool).toBe("Lincoln High");
     expect(filled.basics.state).toBe("CA");
     expect(filled.basics.gradeLevel).toBe("12");
@@ -106,6 +76,8 @@ describe("onboarding logic", () => {
       transcript,
     );
     expect(kept.basics.firstName).toBe("Sam");
+    // Last name was blank, so it still comes from the transcript.
+    expect(kept.basics.lastName).toBe("Chen");
     expect(kept.basics.gradeLevel).toBe("10");
     expect(kept.basics.graduationYear).toBe("2029");
     expect(kept.basics.highSchool).toBe("Mine");
@@ -192,13 +164,11 @@ describe("onboarding logic", () => {
     expect(p.onboarding.completed).toBe(true);
   });
 
-  it("does not treat transfer as a supported first-year flow", () => {
-    const p = emptyProfile("Alex", "");
-    p.basics.gradeLevel = "transfer";
-    p.basics.graduationYear = "2026";
-    p.basics.highSchool = "City College";
-    p.basics.state = "CA";
-    expect(requiredComplete(p)).toBe(false);
-    expect(questionErrors(p, "grade")[0].toLowerCase().includes("first-year")).toBe(true);
+  it("keeps the last name from the transcript, in either printed order", () => {
+    expect(splitStudentName("Maya Rivera")).toEqual({ first: "Maya", last: "Rivera" });
+    expect(splitStudentName("Maya Ann  Rivera")).toEqual({ first: "Maya", last: "Rivera" });
+    expect(splitStudentName("Rivera, Maya Ann")).toEqual({ first: "Maya", last: "Rivera" });
+    expect(splitStudentName("Maya")).toEqual({ first: "Maya", last: "" });
+    expect(splitStudentName("")).toEqual({ first: "", last: "" });
   });
 });
