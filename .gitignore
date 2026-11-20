@@ -1,28 +1,33 @@
-# Secrets / local env. All keys live in the root .env; only .env.example is committed.
+# Secrets (only .env.example is committed)
 .env
 .env.*
-.envrc
-*.env
-*.env.*
 !.env.example
 !.env.*.example
-!*.env.example
+.envrc
 *.pem
 *.key
 *.p12
+*.jks
+*.keystore
 credentials*.json
 service-account*.json
 .aws/
 .ssh/
 .npmrc
 .pypirc
-*.jks
-*.keystore
 
-# OS / editor
+# OS / editor / local tooling
 .DS_Store
 .idea/
 .vscode/
+.cursor/
+.codex/
+.claude/
+.harness/
+.nvmrc
+.mcp.json
+.cmp.json
+CLAUDE.local.md
 *.swp
 
 # Root has no package; npm sometimes drops a stray lockfile here
@@ -37,10 +42,9 @@ coverage/
 playwright-report/
 test-results/
 
-# Backend (Python)
+# Backend
 __pycache__/
-*.pyc
-*.pyo
+*.py[co]
 .ipynb_checkpoints/
 .pytest_cache/
 .venv/
@@ -51,20 +55,13 @@ venv/
 htmlcov/
 backend/logs/
 backend/*.zip
-
-# UC page dumps from UC_DEBUG=1 (contain student info)
 backend/uc_debug/
+
+# Auth dumps / logs
 playwright/.auth/
 auth-state*.json
 storage-state*.json
-
-# Logs
 *.log
 *.bak
 *.orig
 *~
-
-# Personal Claude Code settings / scratch
-.claude/settings.local.json
-CLAUDE.local.md
-.harness/
