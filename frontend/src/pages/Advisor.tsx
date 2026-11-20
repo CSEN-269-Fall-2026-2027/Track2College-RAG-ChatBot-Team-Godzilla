@@ -25,8 +25,7 @@ import { useGuidedStory } from "../journey/useGuidedStory";
 import { applyDrafts, chosenPiqs, currentEssay, ESSAY_FOLLOW_UPS, FOLLOW_UP_THANKS, usedActivities, essayNotesFrom, miloNotes, PERSONAL_ANSWER, piqAboutAsk, piqWorkOf, setPiqAnswer, suggestedPiqTitles } from "../journey/piqs";
 import { usePiqDrafts } from "../journey/usePiqDrafts";
 import { WHAT_COUNTS_ANSWER } from "../game/campusBlurbs";
-import { doneOpener, openerFor, type OpenerAction, type ReviewTool } from "../game/openers";
-import { ReviewToolDialog } from "../components/story/ReviewApply";
+import { doneOpener, openerFor, reviewModeLine, type OpenerAction } from "../game/openers";
 import { PiqSwapDialog } from "../components/story/PiqSwapDialog";
 import { counselorMeetingDone } from "../agent/callState";
 import { autoEmailCounselor, closePendingTab, emailCounselor, openPendingTab, type CounselorEmailProblem } from "../agent/counselorEmailAuto";
@@ -34,8 +33,10 @@ import { usePlanning } from "../planning";
 import { splitStudentName } from "../onboarding/logic";
 import { CounselorEmailProblemDialog } from "../components/story/CounselorEmailProblemDialog";
 import { ApplyLoginDialog, ApplyWatchDialog } from "../components/story/ApplyDialogs";
+import { ApplyStatusBox } from "../components/story/ApplyStatusBox";
 import { useBackgroundApply } from "../agent/useBackgroundApply";
-import { agentOf, applyProgressSummary, cleanTranscriptLine, commitApplied, sameEmail, setAgent } from "../agent/logic";
+import { agentOf, applyProgressSummary, callLogMessage, cleanTranscriptLine, commitApplied, sameEmail, setAgent } from "../agent/logic";
+import { VirtualCounselor } from "../agent/tasks";
 
 interface AdvisorProps {
   userId: string;
@@ -426,7 +427,8 @@ export function Advisor({ userId, visible, onHealth, handoff, mapOpen, onMapOpen
   const applyUnlocked = storyComplete(profile, completeness(profile).sections);
   const guide = mentorById(mentorPickOpen ? pickedGuide : STAGE_GUIDE[currentStage]);
   /** The application tool open under the Review & Apply persona's first message. */
-  const [reviewTool, setReviewTool] = useState<ReviewTool | null>(null);
+  /** Jordan's check-in runs inside the Counselor chat (no popup). */
+  const [jordanOpen, setJordanOpen] = useState(false);
   const [emailBusy, setEmailBusy] = useState(false);
   /** Why "Email my counselor" stopped (shown in a small popup with name + email fields), or null. */
   const [emailProblem, setEmailProblem] = useState<CounselorEmailProblem | null>(null);
@@ -462,7 +464,7 @@ export function Advisor({ userId, visible, onHealth, handoff, mapOpen, onMapOpen
     if (applyFinished) setWatchOpen(false);
   }, [applyFinished]);
   useEffect(() => {
-    if (!applyUnlocked) setReviewTool(null);
+    if (!applyUnlocked) setJordanOpen(false);
   }, [applyUnlocked]);
   const guideRef = useRef(guide.id);
   guideRef.current = guide.id;
@@ -508,16 +510,21 @@ export function Advisor({ userId, visible, onHealth, handoff, mapOpen, onMapOpen
     [postNote],
   );
 
-  // Restarting a guide's chat clears the screen and writes an empty stub so a reload does not
-  // bring the old thread back. Prior message rows stay in Supabase as a record.
+  // Restart clears this guide's chat text (empty stub). Switching guides after the journey also
+  // uses this — chat only. Clearing Jordan's saved call is opt-in (Restart button), never automatic:
+  // wiping counselorCall/counselorDoneAt marks the journey incomplete and snaps you back to Counselor.
   const restartChat = useCallback(
-    (mentorId: Mentor["id"]) => {
+    (mentorId: Mentor["id"], opts?: { clearCounselorCall?: boolean }) => {
       if (pendingFor === mentorId) stop();
       const old = chatsRef.current[mentorId];
       if (!old) return;
       if (old.sessionId) void clearSession(old.sessionId);
-      setChat(mentorId, () => null);
+      setJordanOpen(false);
       setFreshId(null);
+      if (mentorId === "counselor" && opts?.clearCounselorCall) {
+        update((p) => setAgent(p, (a) => ({ ...a, counselorCall: undefined, counselorDoneAt: undefined })));
+      }
+      setChat(mentorId, () => null);
       const stub: Conversation = {
         id: newId(),
         title: old.title,
@@ -532,7 +539,7 @@ export function Advisor({ userId, visible, onHealth, handoff, mapOpen, onMapOpen
         .then((store) => store.conversations.save(userId, stub))
         .catch(() => savedRef.current.delete(stub.id));
     },
-    [pendingFor, stop, setChat, userId],
+    [pendingFor, stop, setChat, userId, update],
   );
   // Resetting essays on the Profile page clears the chosen questions, and Quill's chat goes with it.
   const essayCount = Object.keys(journeyOf(profile).piqs).length;
@@ -654,42 +661,26 @@ export function Advisor({ userId, visible, onHealth, handoff, mapOpen, onMapOpen
     () => (mentorPickOpen ? doneOpener(guide, profile, name) : openerFor(guide, profile, name)),
     [mentorPickOpen, guide, profile, name],
   );
-  // "Help me apply" runs in the background: while it's going (or after it stopped), the assistant says so.
+  // "Help me apply" status lives in ApplyStatusBox in the chat (not in the opener or under the avatar).
   const applyRunning = bgApply.running;
-  const applyDetail = bgApply.run?.detail ?? "";
   const applyIssue = bgApply.issue;
   const hasSavedUcLogin = !!agent.ucAccount?.email;
+  const showApplyStatus = guide.id === "assistant" && (!!bgApply.run || !!applyIssue);
   const opener = useMemo(() => {
     if (guide.id !== "assistant") return baseOpener;
-    const hi = `Hey${name ? ` ${name.split(/\s+/)[0]}` : ""}!`;
-    if (applyRunning) {
-      return {
-        text: `${hi} I'm filling in your UC application in the background. ${applyDetail}`.trim(),
-        actions: [
-          { kind: "watchApply", label: "Watch" },
-          { kind: "stopApply", label: "Stop" },
-        ] satisfies OpenerAction[],
-      };
-    }
-    if (applyIssue && applyIssue.kind !== "code") {
-      return {
-        text: `${hi} The UC assistant stopped: ${applyIssue.message}`,
-        // A wrong login can't be retried as is: fix it instead.
-        actions: (applyIssue.kind === "login"
-          ? [{ kind: "ucLogin", label: "Change UC login" }]
-          : [
-              { kind: "watchApply", label: "See what happened" },
-              { kind: "tool", label: "Try again", tool: "apply" },
-            ]) satisfies OpenerAction[],
-      };
-    }
+    // While the status box owns the run, drop Help me apply / Watch / Stop from the opener chips.
+    let actions = baseOpener.actions.filter((a) => {
+      if (showApplyStatus && a.kind === "tool" && a.tool === "apply") return false;
+      if (showApplyStatus && (a.kind === "watchApply" || a.kind === "stopApply" || a.kind === "ucLogin")) return false;
+      return true;
+    });
     // Once a login is saved, it can always be changed (a typo would otherwise stick on every try).
-    const hasHelpApply = baseOpener.actions.some((a) => a.kind === "tool" && a.tool === "apply");
-    if (hasSavedUcLogin && hasHelpApply) {
-      return { ...baseOpener, actions: [...baseOpener.actions, { kind: "ucLogin", label: "Change UC login" } satisfies OpenerAction] };
+    const hasHelpApply = actions.some((a) => a.kind === "tool" && a.tool === "apply");
+    if (hasSavedUcLogin && hasHelpApply && !actions.some((a) => a.kind === "ucLogin")) {
+      actions = [...actions, { kind: "ucLogin", label: "Change UC login" } satisfies OpenerAction];
     }
-    return baseOpener;
-  }, [guide.id, baseOpener, name, applyRunning, applyDetail, applyIssue, hasSavedUcLogin]);
+    return actions === baseOpener.actions ? baseOpener : { ...baseOpener, actions };
+  }, [guide.id, baseOpener, hasSavedUcLogin, showApplyStatus]);
   // Suggested prompt chips stay under the greeting for every guide.
   // While Quill drafts all four, the chat keeps his picks message and the exchange below it, without buttons.
   const quillDrafting = guide.id === "quill" && bulkDrafting;
@@ -718,6 +709,25 @@ export function Advisor({ userId, visible, onHealth, handoff, mapOpen, onMapOpen
           },
     );
     setFreshId(reply.id);
+  };
+  /** User-only preset line in chat (e.g. "Help me apply") — no model call. */
+  const postUserLine = (content: string, mentorId: Mentor["id"]) => {
+    const now = Date.now();
+    const asked: Message = { id: newId(), role: "user", content, preset: true, createdAt: now };
+    setChat(mentorId, (c) =>
+      c
+        ? { ...c, messages: [...c.messages, asked], updatedAt: now }
+        : {
+            id: newId(),
+            title: mentorId === "assistant" || mentorId === "counselor" ? "Review & Apply" : makeTitle(content),
+            sessionId: null,
+            mentorId,
+            intro: openerFor(mentorById(mentorId), profileRef.current, nameRef.current).text,
+            messages: [asked],
+            createdAt: now,
+            updatedAt: now,
+          },
+    );
   };
   const pendingDraftIds = useRef<string[] | null>(null);
   /** Quill's "I want to swap" popup: the picks it opens with, or null when closed. */
@@ -792,10 +802,14 @@ export function Advisor({ userId, visible, onHealth, handoff, mapOpen, onMapOpen
         return;
       }
       if (action.tool === "apply") {
+        postUserLine("Help me apply", "assistant");
         startApply();
         return;
       }
-      setReviewTool(action.tool);
+      if (action.tool === "call") {
+        setJordanOpen(true);
+        return;
+      }
       return;
     }
     if (action.kind === "soon") return;
@@ -836,6 +850,12 @@ export function Advisor({ userId, visible, onHealth, handoff, mapOpen, onMapOpen
     if (action.kind === "markEmailSent") {
       update((p) =>
         setAgent(p, (a) => ({ ...a, counselorEmail: a.counselorEmail && { ...a.counselorEmail, sentAt: Date.now() } })),
+      );
+      // Student says they're done; counselor replies in chat (don't swap the opener bubble).
+      answerWithoutModel(
+        action.label,
+        reviewModeLine("counselor", name, false, true),
+        "counselor",
       );
       return;
     }
@@ -918,6 +938,42 @@ export function Advisor({ userId, visible, onHealth, handoff, mapOpen, onMapOpen
       ]
     : opener.actions;
 
+  // Under the opener before the first message; under the latest reply once the thread has started
+  // (so "Meet with my virtual counselor" sits under "Email's done…" instead of scrolling away at the top).
+  const showOpenerActions = showGoogleConfirm || (showActions && !miloListStep);
+  const openerActionsEl = showOpenerActions ? (
+    <div className="story-opener-actions" role="group" aria-label={`${guide.name}'s suggestions`}>
+      {openerActions.map((a) => {
+        const open = a.kind === "tool" && a.tool === "call" && jordanOpen;
+        return (
+          <button
+            key={a.label}
+            type="button"
+            className={`story-opener-action${open ? " on" : ""}`}
+            onClick={() => runOpener(a)}
+            title={a.kind === "soon" ? "Coming soon" : undefined}
+            disabled={
+              a.kind === "soon" ||
+              (a.kind !== "tool" && pending) ||
+              (a.kind === "tool" && a.tool === "email" && emailBusy) ||
+              (a.kind === "write" && piqDrafts.busy) ||
+              ((a.kind === "confirmPiqs" || a.kind === "draftPiqs") && piqDrafts.busy)
+            }
+            aria-pressed={a.kind === "tool" ? open : undefined}
+          >
+            {a.kind === "tool" && a.tool === "email" && emailBusy
+              ? "Opening Gmail…"
+              : a.kind === "write" && piqDrafts.isBrainstorming(a.piqId)
+                ? "Brainstorming your essay…"
+                : (a.kind === "confirmPiqs" || a.kind === "draftPiqs") && piqDrafts.busy
+                  ? "Drafting…"
+                  : a.label}
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+
   return (
     <div className="advisor" hidden={!visible}>
       <div className="main">
@@ -930,9 +986,7 @@ export function Advisor({ userId, visible, onHealth, handoff, mapOpen, onMapOpen
           mentorPickOpen={mentorPickOpen}
           onSelectMentor={selectMentor}
           switcherBusy={pending}
-          busyCaption={
-            quillDrafting ? "Writing your essays…" : guide.id === "assistant" && applyRunning ? "Filling in your UC application…" : null
-          }
+          busyCaption={quillDrafting ? "Writing your essays…" : null}
           mapOpen={drawerOpen}
           onMapOpenChange={setDrawerOpen}
           chat={
@@ -945,10 +999,14 @@ export function Advisor({ userId, visible, onHealth, handoff, mapOpen, onMapOpen
                         type="button"
                         className="chat-restart"
                         onClick={() => {
-                          restartChat(guide.id);
+                          restartChat(guide.id, { clearCounselorCall: guide.id === "counselor" });
                         }}
                         aria-label={`Restart your chat with ${guide.name}`}
-                        title="Start over from the first message"
+                        title={
+                          guide.id === "counselor"
+                            ? "Clear this chat and the saved call with Jordan"
+                            : "Start over from the first message"
+                        }
                       >
                         <RetryIcon width={14} height={14} />
                         <span>Restart</span>
@@ -1024,38 +1082,7 @@ export function Advisor({ userId, visible, onHealth, handoff, mapOpen, onMapOpen
                         }}
                       />
                     )}
-                    {(showGoogleConfirm || (showActions && !miloListStep)) && (
-                      <div className="story-opener-actions" role="group" aria-label={`${guide.name}'s suggestions`}>
-                        {openerActions.map((a) => {
-                          const open = a.kind === "tool" && reviewTool === a.tool;
-                          return (
-                            <button
-                              key={a.label}
-                              type="button"
-                              className={`story-opener-action${open ? " on" : ""}`}
-                              onClick={() => runOpener(a)}
-                              title={a.kind === "soon" ? "Coming soon" : undefined}
-                              disabled={
-                                a.kind === "soon" ||
-                                (a.kind !== "tool" && pending) ||
-                                (a.kind === "tool" && a.tool === "email" && emailBusy) ||
-                                (a.kind === "write" && piqDrafts.busy) ||
-                                ((a.kind === "confirmPiqs" || a.kind === "draftPiqs") && piqDrafts.busy)
-                              }
-                              aria-pressed={a.kind === "tool" ? open : undefined}
-                            >
-                              {a.kind === "tool" && a.tool === "email" && emailBusy
-                                ? "Opening Gmail…"
-                                : a.kind === "write" && piqDrafts.isBrainstorming(a.piqId)
-                                  ? "Brainstorming your essay…"
-                                  : (a.kind === "confirmPiqs" || a.kind === "draftPiqs") && piqDrafts.busy
-                                    ? "Drafting…"
-                                    : a.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
+                    {(!started || showGoogleConfirm) && openerActionsEl}
                     {swapPiqs && (
                       <PiqSwapDialog
                         initial={swapPiqs}
@@ -1113,15 +1140,27 @@ export function Advisor({ userId, visible, onHealth, handoff, mapOpen, onMapOpen
                         onClose={() => setEmailProblem(null)}
                       />
                     )}
-                    {reviewGuide && reviewTool && opener.actions.some((a) => a.kind === "tool" && a.tool === reviewTool) && (
-                      <ReviewToolDialog
-                        onClose={() => setReviewTool(null)}
-                        onCallLog={onCallLog}
-                      />
-                    )}
                   </>
                 }
-                footer={null}
+                footer={
+                  <>
+                    {showApplyStatus && (
+                      <ApplyStatusBox
+                        run={bgApply.run}
+                        issue={applyIssue}
+                        running={applyRunning}
+                        onWatch={() => setWatchOpen(true)}
+                        onStop={() => void bgApply.stop()}
+                        onRetry={() => {
+                          postUserLine("Help me apply", "assistant");
+                          startApply();
+                        }}
+                        onChangeLogin={() => setLoginAsk("")}
+                      />
+                    )}
+                    {started && !showGoogleConfirm ? openerActionsEl : null}
+                  </>
+                }
                 messages={guideChat?.messages ?? []}
                 pending={guideBusy}
                 busy={pending}
@@ -1142,6 +1181,14 @@ export function Advisor({ userId, visible, onHealth, handoff, mapOpen, onMapOpen
                     : `Message ${guide.name}…`
                 }
               />
+              {jordanOpen && (
+                <VirtualCounselor
+                  agent={agent}
+                  change={(fn) => update((p) => setAgent(p, fn))}
+                  onCallEnd={(lines) => onCallLog(callLogMessage(lines))}
+                  onClose={() => setJordanOpen(false)}
+                />
+              )}
             </>
           }
         />

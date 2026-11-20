@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { TypedEchoFilter, callPhase, isWrapUpLine, mouthFrame, nearBottom, presence, virtualCounselorDone } from "../agent/callState";
+import {
+  ELEVENLABS_CREDITS_MESSAGE,
+  TypedEchoFilter,
+  callPhase,
+  isCreditsError,
+  isWrapUpLine,
+  mouthFrame,
+  nearBottom,
+  presence,
+  shouldSaveCounselorCall,
+  virtualCounselorDone,
+} from "../agent/callState";
 
 const base = { joined: true, starting: false, status: "disconnected", error: null, hadSession: false };
 
@@ -24,6 +35,16 @@ describe("callPhase", () => {
   it("treats a call that connected and then dropped as ended, even with an error", () => {
     expect(callPhase({ ...base, hadSession: true })).toBe("ended");
     expect(callPhase({ ...base, hadSession: true, error: "dropped" })).toBe("ended");
+  });
+});
+
+describe("isCreditsError", () => {
+  it("spots ElevenLabs quota / credits wording", () => {
+    expect(isCreditsError(ELEVENLABS_CREDITS_MESSAGE)).toBe(true);
+    expect(isCreditsError("quota_exceeded")).toBe(true);
+    expect(isCreditsError("out of tokens")).toBe(true);
+    expect(isCreditsError("character limit reached")).toBe(true);
+    expect(isCreditsError("Allow microphone access")).toBe(false);
   });
 });
 
@@ -108,6 +129,18 @@ describe("virtualCounselorDone", () => {
           },
         ],
       }),
+    ).toBe(true);
+  });
+});
+
+describe("shouldSaveCounselorCall", () => {
+  it("saves only a finished call", () => {
+    expect(shouldSaveCounselorCall([{ role: "student", text: "hi" }])).toBe(false);
+    expect(
+      shouldSaveCounselorCall([
+        { role: "student", text: "Fall 2027" },
+        { role: "counselor", text: "Thanks, Maya! You're all set to start your UC application." },
+      ]),
     ).toBe(true);
   });
 });

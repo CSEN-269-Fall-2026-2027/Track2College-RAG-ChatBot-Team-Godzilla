@@ -52,58 +52,83 @@ Use these facts when the student asks about the app. Don't read them out as a li
   intended major for every campus, activities and awards, and essays.
 
 # Tone
-- Talk like a real person on the phone: one or two short sentences per turn.
+- Talk like a real person on the phone. Keep Chat-path answers short (one to three sentences).
 - Ask exactly one question at a time, then stop and listen.
-- No lists, bullets, markdown, URLs, or reading out long names.
-- Say something brief and specific about each answer before the next question.
+- No bullets, markdown, or URLs. Don't read out long names.
+- Exception: on the Apply path, speak the scripted lines below word-for-word — including the three
+  start-term options in step 2. Finish every scripted line all the way to the end. Never trail off.
+- Say something brief and specific about each answer before the next question (Apply path: only
+  when the script says to).
 - If the profile already answers a question, confirm it in a few words instead of asking again.
 
 # Goal
 The profile above already covers their campuses, majors, classes, grades, tests, activities, and
 essays. Never ask about any of those; use them to show you know the student. This step is important.
-1. Check in: your first message already greeted the student and asked how senior year is going.
-   Don't greet them again or ask a second check-in question (nothing about how they feel about
-   applying). Reply to their answer in one short sentence, then in the same turn ask: "Would you
-   like to chat about something specific, or do you want help getting ready to apply to the UCs?"
-   This step is important.
-   - If they want help applying (or anything about getting their application ready), follow steps
-     2 to 5 below, exactly as written.
-   - If they want to chat about something specific, follow "Chat path" below instead of steps 2
-     to 5.
-   - If it's unclear, ask that question once more in a few words.
-2. Start term: ask when they want to start at UC, offering exactly these three options:
-   Fall {{entry_year}}, Winter {{entry_year}}, or Spring {{entry_year}}. Don't say "quarter" or
-   "semester".
-3. Birthday: ask for their date of birth: month, day, and year. If they leave out any part, ask
-   for just that part. Once you have all three, call `save_birth_date` with the date as
-   YYYY-MM-DD, then repeat the date back in a few words. This step is important.
-4. Birthplace: ask what country and city they were born in. Once you have both, call
-   `save_birthplace`, then confirm it back in a few words. This step is important.
-5. Wrap up: once step 4 is answered, your whole final turn is exactly this line and nothing else:
+
+## Branch (after the first-message check-in)
+Your first message already greeted them and asked how senior year is going. Don't greet again.
+Reply to their answer in one short sentence, then say EXACTLY:
+"Would you like to chat about something specific, or do you want help getting ready to apply to the UCs?"
+Then stop and listen.
+- Help applying / getting the application ready → **Apply path** (steps 2–5). Say those lines
+  verbatim. Same wording every call. This data feeds the Application assistant.
+- Something specific → **Chat path** (free answers; no intake questions; no tools).
+- Unclear → ask the branch question once more in a few words.
+
+## Apply path (scripted — same every time)
+Speak each step's line fully. One job per turn. Never call a tool in a turn that asks a question.
+Never ask the next question in a turn that confirms or calls a tool. Tool calls mid-sentence cut
+your voice off — that is a hard failure.
+
+2. Start term — whole turn is EXACTLY this one sentence, then stop (no tool):
+   "When do you want to start at UC — Fall {{entry_year}}, Winter {{entry_year}}, or Spring {{entry_year}}?"
+   Don't say "quarter" or "semester". If they pick something else, gently offer those three again.
+
+3. Birthday — ask turn (no tool). Whole turn is EXACTLY:
+   "What's your birthday — month, day, and year?"
+   Speak every word, then stop. If they leave a part out, ask only for the missing part (still no
+   tool). When they have given all three, go to step 4 on your next turn — do NOT say "Got it",
+   do NOT repeat their birthday back, and do NOT confirm it out loud.
+
+4. Birthplace — on the turn after they gave a full birthday: call `save_birth_date` with
+   YYYY-MM-DD (no spoken confirmation), and your only spoken line is EXACTLY:
+   "What country and city were you born in?"
+   Speak every word of that question, then stop. Never say "Got it" or read the date back.
+   When they have given country and city, go to step 5 on your next turn — again no "Got it"
+   and no repeating their answer.
+
+5. Wrap up — on the turn after they gave birthplace: call `save_birthplace` (no spoken
+   confirmation), and your only spoken line is EXACTLY:
    "Thanks, {{student_name}}! You're all set to start your UC application."
-   Don't react to their last answer or add anything before or after it in that turn. After saying
-   it, stop talking: the app hangs up for you a few seconds later. This step is important.
+   Don't add anything before or after it. After saying it, stop talking: the app hangs up a
+   few seconds later.
 
 If the student asks for an interesting or fun fact, tell them the UC campuses don't use SAT or
 ACT scores for admission.
 
 # Chat path
-Use this path only when the student chose to chat about something specific in step 1.
-- If they haven't said what yet, ask what's on their mind in a few words, then wait for their
-  question. Don't suggest topics or start any of steps 2 to 5 on your own.
+Use this path only when the student chose to chat about something specific in the branch.
+- If they haven't said what yet, ask what's on their mind in a few words, then wait. Don't suggest
+  topics or start any Apply-path steps on your own.
 - Answer each question in one to three short sentences. Use what Track2College knows about the
   student and the About Track2College facts, and point to the right part of the app or guide
-  when that helps. Then stop and let them ask the next thing; at most, ask "Anything else?"
-- Don't ask for their birthday, birthplace, or start term in this path, and don't call
-  `save_birth_date` or `save_birthplace`.
-- If they ask for help applying, switch to step 2 and continue with steps 2 to 5.
-- If they say they're done or say goodbye, your whole final turn is exactly this line and nothing
-  else: "Thanks, {{student_name}}! Come back any time." After saying it, stop talking: the app hangs up for you a few seconds later.
-  This step is important.
-- All the guardrails below still apply. For money questions you may also say that Penny, the
+  when that helps. Then stop; at most, ask "Anything else?"
+- Don't ask for birthday, birthplace, or start term, and don't call `save_birth_date` or
+  `save_birthplace`.
+- If they ask for help applying, switch to Apply path step 2 and continue through step 5.
+- If they say they're done or say goodbye, your whole final turn is EXACTLY:
+  "Thanks, {{student_name}}! Come back any time."
+  After saying it, stop talking: the app hangs up a few seconds later.
+- All guardrails below still apply. For money questions you may also say that Penny, the
   financial aid guide in the Chatbot, can help.
 
 # Guardrails
+- Never say "Got it" or read the student's birthday or birthplace back to them. Save with the
+  tool and move on: birthday → birthplace question; birthplace → wrap-up line.
+- On Apply-path steps 4 and 5 you may call the save tool in the same turn as the scripted spoken
+  line. Speak that full line to the end; do not add confirmation words. Tool calls mid-sentence
+  still cut off your voice, so finish the scripted line — never trail off into the tool.
+- Finish every sentence you start. Never stop mid-word or mid-list.
 - Don't bring up financial aid, the FAFSA, the California Dream Act, fee waivers, or money. If the
   student asks, say their school counselor can help with that, then continue.
 - If the student doesn't want to share their birthday or birthplace, that's fine: skip it, don't
@@ -135,8 +160,9 @@ COUNSELOR_CONFIG = {
         },
         "prompt": {
             "prompt": COUNSELOR_PROMPT,
+            # Slightly lower temperature so Apply-path scripted lines stay stable across calls.
             "llm": "gemini-2.5-flash",
-            "temperature": 0.5,
+            "temperature": 0.35,
             # No end_call tool: the browser hangs up a few seconds after the goodbye has finished
             # playing (VoiceCounselor.tsx), so the call never cuts off mid-sentence.
             "built_in_tools": {},
@@ -145,12 +171,16 @@ COUNSELOR_CONFIG = {
                 {
                     "type": "client",
                     "name": "save_birth_date",
-                    "description": "Saves the student's date of birth once they've said the month, day, and year.",
+                    "description": (
+                        "Call on the birthplace-question turn after the student already gave month, "
+                        "day, and year. Do not speak a confirmation or repeat the date — only the "
+                        "birthplace question is spoken in that turn."
+                    ),
                     "expects_response": False,
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "birth_date": {"type": "string", "description": "Date of birth as YYYY-MM-DD, e.g. 2008-03-14."},
+                            "birth_date": {"type": "string", "description": "Birthday as YYYY-MM-DD, e.g. 2008-03-14."},
                         },
                         "required": ["birth_date"],
                     },
@@ -158,13 +188,17 @@ COUNSELOR_CONFIG = {
                 {
                     "type": "client",
                     "name": "save_birthplace",
-                    "description": "Saves the country and city the student was born in.",
+                    "description": (
+                        "Call on the wrap-up turn after the student already gave country and city. "
+                        "Do not speak a confirmation or repeat their answer — only the wrap-up "
+                        "line is spoken in that turn."
+                    ),
                     "expects_response": False,
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "birth_country": {"type": "string", "description": "Country of birth, e.g. United States."},
-                            "birth_city": {"type": "string", "description": "City of birth, e.g. San Jose."},
+                            "birth_country": {"type": "string", "description": "Country, e.g. United States."},
+                            "birth_city": {"type": "string", "description": "City, e.g. San Jose."},
                         },
                         "required": ["birth_country", "birth_city"],
                     },
@@ -201,9 +235,55 @@ def counselor_agent_id() -> str:
     return agent_id
 
 
+CREDITS_MESSAGE = (
+    "ElevenLabs is out of credits, so Jordan can't take calls right now. Try again later."
+)
+
+# Voice burns characters quickly; treat a nearly empty free-tier balance as out of credits.
+_CREDITS_HEADROOM = 200
+
+
+def _looks_like_credits(text: str) -> bool:
+    lower = text.lower()
+    return any(
+        tip in lower
+        for tip in (
+            "quota",
+            "credit",
+            "payment",
+            "billing",
+            "out of tokens",
+            "character limit",
+            "insufficient",
+            "limit exceeded",
+        )
+    )
+
+
+def _subscription_exhausted() -> bool:
+    """True when the ElevenLabs workspace has no (or almost no) TTS characters left."""
+    try:
+        sub = elevenlabs.user.get().subscription
+        limit = int(getattr(sub, "character_limit", 0) or 0)
+        count = int(getattr(sub, "character_count", 0) or 0)
+        if limit <= 0:
+            return False
+        return count >= max(0, limit - _CREDITS_HEADROOM)
+    except Exception as error:
+        print(f"[voice] Could not check ElevenLabs usage: {error}")
+        return False
+
+
 def counselor_session_token() -> str:
     """A one-time WebRTC token for the browser to start a call with the practice counselor."""
-    return elevenlabs.conversational_ai.conversations.get_webrtc_token(agent_id=counselor_agent_id()).token
+    if _subscription_exhausted():
+        raise RuntimeError(CREDITS_MESSAGE)
+    try:
+        return elevenlabs.conversational_ai.conversations.get_webrtc_token(agent_id=counselor_agent_id()).token
+    except Exception as error:
+        if _looks_like_credits(str(error)) or _subscription_exhausted():
+            raise RuntimeError(CREDITS_MESSAGE) from error
+        raise
 
 
 def counselor_call_problem(conversation_id: str) -> str | None:
@@ -214,6 +294,7 @@ def counselor_call_problem(conversation_id: str) -> str | None:
         return None
     reason = str(getattr(error, "reason", "") or "")
     print(f"[voice] Call {conversation_id} failed: {reason}")
-    if "quota_exceeded" in reason or "quota" in reason.lower():
-        return "Jordan can't take calls right now because the voice service is out of credits. Try again later."
+    # Out-of-credits often shows up as a generic "not available" once the key is spent.
+    if _looks_like_credits(reason) or _subscription_exhausted():
+        return CREDITS_MESSAGE
     return "Jordan couldn't take the call. Try again in a moment."

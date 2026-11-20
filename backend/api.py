@@ -470,12 +470,22 @@ class CounselorCallProblemRequest(BaseModel):
 def agent_counselor_voice(student: Student = Depends(current_student)) -> CounselorVoiceResponse:
     """Starts a voice call with the ElevenLabs practice counselor; the key stays on the server."""
     try:
-        from voice import counselor_session_token
+        from voice import CREDITS_MESSAGE, counselor_session_token
 
         return CounselorVoiceResponse(conversation_token=counselor_session_token())
     except Exception as error:
         print(f"[voice] Could not start the counselor call: {error}")
-        raise HTTPException(status_code=502, detail="Couldn't reach the voice counselor. Please try again.")
+        detail = str(error)
+        lower = detail.lower()
+        if (
+            "ElevenLabs is out of credits" in detail
+            or "quota" in lower
+            or "credit" in lower
+            or "out of tokens" in lower
+            or "character limit" in lower
+        ):
+            raise HTTPException(status_code=502, detail=CREDITS_MESSAGE) from error
+        raise HTTPException(status_code=502, detail="Couldn't reach the voice counselor. Please try again.") from error
 
 
 @app.post("/agent/counselor/voice/problem")
