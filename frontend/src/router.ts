@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-export const ROUTES = ["profile", "advisor", "map"] as const;
+export const ROUTES = ["profile", "advisor"] as const;
 export type Route = (typeof ROUTES)[number];
 
 export interface Location {
@@ -15,7 +15,7 @@ export interface Location {
  */
 const LEGACY_PAGES = new Set(["materials", "insights", "overview", "home", "explore"]);
 /** The Apply page was folded into the chatbot (story mode's Review & Apply and Financial Aid steps). */
-const RETIRED_TO_ADVISOR = new Set(["agent"]);
+const RETIRED_TO_ADVISOR = new Set(["agent", "map"]);
 const LEGACY_SECTION: Record<string, string> = { essays: "essays", transcript: "academics", plan: "academics" };
 
 export function parseLocation(hash: string): Location {

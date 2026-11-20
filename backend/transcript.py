@@ -8,6 +8,7 @@ import base64
 import binascii
 import io
 import json
+import re
 
 from pypdf import PdfReader
 
@@ -20,6 +21,24 @@ MIN_TEXT_CHARS = 40
 LEVELS = {"regular", "honors", "ap", "ib", "dual-enrollment"}
 AREAS = {"a", "b", "c", "d", "e", "f", "g", "none"}
 GRADE_LEVELS = {"9", "10", "11", "12", "other"}
+US_STATE_CODES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA",
+    "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK",
+    "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC",
+}
+US_STATE_NAMES = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR", "california": "CA", "colorado": "CO",
+    "connecticut": "CT", "delaware": "DE", "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
+    "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS", "kentucky": "KY", "louisiana": "LA",
+    "maine": "ME", "maryland": "MD", "massachusetts": "MA", "michigan": "MI", "minnesota": "MN",
+    "mississippi": "MS", "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
+    "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY", "north carolina": "NC",
+    "north dakota": "ND", "ohio": "OH", "oklahoma": "OK", "oregon": "OR", "pennsylvania": "PA",
+    "rhode island": "RI", "south carolina": "SC", "south dakota": "SD", "tennessee": "TN", "texas": "TX",
+    "utah": "UT", "vermont": "VT", "virginia": "VA", "washington": "WA", "west virginia": "WV",
+    "wisconsin": "WI", "wyoming": "WY", "district of columbia": "DC",
+}
+STATE_LINE = re.compile(r"(?im)^(?:state|st\.?)\s*[:\-]\s*([A-Za-z .]{2,40})\s*$")
 
 
 class TranscriptError(ValueError):
@@ -42,17 +61,36 @@ RULES:
    e = language other than English, f = visual & performing arts, g = college-prep elective,
    none = PE, health, study hall, TA, and other non-academic courses.
 7. "reported_gpa": copy GPAs printed on the transcript, else "".
-8. Feedback ("summary", "strengths", "concerns") must be based only on the transcript: course
+8. "state": the school's US state as a 2-letter code (e.g. "CA") when the transcript shows it
+   (a "State:" line, address, or school location). Use "" if unknown. Never invent a state.
+9. Feedback ("summary", "strengths", "concerns") must be based only on the transcript: course
    rigor, grade trends, gaps in A–G subjects. Plain, encouraging language for a student.
 
 Respond with ONLY a JSON object, no markdown fences:
 {
-  "student_name": "", "school": "",
+  "student_name": "", "school": "", "state": "",
   "reported_gpa": {"unweighted": "", "weighted": ""},
   "courses": [{"name": "", "grade_level": "10", "term": "Fall", "grade": "A", "level": "regular", "area": "b", "semesters": 1}],
   "summary": "2-3 sentences", "strengths": ["..."], "concerns": ["..."]
 }
 """
+
+
+def normalize_state(raw: str) -> str:
+    """Map transcript state text to a 2-letter US code, or ""."""
+    value = text(raw).strip()
+    if not value:
+        return ""
+    upper = value.upper()
+    if upper in US_STATE_CODES:
+        return upper
+    return US_STATE_NAMES.get(value.lower(), "")
+
+
+def state_from_text(transcript_text: str) -> str:
+    """Deterministic fallback when the model skips an explicit State: line."""
+    match = STATE_LINE.search(transcript_text)
+    return normalize_state(match.group(1)) if match else ""
 
 
 def _decode(content_base64: str) -> bytes:
@@ -139,9 +177,11 @@ def analyze_transcript(file_name: str, mime_type: str, content_base64: str) -> d
         raise TranscriptError("We couldn't find any courses in that file. Is it a high school transcript?")
 
     gpa = data.get("reported_gpa") if isinstance(data.get("reported_gpa"), dict) else {}
+    state = normalize_state(data.get("state") or "") or state_from_text(transcript_text)
     return {
         "student_name": text(data.get("student_name")),
         "school": text(data.get("school")),
+        "state": state,
         "reported_gpa": {"unweighted": text(gpa.get("unweighted")), "weighted": text(gpa.get("weighted"))},
         "courses": courses,
         "summary": text(data.get("summary")),

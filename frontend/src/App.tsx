@@ -1,19 +1,18 @@
 import type { Mentor } from "./game/characters";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { checkHealth } from "./api";
 import { AuthProvider, useAuth } from "./auth";
 import { ProfileProvider, useProfile } from "./profile";
 import { PiqDraftsProvider } from "./journey/usePiqDrafts";
-import { navigate, useLocation, type Route } from "./router";
+import { useLocation, type Route } from "./router";
 import { AuthPage } from "./pages/AuthPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { Advisor } from "./pages/Advisor";
 import { PlanningProvider } from "./planning";
-import { GameProvider } from "./game/GameProvider";
+import { GoogleActivitiesProvider } from "./googleActivities";
 import { AppTopbar } from "./components/AppTopbar";
 import { Logo } from "./components/icons";
 import { OnboardingPage } from "./onboarding/OnboardingPage";
-import { JourneyMap } from "./journey/JourneyMap";
 import { isOnboardingComplete } from "./onboarding/logic";
 
 export type Theme = "light" | "dark";
@@ -35,7 +34,6 @@ export interface Handoff extends AskOptions {
 const TITLES: Record<Route, string> = {
   profile: "Profile",
   advisor: "Advisor",
-  map: "UC Journey Map",
 };
 
 function useTheme() {
@@ -94,11 +92,8 @@ function GatedApp({
   const { profile } = useProfile();
   const { route, param } = useLocation();
   const [handoff, setHandoff] = useState<Handoff | null>(null);
+  const [mapOpen, setMapOpen] = useState(false);
   const complete = isOnboardingComplete(profile);
-  // Where the map's Back button returns to.
-  const lastRoute = useRef<Route>("advisor");
-  if (route !== "map") lastRoute.current = route;
-
   const askAdvisor = useCallback((text: string, options?: AskOptions) => {
     setHandoff({ id: crypto.randomUUID(), text, ...options });
     window.location.hash = "/advisor";
@@ -108,6 +103,10 @@ function GatedApp({
     if (!complete) return;
     if (route !== "advisor") document.title = `${TITLES[route]} · Track2College`;
   }, [route, complete]);
+
+  useEffect(() => {
+    if (route !== "advisor") setMapOpen(false);
+  }, [route]);
 
   if (!complete) {
     return (
@@ -125,9 +124,15 @@ function GatedApp({
     <div className="shell shell-immersive">
       <main className="page">
         <AppTopbar route={route} health={health} theme={theme} onToggleTheme={toggleTheme} />
-        {route === "map" && <JourneyMap userId={userId} onBack={() => navigate(lastRoute.current)} />}
         {route === "profile" && <ProfilePage section={param} onAsk={askAdvisor} />}
-        <Advisor userId={userId} visible={route === "advisor"} onHealth={setHealth} handoff={handoff} />
+        <Advisor
+          userId={userId}
+          visible={route === "advisor"}
+          onHealth={setHealth}
+          handoff={handoff}
+          mapOpen={mapOpen}
+          onMapOpenChange={setMapOpen}
+        />
       </main>
     </div>
   );
@@ -144,11 +149,11 @@ function Shell() {
   return (
     <ProfileProvider key={account.id} userId={account.id} name={account.name} fallback={<LoadingScreen />}>
       <PlanningProvider userId={account.id}>
-        <GameProvider userId={account.id}>
+        <GoogleActivitiesProvider userId={account.id}>
           <PiqDraftsProvider>
             <GatedApp userId={account.id} theme={theme} toggleTheme={toggleTheme} health={health} setHealth={setHealth} />
           </PiqDraftsProvider>
-        </GameProvider>
+        </GoogleActivitiesProvider>
       </PlanningProvider>
     </ProfileProvider>
   );

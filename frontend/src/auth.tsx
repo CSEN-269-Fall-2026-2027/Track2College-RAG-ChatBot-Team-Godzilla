@@ -29,11 +29,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let unsubscribe = () => {};
     let cancelled = false;
     getStore().then(async (store) => {
-      const initial = await store.auth.getSession();
       if (cancelled) return;
-      apply(initial);
-      setLoading(false);
-      unsubscribe = store.auth.onChange(apply);
+      let revision = 0;
+      // Subscribe before reading so a token refresh during startup cannot be missed.
+      unsubscribe = store.auth.onChange((next) => {
+        revision += 1;
+        if (!cancelled) apply(next);
+      });
+      const beforeRead = revision;
+      const initial = await store.auth.getSession();
+      if (!cancelled && revision === beforeRead) apply(initial);
+    }).catch((error) => {
+      console.error("[auth] Couldn't restore the session:", error);
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
     });
     return () => {
       cancelled = true;

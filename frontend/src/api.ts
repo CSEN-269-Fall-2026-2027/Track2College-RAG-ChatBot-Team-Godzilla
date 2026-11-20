@@ -1,4 +1,4 @@
-import type { AgArea, CourseLevel, CoursePlan, Fit, ProfileAnalysis, Transcript, TranscriptCourse } from "./types";
+import type { AgArea, CourseLevel, Transcript, TranscriptCourse } from "./types";
 
 export const API_BASE = (import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
 
@@ -40,6 +40,17 @@ function authHeaders(): Record<string, string> {
   return headers;
 }
 
+async function readError(response: Response): Promise<string> {
+  let detail = `The server returned an error (${response.status}).`;
+  try {
+    const body = await response.json();
+    if (typeof body?.detail === "string") detail = body.detail;
+  } catch {
+    // Non-JSON error body; keep the status-based message.
+  }
+  return detail;
+}
+
 async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = { ...authHeaders(), "Content-Type": "application/json" };
 
@@ -51,18 +62,40 @@ async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promi
     throw new ApiError(`Couldn't reach the Track2College server at ${API_BASE}. Make sure the API is running.`, true);
   }
 
-  if (!response.ok) {
-    let detail = `The server returned an error (${response.status}).`;
-    try {
-      const body = await response.json();
-      if (typeof body?.detail === "string") detail = body.detail;
-    } catch {
-      // Non-JSON error body; keep the status-based message.
-    }
-    throw new ApiError(detail);
-  }
-
+  if (!response.ok) throw new ApiError(await readError(response));
   return response.json();
+}
+
+async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, { method: "GET", headers: authHeaders(), signal });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new ApiError(`Couldn't reach the Track2College server at ${API_BASE}. Make sure the API is running.`, true);
+  }
+  if (!response.ok) throw new ApiError(await readError(response));
+  return response.json();
+}
+
+export interface GoogleConnectionStatus {
+  connected: boolean;
+  googleEmail: string | null;
+  scopes: string[];
+  connectedAt: string | null;
+  configured: boolean;
+}
+
+export function getGoogleStatus(signal?: AbortSignal): Promise<GoogleConnectionStatus> {
+  return get("/google/status", signal);
+}
+
+export function startGoogleOAuth(signal?: AbortSignal): Promise<{ url: string }> {
+  return get("/google/oauth/start", signal);
+}
+
+export function disconnectGoogle(signal?: AbortSignal): Promise<{ ok: boolean }> {
+  return post("/google/disconnect", {}, signal);
 }
 
 export function sendChat(
@@ -74,21 +107,6 @@ export function sendChat(
   mode: string | null = null,
 ): Promise<ChatResponse> {
   return post("/chat", { query, session_id: sessionId, profile_context: profileContext || null, persona, mode }, signal);
-}
-
-export function analyzeProfile(
-  profileSummary: string,
-  colleges: string[],
-  majors: string[],
-  signal?: AbortSignal,
-): Promise<Omit<ProfileAnalysis, "generatedAt" | "profileHash">> {
-  return post<{
-    summary: string;
-    strengths: string[];
-    gaps: string[];
-    colleges: { name: string; fit: Fit; reasoning: string; sources: string[] }[];
-    actions: { title: string; detail: string; timeframe: string }[];
-  }>("/profile/analysis", { profile_summary: profileSummary, colleges, majors }, signal);
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -103,6 +121,7 @@ function fileToBase64(file: File): Promise<string> {
 interface TranscriptResponse {
   student_name: string;
   school: string;
+  state?: string;
   reported_gpa: { unweighted: string; weighted: string };
   courses: { name: string; grade_level: TranscriptCourse["gradeLevel"]; term: string; grade: string; level: CourseLevel; area: AgArea; semesters: number }[];
   summary: string;
@@ -122,6 +141,7 @@ export async function analyzeTranscript(
   return {
     studentName: result.student_name,
     school: result.school,
+    state: (result.state || "").trim().toUpperCase(),
     reportedGpa: result.reported_gpa,
     courses: result.courses.map((c) => ({
       id: crypto.randomUUID(),
@@ -137,53 +157,6 @@ export async function analyzeTranscript(
     strengths: result.strengths,
     concerns: result.concerns,
   };
-}
-
-export interface CoursePlanRequest {
-  college: string;
-  major: string;
-  gradeLevel: string;
-  completedCourses: { name: string; gradeLevel: string; level: CourseLevel; area: AgArea; grade: string }[];
-  profileSummary: string;
-}
-
-export function buildCoursePlan(
-  input: CoursePlanRequest,
-  signal?: AbortSignal,
-): Promise<Omit<CoursePlan, "id" | "createdAt" | "college" | "major">> {
-  return post(
-    "/plan/courses",
-    {
-      college: input.college,
-      major: input.major,
-      grade_level: input.gradeLevel,
-      completed_courses: input.completedCourses.map((c) => ({
-        name: c.name,
-        grade_level: c.gradeLevel,
-        level: c.level,
-        area: c.area,
-        grade: c.grade,
-      })),
-      profile_summary: input.profileSummary,
-    },
-    signal,
-  );
-}
-
-export interface EssayResult {
-  title: string;
-  essay: string;
-  ideas: { title: string; angle: string; why_it_fits: string }[];
-  tips: string[];
-}
-
-export function generateEssay(
-  prompt: string,
-  profileSummary: string,
-  mode: "draft" | "ideas",
-  signal?: AbortSignal,
-): Promise<EssayResult> {
-  return post("/essay/generate", { prompt, profile_summary: profileSummary, mode }, signal);
 }
 
 export interface PiqDraftResult {
@@ -209,10 +182,17 @@ export async function generatePiqDrafts(
   return result.essays.map((e) => ({ id: e.id, question: e.question, essay: e.essay, wordCount: e.word_count }));
 }
 
-/** Reads what the student told Milo into rows for their activities list. */
-export async function extractActivities(notes: string, section: string, signal?: AbortSignal): Promise<{ name: string; role: string; description: string; level: string }[]> {
-  const result = await post<{ activities: { name: string; role: string; description: string; level: string }[] }>("/activities/extract", { notes, section }, signal);
-  return result.activities;
+export interface GoogleActivitySuggestion {
+  name: string;
+  role: string;
+  description: string;
+  level: string;
+  section: string;
+}
+
+/** Suggests activities from the student's connected Gmail + Calendar. */
+export function suggestGoogleActivities(signal?: AbortSignal): Promise<GoogleActivitySuggestion[]> {
+  return get<{ activities: GoogleActivitySuggestion[] }>("/google/activities", signal).then((r) => r.activities);
 }
 
 export interface FoundCounselor {
@@ -310,6 +290,8 @@ export interface UcRun {
   piq: boolean;
   /** Personal insight questions entered this run, and ones left alone (with why). */
   piq_report: { entered: string[]; skipped: string[]; removed?: string[] };
+  /** The server is looking for UC's emailed code in the student's Gmail (no need to ask yet). */
+  code_search?: boolean;
 }
 
 /** A chosen personal insight question (UC's numbering, 1–8) and the student's saved answer. */
@@ -319,8 +301,8 @@ export interface UcPiq {
   text: string;
 }
 
-/** "local": a Chrome window on this computer. "cloud": a Browserbase browser the student uses through its live view. */
-export type UcBrowser = "local" | "cloud";
+/** Browserbase browser the student uses through its live view. */
+export type UcBrowser = "cloud";
 
 /** Stops the UC run; in cloud mode the server releases the Browserbase session. */
 export async function cancelUcAccount(runId: string): Promise<void> {

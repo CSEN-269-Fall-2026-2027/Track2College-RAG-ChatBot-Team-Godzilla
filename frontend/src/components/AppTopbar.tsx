@@ -46,7 +46,7 @@ export const AppTopbar = memo(function AppTopbar({ route, health, theme, onToggl
   const initials = (name.trim()[0] ?? "?").toUpperCase() + (profile.basics.lastName.trim()[0] ?? "").toUpperCase();
 
   return (
-    <header className="topbar app-topbar">
+    <header className={`topbar app-topbar is-${route}`}>
       <div className="topbar-left">
         <a className="advisor-brand" href={href("advisor")} aria-label="Track2College home">
           <Logo size={26} />

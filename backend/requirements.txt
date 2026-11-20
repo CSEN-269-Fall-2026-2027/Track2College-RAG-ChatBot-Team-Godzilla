@@ -18,3 +18,9 @@ playwright
 
 # Text-to-speech
 elevenlabs==2.75.0
+
+# Connect Google: OAuth + readonly Gmail / Calendar / Drive (tokens encrypted at rest)
+google-auth>=2.29.0
+google-auth-oauthlib>=1.2.0
+google-api-python-client>=2.127.0
+cryptography>=42.0.0

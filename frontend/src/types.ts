@@ -191,6 +191,18 @@ export interface PiqWork {
   draft?: { text: string; words: number; generatedAt: number; requested?: boolean };
 }
 
+/** One activity or honor waiting in the Google waitlist (see UcJourneyState.googleWaitlist). */
+export interface WaitlistItem {
+  id: string;
+  /** Activities, volunteering, job, or awards (honors and awards). */
+  section: ActivitySectionId;
+  name: string;
+  role: string;
+  description: string;
+  /** Awards only: school, regional, state, national, or international. */
+  level: string;
+}
+
 export interface UcJourneyState {
   /** Chosen Personal Insight Question id → status (at most four). */
   piqs: Record<string, PiqStatus>;
@@ -212,6 +224,11 @@ export interface UcJourneyState {
   activitySurvey?: Record<string, ActivitySurveyAnswer>;
   /** Student said they're done with (or skipping) activities on the Profile page. */
   activitiesReviewed?: boolean;
+  /**
+   * What the Google scan found, waiting for the student's OK. Not in the profile yet: Milo's Confirm
+   * moves it into the activities and awards lists; Edit opens a popup to change or add to it first.
+   */
+  googleWaitlist?: WaitlistItem[];
   /** Apply: what the agent has done for the student after story mode. */
   agent?: AgentState;
 }
@@ -232,17 +249,12 @@ export interface CallLine {
 /** How Sage helps on story mode's Review & Apply step. */
 export type ReviewMode = "counselor" | "assistant";
 
-/** What Penny helps with on story mode's Financial Aid step. */
-export type AidMode = "fafsa" | "scholarships";
-
 /** A story step's mode, sent with the chat so the guide's prompt follows it. */
-export type StoryMode = ReviewMode | AidMode;
+export type StoryMode = ReviewMode;
 
 export interface AgentState {
   /** Story mode's Review & Apply step: Counselor or Application assistant (switchable any time). */
   reviewMode?: ReviewMode;
-  /** Story mode's Financial Aid step: FAFSA or Scholarships (switchable any time). */
-  aidMode?: AidMode;
   /** Which counselor tool is open: the AI voice call or the student's own school counselor. */
   counselorMode?: "virtual" | "school";
   /** Counselor the student confirmed. */
@@ -251,6 +263,8 @@ export interface AgentState {
   counselorEmail?: { subject: string; body: string; openedAt?: number; sentAt?: number };
   /** Last voice call with the practice counselor; the email is drafted from it. */
   counselorCall?: { endedAt: number; lines: CallLine[] };
+  /** Student clicked "Done with counselor" after a full meeting with Jordan; that finishes the meeting task. */
+  counselorDoneAt?: number;
   /** Student marked the FAFSA / CA Dream Act Application submitted. */
   fafsaDoneAt?: number;
   /** Student marked their UC Statement of Intent to Register submitted. */
@@ -340,41 +354,11 @@ export interface Transcript {
   storagePath: string | null;
   studentName: string;
   school: string;
+  /** School's US state (2-letter code) when the transcript lists it. */
+  state?: string;
   reportedGpa: { unweighted: string; weighted: string };
   courses: TranscriptCourse[];
   summary: string;
   strengths: string[];
   concerns: string[];
-}
-
-export interface PlannedCourse {
-  name: string;
-  area: AgArea;
-  level: CourseLevel;
-  status: "completed" | "planned";
-  note: string;
-}
-
-export interface CoursePlan {
-  id: string;
-  college: string;
-  major: string;
-  createdAt: number;
-  summary: string;
-  requirements: { area: string; detail: string }[];
-  years: { grade: HighSchoolGrade; courses: PlannedCourse[] }[];
-  tips: string[];
-  sources: string[];
-}
-
-export type Fit = "reach" | "target" | "likely" | "unknown";
-
-export interface ProfileAnalysis {
-  summary: string;
-  strengths: string[];
-  gaps: string[];
-  colleges: { name: string; fit: Fit; reasoning: string; sources: string[] }[];
-  actions: { title: string; detail: string; timeframe: string }[];
-  generatedAt: number;
-  profileHash: string;
 }

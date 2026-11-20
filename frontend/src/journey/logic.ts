@@ -1,4 +1,4 @@
-import { virtualCounselorDone } from "../agent/callState";
+import { counselorMeetingDone } from "../agent/callState";
 import { COLLEGE_NAMES } from "../colleges";
 import type { ActivityCategory, ActivitySectionId, ActivitySectionState, AgentState, PiqStatus, Profile, TargetCollege, UcJourneyState } from "../types";
 import { chosenPiqs, essayDone, essaysDoneCount } from "./piqs";
@@ -19,18 +19,6 @@ export const PIQ_REQUIRED = 4;
 /** UC activity/award description limit, in characters. */
 export const ACTIVITY_DESC_LIMIT = 350;
 export const UC_APPLY_URL = "https://apply.universityofcalifornia.edu/";
-
-/** One plain sentence on what each PIQ is really about, for Quill's opening line. */
-export const PIQ_ONE_LINERS: Record<string, string> = {
-  leadership: "It's about a time you made things better for a group, with or without a title.",
-  creativity: "It's about how you solve problems or make things in your own way.",
-  talent: "It's about something you're really good at and how you built it.",
-  opportunity: "It's about a chance you made the most of, or a school barrier you worked around.",
-  challenge: "It's about the hardest thing you've faced and what you did about it.",
-  subject: "It's about a subject you love and how you've taken it beyond class.",
-  community: "It's about what you've done to make your school or community better.",
-  standout: "It's about what makes you different that the rest of your application doesn't show.",
-};
 
 export const PIQ_PROMPTS = [
   // Exact wording from UC Admissions (admission.universityofcalifornia.edu → Personal insight questions).
@@ -72,13 +60,6 @@ export const ACTIVITY_SECTIONS: { id: ActivitySectionId; category: ActivityCateg
   { id: "awards", category: "award", question: "do you have any honors or awards to report?", turnId: "awards-count" },
 ];
 
-const SECTION_LABEL: Record<ActivitySectionId, string> = {
-  activities: "Activities",
-  volunteering: "Volunteering",
-  job: "Jobs",
-  awards: "Honors and awards",
-};
-
 export function activitySection(j: UcJourneyState, id: ActivitySectionId): ActivitySectionState {
   return id === "activities" ? { count: j.activityCount, notes: j.activityNotes } : (j.activitySections?.[id] ?? {});
 }
@@ -112,13 +93,6 @@ export function activitySectionAnswered(profile: Profile, id: ActivitySectionId)
   return activitySectionDone(journeyOf(profile), id) || activitySectionEntries(profile, id) > 0;
 }
 
-/** Restarting Milo's chat clears the number for the question in progress. Finished questions stay. */
-export function clearOpenActivityAnswer(profile: Profile): Profile {
-  const j = journeyOf(profile);
-  const open = ACTIVITY_SECTIONS.find((s) => !activitySectionAnswered(profile, s.id));
-  return open && activitySection(j, open.id).count !== undefined ? { ...profile, ucJourney: withActivitySection(j, open.id, {}) } : profile;
-}
-
 export function activitySurveyDone(j: UcJourneyState) {
   return ACTIVITY_QUESTIONS.every((q) => {
     const a = j.activitySurvey?.[q.id];
@@ -127,6 +101,7 @@ export function activitySurveyDone(j: UcJourneyState) {
 }
 
 /** Activities step: questions answered (story or Profile page), and every description fits UC's limit. */
+// These legacy fields are read only to keep students who finished the old Milo flow from losing progress.
 export function activitiesStatus(profile: Profile) {
   const j = journeyOf(profile);
   const acts = profile.activities;
@@ -140,17 +115,6 @@ export function activitiesStatus(profile: Profile) {
   return { answered, fits, done: answered && fits };
 }
 
-/** Starts the activities step over: everything told to Milo and the whole list and awards go. */
-export function resetActivitiesStep(profile: Profile): Profile {
-  const { activityCount: _count, activityNotes: _notes, activitySections: _sections, activitySurvey: _survey, activitiesReviewed: _reviewed, ...rest } = journeyOf(profile);
-  return { ...profile, activities: [], awards: [], ucJourney: rest };
-}
-
-export const REVIEW_MANUAL = [
-  { id: "supplements", label: "Checked campus or major supplements", detail: "Some majors ask for extra steps (portfolios, auditions, supplemental questions). Check each campus's major page." },
-  { id: "fees", label: "Planned application fees or a fee waiver", detail: "UC charges a fee per campus; eligible students can get a fee waiver for up to four campuses inside the application." },
-] as const;
-
 export function emptyJourney(): UcJourneyState {
   return { piqs: {}, checks: {}, submittedAt: null, followUps: {} };
 }
@@ -158,10 +122,6 @@ export function emptyJourney(): UcJourneyState {
 export function journeyOf(profile: Profile): UcJourneyState {
   const j = profile.ucJourney;
   return { ...emptyJourney(), ...j, piqs: { ...j?.piqs }, checks: { ...j?.checks }, followUps: { ...j?.followUps }, activitySurvey: { ...j?.activitySurvey } };
-}
-
-export function wordCount(text: string) {
-  return text.trim() ? text.trim().split(/\s+/).length : 0;
 }
 
 export const isUc = (c: TargetCollege) => COLLEGE_NAMES.some((n) => n.toLowerCase() === c.name.toLowerCase());
@@ -175,10 +135,15 @@ export interface Task {
   optional?: boolean;
 }
 
-export type CheckpointId = "profile" | "ucs" | "activities" | "essays" | "review" | "aid";
+/** The journey ends at Apply: once the application is in, the student is done (Financial Aid is no longer a stop). */
+export type CheckpointId = "profile" | "ucs" | "activities" | "essays" | "counselor" | "apply";
 
-/** Checkpoints after Review & Apply (see storyComplete). */
-export const AFTER_APPLY: CheckpointId[] = ["review", "aid"];
+/** The two application stops: meet your counselors, then apply. Their guides are the Counselor and Application assistant. */
+export const REVIEW_STAGES: CheckpointId[] = ["counselor", "apply"];
+export const isReviewStage = (id: string): boolean => (REVIEW_STAGES as string[]).includes(id);
+
+/** Checkpoints from the counselor stop on (see storyComplete). */
+export const AFTER_APPLY: CheckpointId[] = [...REVIEW_STAGES];
 
 export interface Checkpoint {
   id: CheckpointId;
@@ -223,7 +188,14 @@ export function computeJourney(profile: Profile, sections: Record<string, number
       title: "Choose UCs",
       short: "Campuses",
       tasks: [
-        { id: "campus", label: "Pick your UC campuses", done: ucs.length > 0, detail: `${ucs.length} of 9 campuses saved` },
+        {
+          id: "campus",
+          label: "Pick your UC campuses",
+          // Onboarding prefills all nine; that only counts once Theo has the student confirm them,
+          // so the chat always stops at Theo before Activities (with or without a major).
+          done: ucs.length > 0 && (ucs.length < 9 || !!j.checks?.["ucs-confirmed"]),
+          detail: `${ucs.length} of 9 campuses saved`,
+        },
         {
           id: "majors",
           label: "Choose your major",
@@ -237,14 +209,8 @@ export function computeJourney(profile: Profile, sections: Record<string, number
       title: "Work on Activities List",
       short: "Activities",
       tasks: [
-        // One line per question with its answer. Students who finished another way (the old questions,
-        // or the Profile page) still get every check.
-        ...ACTIVITY_SECTIONS.map((s) => {
-          const entries = activitySectionEntries(profile, s.id);
-          const count = activitySection(j, s.id).count ?? (entries || undefined);
-          const answer = count === undefined ? "" : `: ${count >= 3 ? "3+" : count}`;
-          return { id: s.id, label: `${SECTION_LABEL[s.id]}${answer}`, done: activities.answered || activitySectionAnswered(profile, s.id) };
-        }),
+        // One list: activities (volunteering and jobs count as activities) and honors together, confirmed with Milo.
+        { id: "list", label: "Confirm your activities and honors", done: activities.answered },
         ...(activities.fits ? [] : [{ id: "limit", label: `Shorten descriptions to ${ACTIVITY_DESC_LIMIT} characters`, done: false }]),
       ],
     },
@@ -265,47 +231,27 @@ export function computeJourney(profile: Profile, sections: Record<string, number
     },
   ];
 
+  // Part 1: email your school counselor, then a full practice meeting with Jordan.
   raw.push({
-    id: "review",
-    title: "Review & Apply",
+    id: "counselor",
+    title: "Meet Your Counselor",
+    short: "Counselor",
+    tasks: [
+      { id: "emailCounselor", label: "Emailed your counselor", done: !!j.agent?.counselorEmail?.sentAt },
+      { id: "virtualCounselor", label: "Met with the virtual counselor", done: counselorMeetingDone(j.agent) },
+    ],
+  });
+
+  // Part 2: the Application assistant.
+  raw.push({
+    id: "apply",
+    title: "Apply to the UCs",
     short: "Apply",
     tasks: [
-      {
-        id: "virtualCounselor",
-        label: "Met with the virtual counselor",
-        done: virtualCounselorDone(j.agent?.counselorCall),
-      },
-      {
-        id: "emailCounselor",
-        label: "Emailed your counselor",
-        done: !!j.agent?.counselorEmail?.sentAt,
-      },
       // Saved login that UC accepted (verified code or a successful sign-in).
       { id: "account", label: "Created your UC account", done: !!ucAccountReady(j.agent?.ucAccount) },
       // Agent finished Personal insight (committed when the student closes the tool), or they marked submission by hand.
       { id: "submitted", label: "Applied to the UCs", done: !!j.agent?.ucAccount?.piqAt || j.submittedAt !== null },
-    ],
-  });
-
-  // Financial aid comes from the same answers as Profile → Cost & support.
-  const f = profile.preferences;
-  const noAidNeeded = f.needsAid === "no";
-  raw.push({
-    id: "aid",
-    title: "Financial Aid",
-    short: "Aid",
-    tasks: [
-      { id: "needs", label: "Tell us whether you'll need financial aid", done: f.needsAid !== "", detail: "“Not sure” is a fine answer." },
-      {
-        id: "fafsa",
-        label: "Submit the FAFSA or California Dream Act Application",
-        done: f.fafsa === "done",
-        detail: "It's how UC and California decide grants and aid. File early — aid deadlines come in the spring.",
-        // Students who won't use aid can still file, but it doesn't hold up this step.
-        optional: noAidNeeded,
-      },
-      { id: "income", label: "Share your household income range", done: f.incomeRange !== "", detail: "“Prefer not to say” is fine.", optional: true },
-      { id: "budget", label: "Set a yearly budget you can plan for", done: f.maxAnnualCost.trim() !== "", optional: true },
     ],
   });
 
@@ -344,5 +290,3 @@ export function toggleCampus(profile: Profile, name: string, id: () => string): 
       : [...profile.colleges, { id: id(), name, status: "researching", plan: "UC", deadline: "", notes: "", major: "" }],
   };
 }
-
-

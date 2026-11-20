@@ -5,6 +5,7 @@ import { STAGE_GUIDE } from "../journey/guides";
 import { GRID, mapLayout, planetPixels, routeLegs } from "../journey/planets";
 import type { Profile, UcJourneyState } from "../types";
 import { blankProfile } from "./fixtures";
+import { withAllUcs } from "../onboarding/logic";
 
 const fullBasics = { basics: 1, academics: 0, campuses: 0, finances: 0 };
 const none = { basics: 0, academics: 0, campuses: 0, finances: 0 };
@@ -40,7 +41,7 @@ function readyProfile(): Profile {
 describe("UC journey progress", () => {
   it("starts at checkpoint 1 with nothing complete for a blank student", () => {
     const j = computeJourney(blankProfile(), none, false);
-    expect(j.checkpoints.map((c) => c.title)).toEqual(["Basic Info", "Choose UCs", "Work on Activities List", "Four Essays", "Review & Apply", "Financial Aid"]);
+    expect(j.checkpoints.map((c) => c.title)).toEqual(["Basic Info", "Choose UCs", "Work on Activities List", "Four Essays", "Meet Your Counselor", "Apply to the UCs"]);
     expect(j.completeCount).toBe(0);
     expect(j.current).toBe(0);
   });
@@ -62,6 +63,22 @@ describe("UC journey progress", () => {
     expect(computeJourney(chosen, fullBasics, true).checkpoints[1].tasks[1].detail).toBe("Mathematics at every campus");
   });
 
+  it("stops at Theo after onboarding's nine UCs until they're confirmed, with or without a major", () => {
+    const base = withAllUcs({ ...blankProfile(), ucJourney: emptyJourney() });
+    for (const intendedMajor of ["", "Biology"]) {
+      const p = { ...base, goals: { ...base.goals, intendedMajor } };
+      const j = computeJourney(p, fullBasics, true);
+      expect(j.checkpoints[j.current].id).toBe("ucs");
+      expect(STAGE_GUIDE[j.checkpoints[j.current].id]).toBe("theo");
+    }
+    const confirmed = {
+      ...base,
+      goals: { ...base.goals, intendedMajor: "Biology" },
+      ucJourney: { ...emptyJourney(), checks: { "ucs-confirmed": true } },
+    };
+    expect(computeJourney(confirmed, fullBasics, true).checkpoints[1].complete).toBe(true);
+  });
+
   it("lists each essay on its own line in See tasks", () => {
     let j = emptyJourney();
     for (const q of ["leadership", "creativity", "talent", "community"]) j = togglePiq(j, q);
@@ -77,7 +94,7 @@ describe("UC journey progress", () => {
     expect(none.tasks[1]).toMatchObject({ label: "Essay 1: Not done", done: false });
   });
 
-  it("lists virtual counselor, email counselor, UC account and applying for Review & Apply", () => {
+  it("splits the application into two stops: counselor (email, then Jordan) and apply (account, then applying)", () => {
     const doneCall = {
       endedAt: 1,
       lines: [
@@ -88,26 +105,35 @@ describe("UC journey progress", () => {
         },
       ],
     };
-    const review = (agent: UcJourneyState["agent"], submittedAt: number | null = null) =>
-      computeJourney({ ...blankProfile(), ucJourney: { ...emptyJourney(), agent, submittedAt } }, fullBasics, true).checkpoints[4];
-    expect(review({}).tasks.map((t) => [t.label, t.done])).toEqual([
-      ["Met with the virtual counselor", false],
+    const stops = (agent: UcJourneyState["agent"], submittedAt: number | null = null) => {
+      const cps = computeJourney({ ...blankProfile(), ucJourney: { ...emptyJourney(), agent, submittedAt } }, fullBasics, true).checkpoints;
+      return { counselor: cps[4], apply: cps[5] };
+    };
+    expect(stops({}).counselor.id).toBe("counselor");
+    expect(stops({}).apply.id).toBe("apply");
+    expect(stops({}).counselor.tasks.map((t) => [t.label, t.done])).toEqual([
       ["Emailed your counselor", false],
+      ["Met with the virtual counselor", false],
+    ]);
+    expect(stops({}).apply.tasks.map((t) => [t.label, t.done])).toEqual([
       ["Created your UC account", false],
       ["Applied to the UCs", false],
     ]);
     // First check-in answer alone doesn't finish the virtual counselor task.
-    expect(review({ counselorCall: { endedAt: 1, lines: [{ role: "student", text: "I'm good" }] } }).tasks[0].done).toBe(false);
-    expect(review({ counselorCall: doneCall }).tasks[0].done).toBe(true);
-    expect(review({ counselorEmail: { subject: "", body: "", sentAt: 1 } }).tasks[1].done).toBe(true);
-    expect(review({ counselorEmail: { subject: "", body: "" } }).tasks[1].done).toBe(false);
+    expect(stops({ counselorCall: { endedAt: 1, lines: [{ role: "student", text: "I'm good" }] } }).counselor.tasks[1].done).toBe(false);
+    expect(stops({ counselorCall: doneCall }).counselor.tasks[1].done).toBe(false);
+    expect(stops({ counselorCall: doneCall, counselorDoneAt: 2 }).counselor.tasks[1].done).toBe(true);
+    // Only "I've sent the email" (sentAt) counts; opening Gmail doesn't.
+    expect(stops({ counselorEmail: { subject: "", body: "", sentAt: 1 } }).counselor.tasks[0].done).toBe(true);
+    expect(stops({ counselorEmail: { subject: "", body: "", openedAt: 1 } }).counselor.tasks[0].done).toBe(false);
+    expect(stops({ counselorCall: doneCall, counselorDoneAt: 2, counselorEmail: { subject: "", body: "", sentAt: 1 } }).counselor.complete).toBe(true);
     // Account needs a saved password that UC accepted.
-    expect(review({ ucAccount: { email: "a@b.c", generatedAt: 1, verifiedAt: 2 } }).tasks[2].done).toBe(false);
-    expect(review({ ucAccount: { email: "a@b.c", password: "x", generatedAt: 1, verifiedAt: 2 } }).tasks[2].done).toBe(true);
+    expect(stops({ ucAccount: { email: "a@b.c", generatedAt: 1, verifiedAt: 2 } }).apply.tasks[0].done).toBe(false);
+    expect(stops({ ucAccount: { email: "a@b.c", password: "x", generatedAt: 1, verifiedAt: 2 } }).apply.tasks[0].done).toBe(true);
     // Applied once the agent finishes PIQs (committed on tool close), or the student marks submission by hand.
-    expect(review({ ucAccount: { email: "a@b.c", password: "x", generatedAt: 1, piqAt: 3 } }).tasks[3].done).toBe(true);
-    expect(review({}, 5).tasks[3].done).toBe(true);
-    expect(review({}, 5).complete).toBe(false);
+    expect(stops({ ucAccount: { email: "a@b.c", password: "x", generatedAt: 1, piqAt: 3 } }).apply.tasks[1].done).toBe(true);
+    expect(stops({}, 5).apply.tasks[1].done).toBe(true);
+    expect(stops({}, 5).apply.complete).toBe(false);
   });
 
   it("flags activity descriptions over the 350-character limit", () => {
@@ -126,7 +152,7 @@ describe("UC journey progress", () => {
     expect(essays.complete).toBe(false);
   });
 
-  it("finishes Review & Apply once counselor, UC account, and apply are done", () => {
+  it("finishes the counselor and apply stops once email, Jordan, UC account, and apply are done", () => {
     const doneCall = {
       endedAt: 1,
       lines: [
@@ -142,56 +168,25 @@ describe("UC journey progress", () => {
     const before = computeJourney(p, fullBasics, true);
     expect(before.completeCount).toBe(4);
     expect(before.current).toBe(4);
+    expect(before.checkpoints[4].id).toBe("counselor");
     expect(before.checkpoints[4].complete).toBe(false);
 
     p.ucJourney = {
       ...p.ucJourney,
       agent: {
         counselorCall: doneCall,
+        counselorDoneAt: 2,
         counselorEmail: { subject: "Hi", body: "Hello", sentAt: 1 },
         ucAccount: { email: "a@b.c", password: "x", generatedAt: 1, verifiedAt: 2, signedInAt: 2, piqAt: 3 },
       },
     };
     const after = computeJourney(p, fullBasics, true);
     expect(after.checkpoints[4].complete).toBe(true);
-    expect(after.completeCount).toBe(5);
-    // Financial Aid is still open after applying.
-    expect(after.finished).toBe(false);
-    expect(after.checkpoints[after.current].id).toBe("aid");
-  });
-
-  it("finishes Financial Aid once the student answers the aid question and files", () => {
-    const p = readyProfile();
-    p.ucJourney = {
-      ...p.ucJourney!,
-      agent: {
-        counselorCall: {
-          endedAt: 1,
-          lines: [
-            { role: "student", text: "I'm good" },
-            {
-              role: "counselor",
-              text: "Thanks so much for talking with me today! When you're ready, you can go ahead with your UC application.",
-            },
-          ],
-        },
-        counselorEmail: { subject: "Hi", body: "Hello", sentAt: 1 },
-        ucAccount: { email: "a@b.c", password: "x", generatedAt: 1, verifiedAt: 2, piqAt: 3 },
-      },
-    };
-    p.preferences = { ...p.preferences, needsAid: "yes", fafsa: "in-progress" };
-    const aid = (q: typeof p) => computeJourney(q, fullBasics, true).checkpoints.find((c) => c.id === "aid")!;
-    expect(aid(p).complete).toBe(false);
-    p.preferences = { ...p.preferences, fafsa: "done" };
-    expect(aid(p).complete).toBe(true);
-    expect(computeJourney(p, fullBasics, true).finished).toBe(true);
-  });
-
-  it("doesn't require filing aid forms from students who say they won't need aid", () => {
-    const p = readyProfile();
-    p.preferences = { ...p.preferences, needsAid: "no", fafsa: "" };
-    const aid = computeJourney(p, fullBasics, true).checkpoints.find((c) => c.id === "aid")!;
-    expect(aid.complete).toBe(true);
+    expect(after.checkpoints[5].complete).toBe(true);
+    expect(after.completeCount).toBe(6);
+    // Applying is the end: the journey is officially done (no Financial Aid stop).
+    expect(after.finished).toBe(true);
+    expect(after.checkpoints.map((c) => c.id)).not.toContain("aid");
   });
 
   it("lets students work ahead (current = first incomplete)", () => {
@@ -204,7 +199,7 @@ describe("UC journey progress", () => {
 });
 
 describe("journey planet map", () => {
-  const ids = ["profile", "ucs", "activities", "essays", "review", "aid"] as const;
+  const ids = ["profile", "ucs", "activities", "essays", "counselor", "apply"] as const;
 
   it("draws every planet on the same grid, with the same outline and comparable weight", () => {
     const sizes = ids.map((id) => {
@@ -221,7 +216,7 @@ describe("journey planet map", () => {
       return runs.reduce((n, r) => n + r.w, 0);
     });
     // Same body for all; the ring and flag add a little, never enough to unbalance the row.
-    expect(Math.max(...sizes) / Math.min(...sizes)).toBeLessThan(1.35);
+    expect(Math.max(...sizes) / Math.min(...sizes)).toBeLessThan(1.36);
   });
 
   it("gives each chapter its own art", () => {
@@ -245,7 +240,14 @@ describe("journey planet map", () => {
 });
 
 describe("guides on the journey", () => {
-  it("gives every stop a person to talk to: Sage first and at Review & Apply, Theo for campuses, Penny for aid at the end", () => {
-    expect(STAGE_GUIDE).toEqual({ profile: "sage", ucs: "theo", activities: "milo", essays: "quill", review: "sage", aid: "penny" });
+  it("gives every stop a person to talk to: the Counselor and Application assistant each own one application stop", () => {
+    expect(STAGE_GUIDE).toEqual({
+      profile: "sage",
+      ucs: "theo",
+      activities: "milo",
+      essays: "quill",
+      counselor: "counselor",
+      apply: "assistant",
+    });
   });
 });

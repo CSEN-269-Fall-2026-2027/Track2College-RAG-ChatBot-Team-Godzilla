@@ -7,6 +7,8 @@ import { ArrowUpIcon } from "./icons";
 interface ChatViewProps {
   /** Shown above the first message (e.g. the guide's opening line). */
   intro?: ReactNode;
+  /** In-thread guided turn (choices / pickers) pinned under messages. */
+  footer?: ReactNode;
   messages: Message[];
   pending: boolean;
   busy: boolean;
@@ -19,7 +21,7 @@ interface ChatViewProps {
 
 const STICK_THRESHOLD = 96;
 
-export function ChatView({ intro, messages, pending, busy, freshId, onFollowup, onRetry, onSaveEssay, onFillInProfile }: ChatViewProps) {
+export function ChatView({ intro, footer, messages, pending, busy, freshId, onFollowup, onRetry, onSaveEssay, onFillInProfile }: ChatViewProps) {
   const major = useProfile().profile.goals.intendedMajor;
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -31,14 +33,33 @@ export function ChatView({ intro, messages, pending, busy, freshId, onFollowup, 
     if (el) el.scrollTo({ top: el.scrollHeight, behavior });
   };
 
+  /** The arrow shows only when there's real content below the visible area. */
+  const measure = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD;
+    setShowJump(!nearBottom);
+  };
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD;
+    measure();
+  };
+
   // Follow the bottom while content grows (new messages, text reveal), unless the user scrolled up.
   useLayoutEffect(() => {
     const content = contentRef.current;
     if (!content) return;
     const observer = new ResizeObserver(() => {
       if (stickRef.current) scrollToBottom();
+      // Content can shrink or the pane can grow without a scroll event (restart, switching guides),
+      // so re-check whether the arrow is still needed.
+      measure();
     });
     observer.observe(content);
+    if (scrollRef.current) observer.observe(scrollRef.current);
     return () => observer.disconnect();
   }, []);
 
@@ -50,13 +71,6 @@ export function ChatView({ intro, messages, pending, busy, freshId, onFollowup, 
     }
   }, [last?.id, last?.role]);
 
-  const onScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD;
-    stickRef.current = nearBottom;
-    setShowJump(!nearBottom);
-  };
 
   return (
     <div className="chat-area">
@@ -83,6 +97,7 @@ export function ChatView({ intro, messages, pending, busy, freshId, onFollowup, 
           ),
         )}
           {pending && <ThinkingMessage />}
+          {footer}
         </div>
       </div>
       {showJump && (

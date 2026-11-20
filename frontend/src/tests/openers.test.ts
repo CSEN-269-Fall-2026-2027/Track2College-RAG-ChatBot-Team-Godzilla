@@ -1,19 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { COLLEGE_NAMES } from "../colleges";
-import { UC_MAJORS } from "../constants";
 import { MENTORS, REVIEW_GUIDES, mentorById } from "../game/characters";
 import { callLogMessage } from "../agent/logic";
-import { aidModeLine, financesUnknown, openerFor, reviewModeLine } from "../game/openers";
+import { doneOpener, openerFor, reviewModeLine } from "../game/openers";
 import { blankProfile } from "./fixtures";
 
 describe("guide openers", () => {
-  it("Quill offers suggestions and each question when none are chosen", () => {
+  it("Quill lists the four picks with Why / Sounds good / Swap before confirm", () => {
     const opener = openerFor(mentorById("quill"), blankProfile(), "Maya");
-    expect(opener.actions).toHaveLength(9);
-    expect(opener.text).toContain("Do you want to learn more about each essay question?");
-    expect(opener.actions[0]).toMatchObject({ kind: "ask", label: "Suggest four essays for me" });
-    // Learning about a question never chooses it: that happens in the picker.
-    expect(opener.actions.every((a) => a.kind === "ask")).toBe(true);
+    expect(opener.text).toContain("I'll be writing about these four essays:");
+    expect(opener.text).toMatch(/Essay #\d+\*\*:/);
+    expect(opener.actions.map((a) => a.label)).toEqual(["Why?", "Sounds good", "I want to swap"]);
+    expect(opener.actions[1]).toMatchObject({ kind: "confirmPiqs" });
+    expect(opener.actions[2]).toMatchObject({ kind: "swapPiqs" });
   });
 
   describe("Quill with four essays chosen", () => {
@@ -21,27 +20,15 @@ describe("guide openers", () => {
       ucJourney: { piqs: { leadership: "ready", opportunity: "not-started", challenge: "not-started", community: "not-started" }, checks: {}, submittedAt: null, followUps: {} },
     });
 
-    it("introduces the current essay with a one-liner and the three options", () => {
+    it("offers to draft remaining essays instead of one-at-a-time prompts", () => {
       const opener = openerFor(mentorById("quill"), profile, "Darren");
-      expect(opener.text).toBe("Hey Darren! You selected Prompt #4: **Educational opportunity**. It's about a chance you made the most of, or a school barrier you worked around.");
-      expect(opener.actions.map((a) => a.label)).toEqual(["Analyze my readiness for this essay", "How can I write this essay well?", "Add more information", "Brainstorm my essay"]);
-      expect(opener.actions[2]).toEqual({ kind: "followUp", label: "Add more information", piqId: "opportunity" });
-      expect(opener.actions[3]).toEqual({ kind: "write", label: "Brainstorm my essay", piqId: "opportunity" });
+      expect(opener.text).toContain("I'll draft all four essays now");
+      expect(opener.actions).toEqual([
+        expect.objectContaining({ kind: "draftPiqs", label: "Finish drafting", piqIds: ["opportunity", "challenge", "community"] }),
+      ]);
     });
 
-    it("moves to the next essay once this one is ready", () => {
-      const p = { ...profile, ucJourney: { ...profile.ucJourney!, piqs: { ...profile.ucJourney!.piqs, opportunity: "ready" as const } } };
-      expect(openerFor(mentorById("quill"), p, "").text).toContain("Prompt #5: **Significant challenge**");
-    });
-
-    it("congratulates when all four are ready", () => {
-      const piqs = { leadership: "ready", opportunity: "ready", challenge: "ready", community: "ready" } as const;
-      const opener = openerFor(mentorById("quill"), { ...profile, ucJourney: { ...profile.ucJourney!, piqs } }, "");
-      expect(opener.text).toContain("All four");
-      expect(opener.actions).toEqual([]);
-    });
-
-    it("offers to analyze each written essay once all four are done, sending the essay but showing only the label", () => {
+    it("asks whether to add anything once all four drafts exist", () => {
       const ids = ["leadership", "opportunity", "challenge", "community"];
       const p = {
         ...profile,
@@ -49,16 +36,17 @@ describe("guide openers", () => {
         piqWork: Object.fromEntries(ids.map((id) => [id, { answers: {}, draft: { text: `My ${id} essay.`, words: 3, generatedAt: 1, requested: true } }])),
       };
       const opener = openerFor(mentorById("quill"), p, "Darren");
-      expect(opener.text).toBe("Hey Darren! All four of your essays are done. Nice work!");
+      expect(opener.text).toBe("Hey Darren! Your four essay drafts are ready. Would you like to add anything to the essays?");
       expect(opener.actions.map((a) => a.label)).toEqual([
-        "Analyze my leadership essay",
-        "Analyze my educational opportunity essay",
-        "Analyze my significant challenge essay",
-        "Analyze my community essay",
+        "Yes, add something",
+        "Open essays in Profile",
+        "Analyze Leadership",
+        "Analyze Educational opportunity",
+        "Analyze Significant challenge",
+        "Analyze Community",
       ]);
-      const first = opener.actions[0];
-      expect(first.kind === "ask" && first.prompt).toContain("My leadership essay.");
-      expect(first.kind === "ask" && first.display).toBeUndefined();
+      const analyze = opener.actions[2];
+      expect(analyze.kind === "ask" && analyze.prompt).toContain("My leadership essay.");
     });
   });
 
@@ -68,7 +56,11 @@ describe("guide openers", () => {
     expect(opener.text).toBe("Hey Darren! Do you want to add more activities?");
     expect(opener.actions.map((a) => a.label)).toEqual(["What counts as an activity?", "Add an activity"]);
     expect(opener.actions[1]).toEqual({ kind: "profile", label: "Add an activity", section: "activities" });
-    expect(openerFor(mentorById("milo"), blankProfile(), "Darren").actions).toEqual([]);
+    expect(openerFor(mentorById("milo"), blankProfile(), "Darren").actions.map((a) => a.label)).toEqual([
+      "What counts as an activity?",
+      "How many should I list?",
+      "Open activities in Profile",
+    ]);
   });
 
   it("Theo offers the tour and a button for every campus", () => {
@@ -95,44 +87,19 @@ describe("guide openers", () => {
     expect(opener.actions[1]).not.toHaveProperty("answer");
   });
 
-  it("Theo offers a major at the campuses already chosen", () => {
+  it("Theo states the UC list and offers learn / Confirm / Decline", () => {
     const profile = blankProfile();
-    profile.colleges = ["UCLA", "UC Davis"].map((name, i) => ({ id: String(i), name, status: "researching", plan: "UC", deadline: "", notes: "", major: "" }));
-    const opener = openerFor(mentorById("theo"), profile, "");
-    expect(opener.text).toContain("You've got UCLA and UC Davis on your list. Would you like to learn more about a specific major at each of these campuses?");
-    expect(opener.actions.map((a) => a.label)).toEqual([...UC_MAJORS]);
-    expect(opener.actions[0]).toMatchObject({
-      prompt: "What's Biology like at UCLA and UC Davis? What stands out at each one?",
-      display: "What's Biology like at my campuses?",
-    });
-  });
-
-  it("Theo offers the student's major at each of their schools once his chapter is done", () => {
-    const profile = blankProfile();
-    profile.colleges = ["UCLA", "UC Davis"].map((name, i) => ({ id: String(i), name, status: "researching", plan: "UC", deadline: "", notes: "", major: "" }));
+    profile.colleges = COLLEGE_NAMES.map((name, i) => ({ id: String(i), name, status: "researching", plan: "UC", deadline: "", notes: "", major: "" }));
     profile.goals.intendedMajor = "Computer Science";
-    const opener = openerFor(mentorById("theo"), profile, "Maya");
-    expect(opener.text).toBe("Hey Maya! Would you like to learn more about Computer Science at your schools (UCLA and UC Davis)?");
-    expect(opener.actions.map((a) => a.label)).toEqual(["UCLA", "UC Davis"]);
-    expect(opener.actions[1]).toMatchObject({ prompt: "What's Computer Science like at UC Davis? What stands out about it there?" });
+    const opener = openerFor(mentorById("theo"), profile, "Darren");
+    expect(opener.text).toBe("Hey Darren! We'll be applying to all nine UC campuses.");
+    expect(opener.actions.map((a) => a.label)).toEqual(["Learn about all UCs", "Confirm", "Decline"]);
+    expect(opener.actions[0]).toMatchObject({ kind: "ask", prompt: expect.stringContaining("Computer Science at each of my UCs") });
+    expect(opener.actions[1]).toEqual({ kind: "confirmUcs", label: "Confirm" });
+    expect(opener.actions[2]).toEqual({ kind: "profile", label: "Decline", section: "campuses" });
 
-    profile.colleges = profile.colleges.slice(0, 1);
-    expect(openerFor(mentorById("theo"), profile, "").text).toContain("at your school (UCLA)?");
-
-    profile.goals.intendedMajor = "Other";
-    const other = openerFor(mentorById("theo"), profile, "");
-    expect(other.text).toContain("learn more about majors at your school (UCLA)?");
-    expect(other.actions[0]).toMatchObject({ label: "UCLA", prompt: "What majors stand out at UCLA?" });
-  });
-
-  it("Penny prompts a finance walkthrough only when the profile shows nothing", () => {
-    const blank = blankProfile();
-    expect(financesUnknown(blank)).toBe(true);
-    expect(openerFor(mentorById("penny"), blank, "").actions).toHaveLength(1);
-
-    const known = blankProfile({ preferences: { ...blank.preferences, needsAid: "yes", fafsa: "in-progress" } });
-    expect(financesUnknown(known)).toBe(false);
-    expect(openerFor(mentorById("penny"), known, "").actions).toHaveLength(0);
+    profile.colleges = profile.colleges.filter((c) => c.name === "UCLA" || c.name === "UC Davis");
+    expect(openerFor(mentorById("theo"), profile, "").text).toMatch(/^Hey! We'll be applying to (UCLA and UC Davis|UC Davis and UCLA)\.$/);
   });
 
   it("Sage just greets, with no topic options", () => {
@@ -140,22 +107,33 @@ describe("guide openers", () => {
   });
 });
 
-describe("Review & Apply modes", () => {
-  it("the Counselor opens by offering the email and the virtual counselor, as buttons", () => {
+describe("Counselor and Application assistant stops", () => {
+  it("the Counselor opens with email first (forced order before Jordan)", () => {
     const counselor = openerFor(mentorById("counselor"), blankProfile(), "Maya");
-    expect(counselor.text).toMatch(/email your school counselor/);
-    expect(counselor.text).toMatch(/Jordan, your virtual counselor/);
-    expect(counselor.actions).toEqual([
-      { kind: "tool", label: "Help me email my counselor", tool: "email" },
-      { kind: "tool", label: "Meet with my virtual counselor", tool: "call" },
-    ]);
+    expect(counselor.text).toBe("Hey Maya! Let's email your counselor to set up a meeting.");
+    expect(counselor.actions).toEqual([{ kind: "tool", label: "Email my counselor", tool: "email" }]);
   });
 
-  it("the Application Assistant waits for a full virtual counselor meeting before offering apply", () => {
+  it("the Application Assistant offers apply only after the counselor stop (email sent + full meeting)", () => {
     const locked = openerFor(mentorById("assistant"), blankProfile(), "Maya");
-    expect(locked.text).toMatch(/First finish a full meeting with Jordan/);
-    expect(locked.text).toBe(reviewModeLine("assistant", "Maya", false));
-    expect(locked.actions).toEqual([{ kind: "tool", label: "Meet with my virtual counselor", tool: "call" }]);
+    expect(locked.text).toMatch(/Finish the Counselor stop first/);
+    expect(locked.text).toBe(reviewModeLine("assistant", "Maya", false, false));
+    expect(locked.actions).toEqual([]);
+
+    const emailed = blankProfile({
+      ucJourney: {
+        piqs: {},
+        checks: {},
+        submittedAt: null,
+        followUps: {},
+        agent: { counselorEmail: { subject: "Hi", body: "Hello", openedAt: 1, sentAt: 2 } },
+      },
+    });
+    const afterEmail = openerFor(mentorById("assistant"), emailed, "Maya");
+    expect(afterEmail.text).toMatch(/Finish the Counselor stop first/);
+    expect(afterEmail.actions).toEqual([]);
+    // The Counselor moves on to Jordan once the email is marked sent.
+    expect(openerFor(mentorById("counselor"), emailed, "Maya").actions).toEqual([{ kind: "tool", label: "Meet with my virtual counselor", tool: "call" }]);
 
     const ready = blankProfile({
       ucJourney: {
@@ -164,6 +142,8 @@ describe("Review & Apply modes", () => {
         submittedAt: null,
         followUps: {},
         agent: {
+          counselorEmail: { subject: "Hi", body: "Hello", openedAt: 1, sentAt: 2 },
+          counselorDoneAt: 3,
           counselorCall: {
             endedAt: 1,
             lines: [
@@ -179,15 +159,34 @@ describe("Review & Apply modes", () => {
     });
     const unlocked = openerFor(mentorById("assistant"), ready, "Maya");
     expect(unlocked.text).toMatch(/fill in your UC application/);
-    expect(unlocked.text).toBe(reviewModeLine("assistant", "Maya", true));
-    expect(unlocked.actions).toEqual([{ kind: "tool", label: "Yes, help me apply", tool: "apply" }]);
+    expect(unlocked.text).toBe(reviewModeLine("assistant", "Maya", true, true));
+    expect(unlocked.actions).toEqual([{ kind: "tool", label: "Help me apply", tool: "apply" }]);
+  });
+
+  it("after Gmail opens, the Counselor waits for \"I've sent the email\" before moving on", () => {
+    const opened = blankProfile({
+      ucJourney: {
+        piqs: {},
+        checks: {},
+        submittedAt: null,
+        followUps: {},
+        agent: { counselorEmail: { subject: "Hi", body: "Hello", openedAt: 1 } },
+      },
+    });
+    const o = openerFor(mentorById("counselor"), opened, "Maya");
+    expect(o.text).toMatch(/clicked Send/);
+    expect(o.actions).toEqual([
+      { kind: "tool", label: "Open the email again", tool: "email" },
+      { kind: "markEmailSent", label: "I've sent the email" },
+    ]);
+    expect(openerFor(mentorById("assistant"), opened, "Maya").actions).toEqual([]);
   });
 
   it("the review personas aren't in the general mentor list, and Sage keeps the usual greeting", () => {
     expect(MENTORS.map((m) => m.id)).not.toContain("counselor");
     expect(REVIEW_GUIDES.map((m) => m.id)).toEqual(["counselor", "assistant"]);
     const sage = mentorById("sage");
-    expect(openerFor(sage, blankProfile(), "Maya", null).text).toBe(sage.greeting("Maya"));
+    expect(openerFor(sage, blankProfile(), "Maya").text).toBe(sage.greeting("Maya"));
   });
 
   it("posts the call with Jordan as a readable log", () => {
@@ -197,19 +196,89 @@ describe("Review & Apply modes", () => {
     ]);
     expect(text).toBe("Here's the log from your call with Jordan:\n\n**Jordan:** Hi Maya!\n\n**You:** Hi Jordan.");
   });
+});
 
-  it("Penny's Financial Aid opener follows the FAFSA or Scholarships mode", () => {
-    const fafsa = openerFor(mentorById("penny"), blankProfile(), "Maya", "fafsa");
-    expect(fafsa.text).toBe(aidModeLine("fafsa", "Maya"));
-    expect(fafsa.text).toMatch(/FAFSA/);
-    expect(fafsa.actions.map((a) => a.label)).toContain("FAFSA or Dream Act?");
+describe("Counselor: after the call with Jordan", () => {
+  const call = {
+    endedAt: 1,
+    lines: [
+      { role: "student" as const, text: "I'm good" },
+      { role: "counselor" as const, text: "Thanks, Maya! You're all set to start your UC application." },
+    ],
+  };
+  const withAgent = (agent: Record<string, unknown>) =>
+    blankProfile({ ucJourney: { piqs: {}, checks: {}, submittedAt: null, followUps: {}, agent } });
 
-    const scholarships = openerFor(mentorById("penny"), blankProfile(), "Maya", "scholarships");
-    expect(scholarships.text).toMatch(/scholarships/);
-    expect(scholarships.actions.map((a) => a.label)).toContain("Find scholarships for me");
+  it("waits for \"Done with counselor\" after a full meeting, with \"Meet with Jordan again\" on its left", () => {
+    const o = openerFor(mentorById("counselor"), withAgent({ counselorEmail: { subject: "", body: "", sentAt: 1 }, counselorCall: call }), "Maya");
+    expect(o.text).toBe("Hey Maya! Nice work with Jordan! Ready to move on?");
+    expect(o.actions).toEqual([
+      { kind: "tool", label: "Meet with Jordan again", tool: "call" },
+      { kind: "counselorDone", label: "Done with counselor" },
+    ]);
+    // The Application assistant stays locked until they click it.
+    expect(openerFor(mentorById("assistant"), withAgent({ counselorEmail: { subject: "", body: "", sentAt: 1 }, counselorCall: call }), "Maya").actions).toEqual([]);
+  });
 
-    // A Review & Apply mode never changes Penny, and an aid mode never changes Sage.
-    expect(openerFor(mentorById("penny"), blankProfile(), "", "counselor").text).not.toMatch(/Counselor mode/);
-    expect(openerFor(mentorById("sage"), blankProfile(), "", "fafsa").text).not.toBe(aidModeLine("fafsa", ""));
+  it("moves on once they click it", () => {
+    const done = withAgent({ counselorEmail: { subject: "", body: "", sentAt: 1 }, counselorCall: call, counselorDoneAt: 2 });
+    expect(openerFor(mentorById("counselor"), done, "Maya").text).toMatch(/Next up: your UC application/);
+    expect(openerFor(mentorById("assistant"), done, "Maya").actions).toEqual([{ kind: "tool", label: "Help me apply", tool: "apply" }]);
+  });
+});
+
+describe("Application assistant: after the background run", () => {
+  it("offers Open UC application and Done with application once everything is filled in", () => {
+    const p = blankProfile({
+      ucJourney: { piqs: {}, checks: {}, submittedAt: null, followUps: {}, agent: { pendingApply: true, ucAccount: { email: "a@b.c", password: "x", generatedAt: 1 } } },
+    });
+    const o = openerFor(mentorById("assistant"), p, "Maya");
+    expect(o.text).toBe("Hey Maya! Your UC application is filled in. Look it over on UC, then submit it there.");
+    expect(o.actions.map((a) => a.label)).toEqual(["Open UC application", "Done with application"]);
+  });
+});
+
+describe("after the journey: each guide's greeting and basic buttons", () => {
+  const p = blankProfile();
+  p.colleges = ["UCLA", "UC Davis"].map((name, i) => ({ id: String(i), name, status: "researching", plan: "UC", deadline: "", notes: "", major: "" }));
+  p.goals.intendedMajor = "Computer Science";
+  const labels = (id: Parameters<typeof mentorById>[0]) => doneOpener(mentorById(id), p, "Maya Rivera").actions.map((a) => a.label);
+
+  it("opens with the guide's standard greeting", () => {
+    for (const id of ["sage", "theo", "milo", "quill", "penny", "counselor", "assistant"] as const) {
+      expect(doneOpener(mentorById(id), p, "Maya Rivera").text).toBe(mentorById(id).greeting("Maya"));
+    }
+  });
+
+  it("gives each guide only their basic job, with nothing that says again", () => {
+    expect(labels("sage")).toEqual([]);
+    expect(labels("theo")).toEqual(["Learn about all UCs", "UCLA", "UC Davis"]);
+    expect(labels("milo")).toEqual(["Add more activities"]);
+    expect(labels("quill")).toEqual(["Review my essays"]);
+    expect(labels("counselor")).toEqual(["Email my counselor", "Meet with my virtual counselor"]);
+    expect(labels("assistant")).toEqual(["Help me apply"]);
+    expect(labels("penny")).toEqual(["Apply for FAFSA"]);
+    for (const id of ["theo", "milo", "quill", "counselor", "assistant", "penny"] as const) {
+      expect(labels(id).some((l) => /again/i.test(l))).toBe(false);
+    }
+  });
+
+  it("makes Theo's campus buttons about the student's major, and Milo's go to Profile", () => {
+    const theo = doneOpener(mentorById("theo"), p, "Maya").actions;
+    expect(theo[0]).toMatchObject({ prompt: expect.stringContaining("Computer Science at each of my UCs (UCLA and UC Davis)") });
+    expect(theo[1]).toMatchObject({ prompt: expect.stringMatching(/^What's Computer Science like at UCLA\?/) });
+    expect(doneOpener(mentorById("milo"), p, "Maya").actions[0]).toEqual({ kind: "profile", label: "Add more activities", section: "activities" });
+  });
+
+  it("shows Penny's FAFSA button as not clickable yet", () => {
+    expect(doneOpener(mentorById("penny"), p, "Maya").actions).toEqual([{ kind: "soon", label: "Apply for FAFSA" }]);
+  });
+});
+
+describe("Quill's four picks", () => {
+  it("bolds Essay #N on each line", () => {
+    const text = openerFor(mentorById("quill"), blankProfile(), "Maya").text;
+    expect(text).toMatch(/\n\*\*Essay #\d\*\*: /);
+    expect(text.match(/\*\*Essay #\d\*\*/g)).toHaveLength(4);
   });
 });

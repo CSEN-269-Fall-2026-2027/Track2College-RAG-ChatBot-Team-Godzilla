@@ -10,6 +10,8 @@ export const MAX_TRANSCRIPT_BYTES = 5 * 1024 * 1024;
 
 interface PlanningContextValue {
   transcripts: Transcript[];
+  loadError: string | null;
+  reload: () => void;
   uploading: string | null;
   uploadError: string | null;
   /** Cleared on the next successful save; set when an edit/delete fails to reach Supabase. */
@@ -38,6 +40,9 @@ export function PlanningProvider({ userId, children }: { userId: string; childre
   profileRef.current = profile;
 
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const reload = useCallback(() => setLoadAttempt((n) => n + 1), []);
   const [uploading, setUploading] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -46,15 +51,18 @@ export function PlanningProvider({ userId, children }: { userId: string; childre
 
   useEffect(() => {
     let cancelled = false;
+    setLoadError(null);
     getStore().then(async (store) => {
-      const storedTranscripts = await store.transcripts.list(userId).catch(() => []);
+      const storedTranscripts = await store.transcripts.list(userId);
       if (cancelled) return;
       setTranscripts((current) => [...current, ...storedTranscripts.filter((t) => !current.some((c) => c.id === t.id))]);
+    }).catch(() => {
+      if (!cancelled) setLoadError("Couldn't load your saved transcripts. Please try again.");
     });
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [userId, loadAttempt]);
 
   const upload = useCallback(
     async (file: File) => {
@@ -98,6 +106,7 @@ export function PlanningProvider({ userId, children }: { userId: string; childre
       storagePath: null,
       studentName: "",
       school: profileRef.current.basics.highSchool || "",
+      state: profileRef.current.basics.state || "",
       reportedGpa: { unweighted: "", weighted: "" },
       courses: [],
       summary: "",
@@ -129,10 +138,10 @@ export function PlanningProvider({ userId, children }: { userId: string; childre
 
   const removeTranscript = useCallback(
     (transcript: Transcript) => {
-      setTranscripts((current) => current.filter((t) => t.id !== transcript.id));
       setSaveError(null);
       getStore()
         .then((store) => store.transcripts.remove(userId, transcript))
+        .then(() => setTranscripts((current) => current.filter((t) => t.id !== transcript.id)))
         .catch((error) => {
           setSaveError(errorMessage(error, "Couldn't delete that transcript from your account. Please try again."));
         });
@@ -143,6 +152,8 @@ export function PlanningProvider({ userId, children }: { userId: string; childre
   const value = useMemo(
     () => ({
       transcripts,
+      loadError,
+      reload,
       uploading,
       uploadError,
       saveError,
@@ -151,7 +162,7 @@ export function PlanningProvider({ userId, children }: { userId: string; childre
       updateTranscript,
       removeTranscript,
     }),
-    [transcripts, uploading, uploadError, saveError, upload, ensureManualTranscript, updateTranscript, removeTranscript],
+    [transcripts, loadError, reload, uploading, uploadError, saveError, upload, ensureManualTranscript, updateTranscript, removeTranscript],
   );
   return <PlanningContext.Provider value={value}>{children}</PlanningContext.Provider>;
 }

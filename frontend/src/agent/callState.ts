@@ -95,7 +95,7 @@ function normalize(text: string) {
  * no end_call tool, so this pause is the only hang-up; it stays under ElevenLabs' ~7 s silence
  * prompt ("Are you still there?").
  */
-export const WRAP_UP_HANGUP_MS = 4000;
+export const WRAP_UP_HANGUP_MS = 3000;
 
 /**
  * Jordan's scripted goodbyes (backend/voice.py): step 5 of the apply path, or the end of the chat
@@ -103,9 +103,11 @@ export const WRAP_UP_HANGUP_MS = 4000;
  * "Are you still there?" silence prompt.
  */
 export function isWrapUpLine(text: string): boolean {
+  // Current lines: "Thanks, Maya! You're all set to start your UC application." / "Thanks, Maya! Come back any time."
+  // Older calls (still in saved transcripts) used "Thanks so much for talking with me today…".
   return (
-    /thanks so much for talking with me today/i.test(text) &&
-    (/go ahead with your uc application/i.test(text) || /come back any time you have more questions/i.test(text))
+    /\bthanks\b/i.test(text) &&
+    (/all set to start your uc application/i.test(text) || /go ahead with your uc application/i.test(text) || /come back any time/i.test(text))
   );
 }
 
@@ -113,6 +115,14 @@ export function isWrapUpLine(text: string): boolean {
  * True once Jordan finished a full check-in (said a wrap-up goodbye) and the student spoke.
  * Answering only the first "how are you doing" and hanging up does not count.
  */
+/**
+ * The meeting task is done: a full call with Jordan, and the student clicked "Done with counselor"
+ * (like "I've sent the email", the stop only moves on when they say so).
+ */
+export function counselorMeetingDone(agent?: { counselorCall?: { lines: CallLine[] } | null; counselorDoneAt?: number } | null): boolean {
+  return virtualCounselorDone(agent?.counselorCall) && !!agent?.counselorDoneAt;
+}
+
 export function virtualCounselorDone(call?: { lines: CallLine[] } | null): boolean {
   if (!call?.lines.length) return false;
   const studentSpoke = call.lines.some((l) => l.role === "student");

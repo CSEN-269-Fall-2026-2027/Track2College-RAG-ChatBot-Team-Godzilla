@@ -1,5 +1,3 @@
-export { COLLEGE_NAMES as KNOWN_COLLEGES } from "./colleges";
-
 /**
  * The intended-major choices: ten of the largest majors across the UC campuses (one pick covers
  * every campus the student applies to). Anything else is "Other". Edit this list to change the
@@ -42,14 +40,3 @@ export function toMajorChoice(raw: string | undefined | null): string {
   if (exact) return exact;
   return MAJOR_KEYWORDS.find(([re]) => re.test(value))?.[1] ?? OTHER_MAJOR;
 }
-
-export const MAJOR_SUGGESTIONS = [
-  "Computer Science",
-  "Biology",
-  "Business",
-  "Psychology",
-  "Engineering",
-  "Nursing",
-  "Economics",
-  "Undecided",
-];

@@ -1,5 +1,5 @@
 import type { PiqDraftResult } from "../api";
-import type { ActivitySectionId, Message, PiqWork, Profile, UcJourneyState } from "../types";
+import type { ActivityCategory, ActivitySectionId, Message, PiqWork, Profile, UcJourneyState } from "../types";
 import { ACTIVITY_SECTIONS, activitySection, journeyOf, PIQ_PROMPTS, PIQ_REQUIRED, PIQ_WORD_LIMIT, setPiqStatus } from "./logic";
 
 /** Answer key for what the student told Quill about an essay. */
@@ -122,18 +122,129 @@ export function usedActivities(profile: Profile, exceptId?: string): string[] {
   });
 }
 
-/** What "Suggest four essays" asks for: the limit is spelled out in the message, where the model follows it best. */
-export function suggestEssaysPrompt(profile: Profile): string {
-  const names = [...new Set(activityNames(profile))];
-  if (!names.length) {
-    return "Suggest four essays for me, using only the eight official question titles. I have no activities to draw on, so base all five suggestions on my major or interests, in general terms, without assuming any project or club.";
+/**
+ * What points an activity at each PIQ. An activity matches when its name, role, or description
+ * hits `words`, or its category is in `categories`.
+ */
+const PIQ_SIGNALS: { piq: string; words: RegExp; categories?: ActivityCategory[] }[] = [
+  {
+    piq: "leadership",
+    words: /\b(captain|president|vice president|officer|treasurer|secretary|leader|lead|founder|co-?founder|chair|head|manager|organizer|mentor|coach)\b/,
+  },
+  {
+    piq: "creativity",
+    words: /\b(art|arts|paint\w*|draw\w*|music|band|orchestra|choir|theat(er|re)|drama|film\w*|photo\w*|design\w*|cod(e|ing)|programm\w*|robot\w*|engineer\w*|maker\w*|hackathon|writ\w*|poet\w*|invent\w*|creat\w*)\b/,
+  },
+  {
+    piq: "talent",
+    words: /\b(piano|violin|guitar|cello|sing\w*|swim\w*|soccer|basketball|tennis|track|cross country|football|volleyball|baseball|softball|chess|debate|speech|martial arts|karate|dance|athlet\w*|varsity|competit\w*)\b/,
+    categories: ["award"],
+  },
+  {
+    piq: "opportunity",
+    words: /\b(summer program|research|academy|dual enrollment|community college|college course|enrichment|honors program|upward bound|avid|stem program)\b/,
+    categories: ["educational-prep", "other-coursework"],
+  },
+  {
+    piq: "challenge",
+    words: /\b(job|part-time|employ\w*|cashier|barista|caregiv\w*|take care|family responsibilit\w*|siblings?|translat\w*)\b/,
+    categories: ["work"],
+  },
+  {
+    piq: "community",
+    words: /\b(volunteer\w*|community|tutor\w*|nonprofit|food bank|habitat|service|charity|fundrais\w*|outreach|clean-?up)\b/,
+    categories: ["volunteering"],
+  },
+];
+
+/** Points per activity that matches a PIQ (once per PIQ, however many words hit). */
+const ACTIVITY_POINTS = 2;
+/** A declared major means Academic subject always has something to say. */
+const MAJOR_POINTS = 3;
+/** Awards point at Talent; state-level and above count a little more. */
+const AWARD_POINTS = 1;
+const BIG_AWARD_POINTS = 2;
+/** Standout works for anyone, so it starts with a small head start. */
+const STANDOUT_POINTS = 1;
+/**
+ * Ties go to the questions most students can answer without a matching activity
+ * (instead of alphabetically, which used to pick "challenge" for everyone).
+ */
+const TIE_ORDER = ["subject", "standout", "challenge", "opportunity", "community", "leadership", "creativity", "talent"];
+
+/** One activity or honor that could carry a PIQ, and how strongly. */
+interface Support {
+  /** Activity or award id. */
+  source: string;
+  points: number;
+}
+
+/**
+ * For each PIQ: points that never run out (major, background, Standout's head start) and the
+ * activities and honors that point at it. Each source shows up once per PIQ.
+ */
+export function piqEvidence(profile: Profile) {
+  const base = new Map<string, number>(PIQ_PROMPTS.map((q) => [q.id, 0]));
+  const support = new Map<string, Support[]>(PIQ_PROMPTS.map((q) => [q.id, []]));
+  const addBase = (id: string, n: number) => base.set(id, (base.get(id) ?? 0) + n);
+  const addSupport = (id: string, source: string, points: number) => support.get(id)?.push({ source, points });
+
+  for (const a of profile.activities) {
+    const text = [a.name, a.role, a.description].join(" ").toLowerCase();
+    for (const signal of PIQ_SIGNALS) {
+      if (signal.words.test(text) || signal.categories?.includes(a.category)) addSupport(signal.piq, a.id, ACTIVITY_POINTS);
+    }
   }
-  return (
-    `Suggest four essays for me, using only the eight official question titles. My activities: ${names.join(", ")}. ` +
-    "In the Top 4, use each activity at most twice, and try to give each activity its own essay first. A suggestion that combines it with " +
-    "something else, like a sport plus tech, still counts. Any other Top 4 suggestion stays on my major, favorite subjects, or interests in " +
-    "general terms and doesn't mention these activities. The Backup can be anything. Don't assume any project, club, or event I haven't told you about."
-  );
+
+  for (const award of profile.awards) {
+    if (!award.title.trim()) continue;
+    addSupport("talent", award.id, ["state", "national", "international"].includes(award.level) ? BIG_AWARD_POINTS : AWARD_POINTS);
+  }
+
+  // The major can back any number of essays, so it isn't limited like activities.
+  if (profile.goals.intendedMajor.trim()) addBase("subject", MAJOR_POINTS);
+  // First in the family to go to college: an educational barrier or challenge often fits.
+  if (profile.basics.firstGen === "yes") {
+    addBase("opportunity", 1);
+    addBase("challenge", 1);
+  }
+  addBase("standout", STANDOUT_POINTS);
+  return { base, support };
+}
+
+/**
+ * Deterministic Top 4 PIQs from the student's activities, awards, major, and background (no model call).
+ * Picks one essay at a time, so no activity or honor carries more than
+ * MAX_ESSAYS_PER_ACTIVITY of the four; once it's used up it stops counting toward the rest.
+ * Returned in official PIQ order for Quill's essay queue.
+ */
+export function autoPickPiqs(profile: Profile): string[] {
+  const { base, support } = piqEvidence(profile);
+  const uses = new Map<string, number>();
+  const available = (s: Support) => (uses.get(s.source) ?? 0) < MAX_ESSAYS_PER_ACTIVITY;
+  const score = (id: string) => (base.get(id) ?? 0) + (support.get(id) ?? []).filter(available).reduce((n, s) => n + s.points, 0);
+  const rank = (id: string) => TIE_ORDER.indexOf(id);
+
+  const picked: string[] = [];
+  while (picked.length < PIQ_REQUIRED) {
+    const next = PIQ_PROMPTS.map((q) => q.id)
+      .filter((id) => !picked.includes(id))
+      .sort((a, b) => score(b) - score(a) || rank(a) - rank(b))[0];
+    if (!next) break;
+    for (const s of (support.get(next) ?? []).filter(available)) uses.set(s.source, (uses.get(s.source) ?? 0) + 1);
+    picked.push(next);
+  }
+  return PIQ_PROMPTS.filter((q) => picked.includes(q.id)).map((q) => q.id);
+}
+
+/** Labels for Quill's "I'll write about these — confirm?" turn (official UC prompt numbers). */
+export function autoPickPiqLabels(profile: Profile): string[] {
+  const ids = autoPickPiqs(profile);
+  return ids.map((id) => {
+    const index = PIQ_PROMPTS.findIndex((q) => q.id === id);
+    const meta = index >= 0 ? PIQ_PROMPTS[index] : undefined;
+    return `Essay #${index + 1}: ${meta?.title ?? id}`;
+  });
 }
 
 /** Official PIQ titles Quill named in a "Suggest four essays" reply, in the order they appeared (Top 4 + Backup). */
@@ -168,16 +279,6 @@ export const ESSAY_FOLLOW_UPS: Record<string, string> = {
   community: "What's something you've done to help your school or community?",
   standout: "What's something about you that the rest of your application doesn't show?",
 };
-
-/** No activity is left for this essay and the student hasn't told Quill anything for it, so one question helps. */
-export function essayNeedsFollowUp(profile: Profile, piqId: string): boolean {
-  if ((piqWorkOf(profile, piqId).answers[PERSONAL_ANSWER] ?? "").trim() || !ESSAY_FOLLOW_UPS[piqId]) return false;
-  const off = new Set(usedActivities(profile, piqId));
-  return activityNames(profile).every((name) => off.has(activityKey(name)));
-}
-
-/** Quill's chat button that asks the question, and the reply once it's answered. Neither uses the model. */
-export const ADD_INFO_LABEL = "Add more information";
 export const FOLLOW_UP_THANKS = "Thanks, that will help. You can generate your essay whenever you're ready.";
 
 /** Request body for /essay/piqs: the given PIQs (default: every chosen one) with what the student told Quill. */
@@ -222,24 +323,6 @@ export function miloNotes(j: UcJourneyState): string {
   return parts.join("\n\n").slice(0, ACTIVITY_NOTES_LIMIT);
 }
 
-const REPORT_NOUNS: Record<ActivitySectionId, [string, string]> = {
-  activities: ["activity", "activities"],
-  volunteering: ["volunteering experience", "volunteering experiences"],
-  job: ["job", "jobs"],
-  awards: ["honor or award", "honors or awards"],
-};
-
-/** The opening message to Milo, which starts (or, with a new number, restarts) the chat. */
-export function activityReportMessage(section: ActivitySectionId, count: number): string {
-  const [one, many] = REPORT_NOUNS[section];
-  return `Hi, I have ${count >= 3 ? "3 or more" : count} ${count === 1 ? one : many} I want to report.`;
-}
-
-/** Milo's reply to 3 or more: those go in the Profile page instead of the chat. */
-export function fillInProfileMessage(section: ActivitySectionId): string {
-  return `Since you have 3 or more ${REPORT_NOUNS[section][1]}, it's easiest to add them on your profile. This button takes you there.`;
-}
-
 /** A guide's questions and the student's typed answers. Ready-made button messages and the closing line are left out. */
 export function chatNotes(messages: Message[], guide: string): string {
   const pairs: string[] = [];
@@ -250,15 +333,8 @@ export function chatNotes(messages: Message[], guide: string): string {
   return pairs.join("\n\n");
 }
 
-export const activityNotesFrom = (messages: Message[]) => chatNotes(messages, "Milo").slice(0, ACTIVITY_NOTES_LIMIT);
-
 /** The latest of what the student told Quill about an essay, within /essay/piqs' 3000-character answer field. */
 export const essayNotesFrom = (messages: Message[]) => chatNotes(messages, "Quill").slice(-3000);
-
-/** The student has answered Milo at least once and Milo isn't mid-reply. */
-export function canFinishActivities(messages: Message[]): boolean {
-  return messages.filter((m) => m.role === "user").length >= 2 && messages.at(-1)?.role === "assistant";
-}
 
 /** Saves generated drafts and moves those PIQs to "drafting". */
 export function applyDrafts(profile: Profile, drafts: PiqDraftResult[], now = Date.now()): Profile {

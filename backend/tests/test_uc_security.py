@@ -124,8 +124,11 @@ class RunOwnershipTest(unittest.TestCase):
         # Don't open any browser: the run thread does nothing.
         self.run = patch.object(uc_account, "_run")
         self.run.start()
+        self.cloud_config = patch.object(cloud_browser, "configured", return_value=True)
+        self.cloud_config.start()
 
     def tearDown(self):
+        self.cloud_config.stop()
         self.run.stop()
         _reset_runs()
 
@@ -318,10 +321,17 @@ class ApiRequiresSignInTest(unittest.TestCase):
                 yield method, re.sub(r"\{[^}]+\}", "x", route.path)
 
     def test_every_route_but_health_and_docs_rejects_logged_out_requests(self):
-        public = {"/health", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"}
+        # /google/oauth/callback is public: Google redirects the browser here with ?code&state (no Bearer).
+        public = {"/health", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect", "/google/oauth/callback"}
         checked = 0
         for method, path in self._routes():
-            r = requests.request(method, f"http://127.0.0.1:{self.port}{path}", json={}, timeout=10)
+            r = requests.request(
+                method,
+                f"http://127.0.0.1:{self.port}{path}",
+                json={},
+                timeout=10,
+                allow_redirects=False,
+            )
             if path in public:
                 self.assertLess(r.status_code, 400, path)
             else:

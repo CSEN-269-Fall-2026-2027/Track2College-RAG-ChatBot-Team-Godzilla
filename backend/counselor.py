@@ -8,9 +8,11 @@ import json
 import re
 
 from llm_utils import parse_json, text
-from query import complete
+from query import complete, last_failure
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# The web search fails now and then on its own (see find_counselors); this many tries in total.
+FIND_ATTEMPTS = 3
 
 FIND_PROMPT = """\
 You look up public staff directories for high school students on the Track2College platform.
@@ -79,9 +81,20 @@ def find_counselors(high_school: str, city: str, state: str, last_name: str) -> 
         f"=== High school ===\n{high_school.strip()}{f' ({where})' if where else ''}\n\n"
         f"=== Student last name ===\n{last_name.strip() or '(not given)'}"
     )
-    raw = complete(FIND_PROMPT, user_message, max_tokens=2500, web_search=True)
+    # With browser_search on, the model sometimes calls a tool that doesn't exist (e.g. "json") and Groq
+    # rejects the whole request (400), so one bad roll returned nothing. Retry a couple of times.
+    raw = ""
+    for attempt in range(FIND_ATTEMPTS):
+        raw = complete(FIND_PROMPT, user_message, max_tokens=2500, web_search=True)
+        if raw or last_failure() in ("missing_key", "auth"):
+            break
+        print(f"[counselor] Search attempt {attempt + 1} came back empty ({last_failure() or 'no text'}); retrying")
     if not raw:
-        raise RuntimeError("The language model didn't respond. Check GROQ_API_KEY in .env at the project root.")
+        if last_failure() in ("missing_key", "auth"):
+            raise RuntimeError("The language model didn't respond. Check GROQ_API_KEY in .env at the project root.")
+        if last_failure() == "rate_limit":
+            raise RuntimeError("The AI service is busy right now. Please try again in a minute.")
+        raise RuntimeError("The web search didn't finish after a few tries. Please try again.")
     try:
         data = parse_json(raw)
     except (ValueError, json.JSONDecodeError) as exc:

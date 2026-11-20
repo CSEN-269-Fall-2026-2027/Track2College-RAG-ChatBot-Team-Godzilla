@@ -270,51 +270,16 @@ REVIEW_MODES: dict[str, str] = {
 }
 
 
-# Story mode's Financial Aid step: the student picks what Penny helps with, and the prompt follows.
-AID_MODES: dict[str, str] = {
-    "fafsa": (
-        "\nMODE — FAFSA (Financial Aid step)\n"
-        "• The student is on the Financial Aid step and chose FAFSA help. Focus on filing the FAFSA or, "
-        "if FAFSA isn't right for them (for example, undocumented students), the California Dream Act "
-        "Application (CADAA).\n"
-        "• Use the STUDENT PROFILE's FAFSA status: if not started, help them decide which form to file and "
-        "set up a StudentAid.gov account (FSA ID) for them and a contributor; if in progress, help them "
-        "finish (documents, contributor consent, school codes for their UC campuses, signing and submitting).\n"
-        "• Mention the March 2 Cal Grant priority deadline and that their school must send a Cal Grant GPA. "
-        "Note that exact dates and form details change each cycle, so they should confirm on the official site.\n"
-        "• Walk through one step at a time and ask what they're stuck on. Never ask for or repeat SSNs, "
-        "tax numbers, passwords, or other sensitive details.\n"
-        "• If they ask about scholarships, answer briefly and point out the Scholarships tab next to this chat.\n"
-    ),
-    "scholarships": (
-        "\nMODE — Scholarships (Financial Aid step)\n"
-        "• The student is on the Financial Aid step and chose Scholarships help. Focus on finding, "
-        "prioritizing, and applying for scholarships.\n"
-        "• Use the STUDENT PROFILE (intended major, activities, background, first-gen status, location, "
-        "colleges) to suggest the kinds of scholarships they're likely to qualify for: UC campus "
-        "scholarships, school and local community awards, and well-known national programs. Don't invent "
-        "specific scholarships, amounts, or deadlines; tell them to verify details on the official site.\n"
-        "• Help them build a simple plan (where to search, how to track deadlines) and coach scholarship "
-        "essays by reusing stories from their Personal Insight answers. Never write the whole essay for them.\n"
-        "• Warn them that real scholarships never charge a fee to apply.\n"
-        "• Remind them the FAFSA or CA Dream Act is still the biggest source of aid; if they ask about it, "
-        "answer briefly and point out the FAFSA tab next to this chat.\n"
-    ),
-}
-
-STORY_MODES: dict[str, str] = {**REVIEW_MODES, **AID_MODES}
-
-
 def normalize_mode(mode: str | None) -> str | None:
-    """Return a known Story mode (Review & Apply or Financial Aid), or None."""
+    """Return a live counselor or application-assistant mode, or None."""
     key = (mode or "").strip().lower()
-    return key if key in STORY_MODES else None
+    return key if key in REVIEW_MODES else None
 
 
 def mode_prompt(mode: str | None) -> str:
     """Extra system-prompt block for a Story mode; empty string when none."""
     key = normalize_mode(mode)
-    return STORY_MODES[key] if key else ""
+    return REVIEW_MODES[key] if key else ""
 
 
 # UC's eight questions, in the official order.

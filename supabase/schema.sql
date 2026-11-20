@@ -13,25 +13,26 @@ create table if not exists public.profiles (
   updated_at timestamptz not null default now()
 );
 
-create table if not exists public.profile_analyses (
-  user_id    uuid primary key references auth.users (id) on delete cascade,
-  data       jsonb not null,
-  updated_at timestamptz not null default now()
-);
-
--- Story-mode progress: XP, achievements, mentor affinity and settings (frontend/src/game/progress.ts).
-create table if not exists public.game_progress (
-  user_id    uuid primary key references auth.users (id) on delete cascade,
-  data       jsonb not null default '{}'::jsonb,
-  updated_at timestamptz not null default now()
-);
-
 -- Birthday and birthplace from the voice counselor call. Kept out of `profiles` on purpose.
 -- data: { "birthDate": "YYYY-MM-DD", "birthCountry": "", "birthCity": "" }
 create table if not exists public.personal_info (
   user_id    uuid primary key references auth.users (id) on delete cascade,
   data       jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
+);
+
+-- Google OAuth refresh tokens for Gmail / Calendar / Drive (readonly).
+-- Ciphertext is written only by the FastAPI backend with the service-role key.
+-- No policies for authenticated/anon: RLS stays on, so the browser cannot read tokens.
+create table if not exists public.google_connections (
+  user_id                   uuid primary key references auth.users (id) on delete cascade,
+  google_email              text,
+  scopes                    text[] not null default '{}'::text[],
+  refresh_token_ciphertext  text not null,
+  token_uri                 text not null default 'https://oauth2.googleapis.com/token',
+  connected_at              timestamptz not null default now(),
+  updated_at                timestamptz not null default now(),
+  revoked_at                timestamptz
 );
 
 -- ---------------------------------------------------------------------------
@@ -52,16 +53,8 @@ create table if not exists public.transcripts (
   updated_at timestamptz not null default now()
 );
 
-create table if not exists public.course_plans (
-  id         uuid primary key,
-  user_id    uuid not null references auth.users (id) on delete cascade,
-  data       jsonb not null,
-  updated_at timestamptz not null default now()
-);
-
 create index if not exists conversations_user_idx on public.conversations (user_id, updated_at desc);
 create index if not exists transcripts_user_idx   on public.transcripts   (user_id, updated_at desc);
-create index if not exists course_plans_user_idx  on public.course_plans  (user_id, updated_at desc);
 
 -- ---------------------------------------------------------------------------
 -- Row-level security: every user can only see and change their own rows.
@@ -71,7 +64,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['profiles', 'profile_analyses', 'game_progress', 'personal_info', 'conversations', 'transcripts', 'course_plans'] loop
+  foreach t in array array['profiles', 'personal_info', 'conversations', 'transcripts'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('drop policy if exists "Users manage own rows" on public.%I', t);
     execute format(
@@ -81,6 +74,11 @@ begin
     );
   end loop;
 end $$;
+
+-- google_connections: RLS on, no grants to authenticated/anon. Service role only.
+alter table public.google_connections enable row level security;
+drop policy if exists "Users manage own rows" on public.google_connections;
+revoke all on public.google_connections from anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Private storage for original transcript files, stored at <user_id>/<transcript_id>/<file>.

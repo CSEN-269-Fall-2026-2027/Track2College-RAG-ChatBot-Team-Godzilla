@@ -6,8 +6,9 @@ import { computeJourney, type CheckpointId } from "./logic";
 
 /**
  * Each guide owns a level of the UC journey. Story mode's chat is with the guide of the level
- * the student is on: Theo for choosing campuses, Sage for Review & Apply, Penny for Financial Aid
- * at the end.
+ * the student is on: Theo for choosing campuses, the Counselor for meeting your counselors, the
+ * Application assistant for applying. Penny has no stop: after Apply the student is done and can
+ * chat with any guide.
  * Basic Info has no guide of its own; Sage, the general admissions guide, covers it.
  */
 export const STAGE_GUIDE: Record<CheckpointId, Mentor["id"]> = {
@@ -15,8 +16,8 @@ export const STAGE_GUIDE: Record<CheckpointId, Mentor["id"]> = {
   ucs: "theo",
   activities: "milo",
   essays: "quill",
-  review: "sage",
-  aid: "penny",
+  counselor: "counselor",
+  apply: "assistant",
 };
 
 /** The level the student is on (the last one once everything is done), from the same rules as the map. */
@@ -29,12 +30,12 @@ export function useCurrentStage(): CheckpointId {
   }, [profile, transcripts]);
 }
 
-/**
- * The planet to select so the chat is with `mentorId`: null keeps the current chapter when its
- * guide already is that person, otherwise the first chapter that guide owns.
- */
-export function stageFor(mentorId: Mentor["id"], current: CheckpointId): CheckpointId | null {
-  if (STAGE_GUIDE[current] === mentorId) return null;
-  const owned = (Object.keys(STAGE_GUIDE) as CheckpointId[]).find((id) => STAGE_GUIDE[id] === mentorId);
-  return owned ?? null;
+/** The whole journey is done (the application is in): from here the student can chat with any guide. */
+export function useJourneyFinished(): boolean {
+  const { profile } = useProfile();
+  const { transcripts } = usePlanning();
+  return useMemo(
+    () => computeJourney(profile, completeness(profile).sections, academicHistoryStatus(profile, transcripts).started).finished,
+    [profile, transcripts],
+  );
 }

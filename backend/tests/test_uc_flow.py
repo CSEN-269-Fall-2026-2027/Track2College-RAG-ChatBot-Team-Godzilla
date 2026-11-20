@@ -76,7 +76,7 @@ class CreateThenSignInTest(unittest.TestCase):
             uc_account._runs.clear()
             uc_account._active = None
             uc_account._runs[run_id] = {
-                "owner": "s", "status": "opening", "detail": "", "mode": mode, "browser": "local", "live_url": None,
+                "owner": "s", "status": "opening", "detail": "", "mode": mode, "browser": "cloud", "live_url": None,
                 "open": True, "cancelled": False, "finished": False, "page_url": "", "created": False, "verified": False,
                 "setup": False, "about": False, "piq": False, "code": None,
             }
@@ -170,7 +170,7 @@ class CreateThenSignInTest(unittest.TestCase):
             browser.close()
 
     def test_closing_keeps_the_failure_message(self):
-        for browser in ("local", "cloud"):
+        for browser in ("cloud",):
             with uc_account._lock:
                 uc_account._runs["r"] = {"status": "login_failed", "detail": "Nope", "browser": browser, "open": True, "cancelled": False, "finished": False, "code": None}
             uc_account._closed("r")

@@ -47,9 +47,67 @@
 .jm-embedded .jm-scroll {
   padding: 0;
   place-items: stretch;
-  align-content: start;
-  gap: 10px;
+  align-content: stretch;
+  gap: 0;
   height: 100%;
+  overflow: hidden;
+}
+
+/* Map on top, stage tasks on the bottom half. */
+.jm-board-split {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+  width: 100%;
+  height: min(82vh, 900px);
+}
+
+.jm-board-map {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.jm-board-map .jm-sky-fit {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+.jm-stage-panel {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.jm-stage-head h2 {
+  margin: 4px 0 0;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.jm-stage-panel .jm-tasks {
+  gap: 8px;
+}
+
+.jm-stage-panel .jm-tasks li {
+  padding: 12px 14px;
+  font-size: 15px;
+}
+
+.jm-stage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
 }
 
 .jm-embedded .jm-overall strong {
@@ -82,50 +140,11 @@
 
 .jm-scroll { flex: 1; min-height: 0; overflow: auto; padding: 20px; display: grid; place-items: center; align-content: start; gap: 12px; }
 
-.jm-finished { max-width: 640px; text-align: center; color: var(--text-muted); font-size: 14px; }
-
 /* ------------------------------------------------------------ Panel */
 
 /* Sit below the shared app topbar (56px) so the drawer doesn't cover nav. */
-.jm-panel-wrap {
-  position: fixed;
-  top: 56px;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 50;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 24px;
-}
-
-.jm-scrim { position: absolute; inset: 0; border: 0; background: rgba(20, 24, 22, 0.45); cursor: default; }
 
 /* A centered card sized to its tasks, so two tasks don't sit in a tall empty panel. */
-.jm-panel {
-  position: relative;
-  width: min(560px, 100%);
-  max-height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  background: var(--bg-elevated);
-  box-shadow: 0 18px 50px rgba(20, 24, 22, 0.28);
-  animation: jm-pop 0.2s ease-out;
-}
-
-.jm-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 22px 24px 0; }
-.jm-panel-kicker { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
-.jm-panel-head h2 { margin: 4px 0 0; font-size: 26px; line-height: 1.2; }
-.jm-panel-head h2:focus { outline: none; }
-.jm-panel-body { min-height: 0; overflow: auto; padding: 8px 24px 24px; display: grid; gap: 16px; align-content: start; }
-
-.jm-progress { display: grid; gap: 8px; font-size: 15px; font-weight: 700; }
-.jm-panel .jm-bar { height: 10px; overflow: hidden; border: 0; border-radius: 999px; background: var(--bg-hover); }
-.jm-panel .jm-bar span { border-radius: 999px; background: var(--accent); }
 
 .jm-tasks { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .jm-tasks li {
@@ -145,9 +164,6 @@
 .jm-task-label { display: block; min-width: 0; font-weight: 600; }
 .jm-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
-.jm-note { margin: 0; font-size: 15px; color: var(--text-muted); }
-.jm-cta { display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; justify-self: start; }
-
 .jm-link { justify-self: start; padding: 0; border: 0; background: none; color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit; font-size: 13px; }
 
 @keyframes jm-pulse { 50% { box-shadow: 0 0 0 7px rgba(242, 194, 48, 0.15); } }
@@ -157,14 +173,11 @@
   .jm-top { flex-wrap: wrap; padding: 10px 16px; gap: 8px 12px; }
   .jm-overall { flex-basis: 100%; }
   .jm-scroll { padding: 12px 16px 24px; }
-  .jm-panel-wrap { align-items: flex-end; padding: 0; }
-  .jm-panel { max-height: 88%; border-radius: 20px 20px 0 0; animation-name: jm-sheet; }
 }
 
 @keyframes jm-sheet { from { transform: translateY(40px); opacity: 0; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .jm-panel { animation: none; }
   .map-btn, .jm-bar span { transition: none; }
 }
 
@@ -222,6 +235,10 @@
 .jm-embedded .jm-sky-fit {
   height: 100%;
   min-height: 0;
+}
+
+.jm-embedded .jm-board-split {
+  height: 100%;
 }
 
 .jm-sky {
@@ -538,46 +555,6 @@
   }
 }
 
-/* Selected chapter: a quiet link to its full to-do list. */
-.jm-explore {
-  position: absolute;
-  top: 10px;
-  right: 12px;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 4px;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--cn-sage-deep);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-  cursor: pointer;
-  text-decoration: underline;
-  text-decoration-color: transparent;
-  text-underline-offset: 3px;
-  transition: text-decoration-color 0.15s;
-}
-
-.jm-explore:hover {
-  text-decoration-color: currentColor;
-}
-
-.jm-explore:focus-visible {
-  outline: 2px solid var(--cn-sage-deep);
-  outline-offset: 1px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .jm-explore {
-    transition: none;
-  }
-}
-
 /* Narrow wide-map (e.g. a 2/5 column on a laptop): status and guide on their own lines. */
 .jm-sky {
   container-type: inline-size;
@@ -597,10 +574,6 @@
     flex-direction: column;
     font-size: 11.5px;
     line-height: 1.3;
-  }
-
-  [data-layout="wide"] .jm-label-sep {
-    display: none;
   }
 }
 
@@ -669,4 +642,3 @@
 .jm-sign-board.is-urgent .jm-sign-count strong {
   color: var(--warning, #b7791f);
 }
-.jm-major { margin-bottom: 8px; }

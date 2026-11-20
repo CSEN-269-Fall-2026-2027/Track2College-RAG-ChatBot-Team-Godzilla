@@ -19,9 +19,7 @@ with redact, and everything it prints, reports or saves for debugging goes throu
 Every run belongs to the student who started it (`owner`, from their verified session). Status,
 codes, cancelling and reconnecting only work for that student; to anyone else the run doesn't exist.
 
-Two ways to get the browser (the script after that is the same):
-- local → a visible Chrome window on this computer (the backend must run on the student's machine)
-- cloud → a Browserbase session attached over CDP; the student uses it through its live view
+The browser is a Browserbase session attached over CDP; the student uses it through its live view.
 """
 
 from __future__ import annotations
@@ -34,6 +32,7 @@ import uuid
 
 import cloud_browser
 import redact
+import uc_code_mail
 import uc_sections
 
 UC_LOGIN_URL = "https://apply.universityofcalifornia.edu/my-application/login"
@@ -58,8 +57,17 @@ CREATE_WAIT_S = 30
 # How often the run looks at the UC page again. Each look is a couple of round trips to the browser.
 TICK_MS = 150
 PIQ_REQUIRED = 4
-# Cloud Browserbase: after the last essay is in, close the session if idle this long.
-CLOUD_IDLE_CLOSE_S = 30
+# Cloud Browserbase: once everything is filled in, close the session this soon (just long enough for the
+# app's next status check to see "finished"). The app also closes it as soon as it sees that; this is
+# the backstop when nobody is watching (tab closed), so no session is left running.
+CLOUD_IDLE_CLOSE_S = 3
+# UC's emailed code: look for it in the student's connected Gmail this long, this often, before asking
+# them to type it. At most this many codes found that way per run (a wrong one isn't retried).
+CODE_SEARCH_S = 90
+CODE_POLL_S = 5
+MAX_AUTO_CODES = 2
+# Run fields only the run's own threads use (never sent to the student's browser).
+_PRIVATE = ("code", "session_id", "owner", "tried_codes", "code_asked_at", "searched_for", "auto_codes")
 
 _lock = threading.Lock()
 _runs: dict[str, dict] = {}
@@ -93,7 +101,7 @@ def start(
     about_done: bool = False,
     verified: bool = False,
     piqs: list[dict] | None = None,
-    browser: str = "local",
+    browser: str = "cloud",
     *,
     owner: str,
 ) -> str:
@@ -101,7 +109,7 @@ def start(
 
     `facts` is what Track2College knows about the student, used to fill "About you".
     `piqs` are the student's four chosen questions: {"number": 1–8, "title", "text"}.
-    `browser` is "local" (a window on this computer) or "cloud" (Browserbase).
+    `browser` is "cloud" (Browserbase).
     `owner` is the signed-in student's id; only they can see or control the run.
     """
     global _active
@@ -109,10 +117,10 @@ def start(
         raise UcAccountError("Sign in to use the UC assistant.")
     if mode not in ("login", "create"):
         raise UcAccountError("Unknown mode.")
-    if browser not in ("local", "cloud"):
+    if browser != "cloud":
         raise UcAccountError("Unknown browser mode.")
-    if browser == "cloud" and not cloud_browser.configured():
-        raise UcAccountError("Cloud mode isn't set up on this server yet. Switch to Local to use a window on this computer.")
+    if not cloud_browser.configured():
+        raise UcAccountError("Cloud mode isn't set up on this server yet.")
     if not EMAIL_RE.match(email):
         raise UcAccountError("That email address doesn't look right.")
     if not valid_uc_password(password):
@@ -126,7 +134,7 @@ def start(
         _runs[run_id] = {
             "owner": owner,
             "status": "opening",
-            "detail": "Starting cloud browser…" if browser == "cloud" else "Opening the UC application…",
+            "detail": "Starting cloud browser…",
             "mode": mode,
             "browser": browser,
             # Cloud only: Browserbase's live view, where the student sees and uses the window.
@@ -148,6 +156,12 @@ def start(
             "piq_report": {"entered": [], "skipped": [], "removed": []},
             "piq": False,
             "code": None,
+            # Looking for UC's code in the student's Gmail right now (the code popup waits meanwhile).
+            "code_search": False,
+            "tried_codes": [],
+            "code_asked_at": 0.0,
+            "searched_for": -1,
+            "auto_codes": 0,
         }
         _active = run_id
     threading.Thread(
@@ -177,7 +191,7 @@ def status(run_id: str, owner: str) -> dict | None:
         run = _owned(run_id, owner)
         if not run:
             return None
-        return {k: v for k, v in run.items() if k not in ("code", "session_id", "owner")}
+        return {k: v for k, v in run.items() if k not in _PRIVATE}
 
 
 def open_sessions(excluding_owner: str | None = None) -> set[str]:
@@ -202,6 +216,7 @@ def submit_code(run_id: str, owner: str, code: str) -> None:
         if run["status"] != "needs_code":
             raise UcAccountError("UC isn't asking for a code right now.")
         run.update(code=code, status="checking_code", detail="Entering your code…")
+        run.setdefault("tried_codes", []).append(code)
 
 
 def cancel(run_id: str, owner: str) -> None:
@@ -212,6 +227,50 @@ def cancel(run_id: str, owner: str) -> None:
             raise UcAccountError("That UC window session wasn't found.")
         if run["open"]:
             run.update(cancelled=True, detail="Stopping…")
+
+
+def _start_code_search(run_id: str) -> None:
+    """Look for UC's code in Gmail in the background, unless a search for this code screen already ran."""
+    with _lock:
+        run = _runs[run_id]
+        tried = run.setdefault("tried_codes", [])
+        attempt = len(tried)
+        if run.get("code_search") or run.get("searched_for", -1) == attempt or run.get("auto_codes", 0) >= MAX_AUTO_CODES:
+            return
+        if not run.get("code_asked_at"):
+            run["code_asked_at"] = time.time()
+        # What to show again if nothing turns up (e.g. "UC didn't accept that code…").
+        prior = run["detail"]
+        run.update(code_search=True, searched_for=attempt, detail="Looking for UC's verification code in your email…")
+        args = (run_id, run["owner"], run["code_asked_at"], set(tried), prior)
+    threading.Thread(target=_search_code, args=args, daemon=True).start()
+
+
+def _search_code(run_id: str, owner: str, since: float, tried: set[str], prior: str) -> None:
+    found = None
+    deadline = time.monotonic() + CODE_SEARCH_S
+    while time.monotonic() < deadline and not _cancelled(run_id):
+        with _lock:
+            run = _runs[run_id]
+            waiting = run["open"] and run["status"] == "needs_code" and not run["code"]
+        if not waiting:
+            break
+        found = uc_code_mail.find_code(owner, since, tried)
+        if found:
+            redact.remember(found)
+            break
+        time.sleep(CODE_POLL_S)
+    with _lock:
+        run = _runs[run_id]
+        run["code_search"] = False
+        still_waiting = run["open"] and run["status"] == "needs_code" and not run["code"]
+        if found and still_waiting:
+            # Same path as a typed code: the run's loop enters it on its next look at the page.
+            run.setdefault("tried_codes", []).append(found)
+            run["auto_codes"] = run.get("auto_codes", 0) + 1
+            run.update(code=found, status="checking_code", detail="Found UC's code in your email. Entering it…")
+        elif still_waiting:
+            run["detail"] = prior
 
 
 def _cancelled(run_id: str) -> bool:
@@ -243,7 +302,7 @@ def _closed(run_id: str) -> None:
         run.update(open=False, code=None)
         if run["cancelled"]:
             run.update(status="closed", detail="Stopped. Continue on UC any time to pick up where you left off.")
-        elif run["browser"] == "cloud" and run["status"] not in ("error", "login_failed") and not run["finished"]:
+        elif run["status"] not in ("error", "login_failed") and not run["finished"]:
             # Nobody closes a cloud window by hand: the session dropped or hit its time limit.
             run.update(
                 status="disconnected",
@@ -262,7 +321,7 @@ def _run(
     about_done: bool,
     verified: bool,
     piqs: list[dict],
-    browser_mode: str = "local",
+    browser_mode: str = "cloud",
 ) -> None:
     try:
         from playwright.sync_api import Error as PlaywrightError, sync_playwright
@@ -275,25 +334,21 @@ def _run(
     redact.remember(password)
     try:
         with sync_playwright() as p:
-            if browser_mode == "cloud":
-                try:
-                    session_id, connect_url = cloud_browser.create_session()
-                    redact.remember(connect_url)
-                    with _lock:
-                        _runs[run_id]["session_id"] = session_id
-                    browser = p.chromium.connect_over_cdp(connect_url, timeout=60_000)
-                except Exception as exc:  # noqa: BLE001 — any startup failure gets the same clear message
-                    print(redact.redact(f"[uc_account] cloud browser didn't start: {exc}"))
-                    _set(run_id, "error", "The cloud browser couldn't start. Retry, or switch to Local.")
-                    return
-                context = browser.contexts[0] if browser.contexts else browser.new_context()
-                page = context.pages[0] if context.pages else context.new_page()
+            try:
+                session_id, connect_url = cloud_browser.create_session()
+                redact.remember(connect_url)
                 with _lock:
-                    _runs[run_id]["live_url"] = cloud_browser.live_url(session_id)
-                _set(run_id, "opening", "Opening the UC application…")
-            else:
-                browser = p.chromium.launch(headless=False)
-                page = browser.new_page(viewport=None)
+                    _runs[run_id]["session_id"] = session_id
+                browser = p.chromium.connect_over_cdp(connect_url, timeout=60_000)
+            except Exception as exc:  # noqa: BLE001 — any startup failure gets the same clear message
+                print(redact.redact(f"[uc_account] cloud browser didn't start: {exc}"))
+                _set(run_id, "error", "The cloud browser couldn't start. Retry.")
+                return
+            context = browser.contexts[0] if browser.contexts else browser.new_context()
+            page = context.pages[0] if context.pages else context.new_page()
+            with _lock:
+                _runs[run_id]["live_url"] = cloud_browser.live_url(session_id)
+            _set(run_id, "opening", "Opening the UC application…")
             page.goto(UC_LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
             with _lock:
                 _runs[run_id]["page_url"] = page.url
@@ -309,10 +364,7 @@ def _run(
                     browser.close()
     except Exception as exc:  # noqa: BLE001 — report anything to the student instead of crashing the thread
         print(redact.redact(f"[uc_account] {type(exc).__name__}: {exc}"))
-        if browser_mode == "cloud":
-            _set(run_id, "error", "Something went wrong in the cloud browser. Try again, or switch to Local.")
-        else:
-            _set(run_id, "error", "Something went wrong driving the UC site. Close the window and try again.")
+        _set(run_id, "error", "Something went wrong in the cloud browser. Try again.")
     finally:
         if session_id:
             cloud_browser.release(session_id)
@@ -342,7 +394,6 @@ def _drive(
     create_clicked_at = 0.0
     # Cloud only: when the last essay is in, start a grace period then release Browserbase.
     finished_at: float | None = None
-    is_cloud = _current(run_id, "browser") == "cloud"
 
     def sign_in_instead(reason: str) -> None:
         nonlocal create_error, may_sign_in
@@ -357,14 +408,7 @@ def _drive(
             _runs[run_id]["finished"] = True
         finished_at = time.monotonic()
         prior = detail or _current(run_id, "detail") or "Ready for review."
-        if is_cloud:
-            _set(
-                run_id,
-                "piq_done",
-                f"{prior} The cloud browser closes in {CLOUD_IDLE_CLOSE_S} seconds to save session time — close this window when you're ready to continue.",
-            )
-        elif detail:
-            _set(run_id, "piq_done", detail)
+        _set(run_id, "piq_done", prior)
 
     if mode == "create":
         try:
@@ -382,17 +426,12 @@ def _drive(
         with _lock:
             _runs[run_id]["page_url"] = page.url
 
-        # After the last essay: keep the page open for review. Cloud releases Browserbase after a grace
-        # period; local stays until the student closes the tool (or the Chrome window).
+        # After the last essay, keep the page open for review during a short grace period.
         if finished_at is not None:
             if _cancelled(run_id):
                 return
-            if is_cloud and time.monotonic() - finished_at >= CLOUD_IDLE_CLOSE_S:
-                _set(
-                    run_id,
-                    "piq_done",
-                    "Ready for review. Closed the cloud browser to save session time — close this window when you're done.",
-                )
+            if time.monotonic() - finished_at >= CLOUD_IDLE_CLOSE_S:
+                _set(run_id, "piq_done", _current(run_id, "detail") or "Ready for review.")
                 try:
                     page.close()
                 except Exception:  # noqa: BLE001 — session may already be gone
@@ -418,9 +457,12 @@ def _drive(
             if code:
                 _enter_code(run_id, page, code)
                 may_sign_in = True  # UC may send a newly verified student back to sign in
-            elif current != "needs_code":
-                # Also after a code that came back to this screen: the student needs to try again.
-                _set(run_id, "needs_code", "UC emailed you a verification code. Type it in here.", created=True)
+            else:
+                if current != "needs_code":
+                    # Also after a code that came back to this screen: the student needs to try again.
+                    _set(run_id, "needs_code", "UC emailed you a verification code. Type it in here.", created=True)
+                # First, try to find it in their Gmail (no-op if a search for this screen already ran).
+                _start_code_search(run_id)
 
         elif screen == "setup":
             if not setup_done:
